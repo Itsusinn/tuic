@@ -41,32 +41,42 @@ impl<B> Packet<side::Tx, B> {
     where
         P: AsRef<[u8]> + 'a,
     {
-        let Side::Tx(tx) = self.inner else { unreachable!() };
+        let Side::Tx(tx) = self.inner else {
+            unreachable!()
+        };
         Fragments::new(tx.assoc_id, tx.pkt_id, tx.addr, tx.max_pkt_size, payload)
     }
 
     /// Returns the UDP session ID
     pub fn assoc_id(&self) -> u16 {
-        let Side::Tx(tx) = &self.inner else { unreachable!() };
+        let Side::Tx(tx) = &self.inner else {
+            unreachable!()
+        };
         tx.assoc_id
     }
 
     /// Returns the packet ID
     pub fn pkt_id(&self) -> u16 {
-        let Side::Tx(tx) = &self.inner else { unreachable!() };
+        let Side::Tx(tx) = &self.inner else {
+            unreachable!()
+        };
         tx.pkt_id
     }
 
     /// Returns the address
     pub fn addr(&self) -> &Address {
-        let Side::Tx(tx) = &self.inner else { unreachable!() };
+        let Side::Tx(tx) = &self.inner else {
+            unreachable!()
+        };
         &tx.addr
     }
 }
 
 impl Debug for Packet<side::Tx, ()> {
     fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
-        let Side::Tx(tx) = &self.inner else { unreachable!() };
+        let Side::Tx(tx) = &self.inner else {
+            unreachable!()
+        };
         f.debug_struct("Packet")
             .field("assoc_id", &tx.assoc_id)
             .field("pkt_id", &tx.pkt_id)
@@ -115,7 +125,9 @@ where
 
     /// Reassembles the packet. If the packet is not complete yet, `None` is returned.
     pub fn assemble(self, data: B) -> Result<Option<Assemblable<B>>, AssembleError> {
-        let Side::Rx(rx) = self.inner else { unreachable!() };
+        let Side::Rx(rx) = self.inner else {
+            unreachable!()
+        };
         let mut sessions = rx.sessions.lock();
 
         sessions.insert(
@@ -131,44 +143,58 @@ where
 
     /// Returns the UDP session ID
     pub fn assoc_id(&self) -> u16 {
-        let Side::Rx(rx) = &self.inner else { unreachable!() };
+        let Side::Rx(rx) = &self.inner else {
+            unreachable!()
+        };
         rx.assoc_id
     }
 
     /// Returns the packet ID
     pub fn pkt_id(&self) -> u16 {
-        let Side::Rx(rx) = &self.inner else { unreachable!() };
+        let Side::Rx(rx) = &self.inner else {
+            unreachable!()
+        };
         rx.pkt_id
     }
 
     /// Returns the fragment ID
     pub fn frag_id(&self) -> u8 {
-        let Side::Rx(rx) = &self.inner else { unreachable!() };
+        let Side::Rx(rx) = &self.inner else {
+            unreachable!()
+        };
         rx.frag_id
     }
 
     /// Returns the total number of fragments
     pub fn frag_total(&self) -> u8 {
-        let Side::Rx(rx) = &self.inner else { unreachable!() };
+        let Side::Rx(rx) = &self.inner else {
+            unreachable!()
+        };
         rx.frag_total
     }
 
     /// Returns the address
     pub fn addr(&self) -> &Address {
-        let Side::Rx(rx) = &self.inner else { unreachable!() };
+        let Side::Rx(rx) = &self.inner else {
+            unreachable!()
+        };
         &rx.addr
     }
 
     /// Returns the size of the (fragmented) packet
     pub fn size(&self) -> u16 {
-        let Side::Rx(rx) = &self.inner else { unreachable!() };
+        let Side::Rx(rx) = &self.inner else {
+            unreachable!()
+        };
         rx.size
     }
 }
 
 impl<B> Debug for Packet<side::Rx, B> {
     fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
-        let Side::Rx(rx) = &self.inner else { unreachable!() };
+        let Side::Rx(rx) = &self.inner else {
+            unreachable!()
+        };
         f.debug_struct("Packet")
             .field("assoc_id", &rx.assoc_id)
             .field("pkt_id", &rx.pkt_id)
@@ -205,7 +231,9 @@ where
         let first_frag_size = max_pkt_size - header_addr_ref.len();
         let frag_size_addr_none = max_pkt_size - header_addr_none_ref.len();
 
-        let Header::Packet(pkt) = header_addr_ref else { unreachable!() };
+        let Header::Packet(pkt) = header_addr_ref else {
+            unreachable!()
+        };
         let (_, _, _, _, _, addr) = pkt.into();
 
         let frag_total = if first_frag_size < payload.as_ref().len() {
@@ -242,7 +270,9 @@ where
             let next_frag_end =
                 (self.next_frag_start + payload_size).min(self.payload.as_ref().len());
 
-            let Header::Packet(pkt) = header_ref else { unreachable!() };
+            let Header::Packet(pkt) = header_ref else {
+                unreachable!()
+            };
             let (_, _, _, _, _, addr) = pkt.into();
 
             let header = Header::Packet(PacketHeader::new(
@@ -254,9 +284,15 @@ where
                 addr,
             ));
 
-            let payload_ptr = &(self.payload.as_ref()[self.next_frag_start]) as *const u8;
-            let payload =
-                unsafe { slice::from_raw_parts(payload_ptr, next_frag_end - self.next_frag_start) };
+            let payload = if self.payload.as_ref().is_empty() {
+                &[]
+            } else {
+                let payload_ptr = &(self.payload.as_ref()[self.next_frag_start]) as *const u8;
+                let payload = unsafe {
+                    slice::from_raw_parts(payload_ptr, next_frag_end - self.next_frag_start)
+                };
+                payload
+            };
 
             self.next_frag_id += 1;
             self.next_frag_start = next_frag_end;
