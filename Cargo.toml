@@ -1,4 +1,5 @@
 [workspace]
+resolver = "2"
 members = ["tuic", "tuic-quinn", "tuic-server", "tuic-client"]
 
 [profile.release]

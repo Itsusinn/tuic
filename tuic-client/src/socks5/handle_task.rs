@@ -1,17 +1,18 @@
-use super::{udp_session::UdpSession, Server, UDP_SESSIONS};
+use super::{udp_session::UdpSession, ServerInstance, UDP_SESSIONS};
 use crate::connection::{Connection as TuicConnection, ERROR_CODE};
 use socks5_proto::{Address, Reply};
 use socks5_server::{
     connection::{associate, bind, connect},
     Associate, Bind, Connect,
 };
+use std::io::{Error as IoError, ErrorKind};
 use tokio::io::{self, AsyncWriteExt};
 use tokio_util::compat::FuturesAsyncReadCompatExt;
 use tuic::Address as TuicAddress;
 
-impl Server {
+impl<A> ServerInstance<A> {
     pub async fn handle_associate(
-        assoc: Associate<associate::NeedReply>,
+        assoc: Associate<associate::state::NeedReply>,
         assoc_id: u16,
         dual_stack: Option<bool>,
         max_pkt_size: usize,
@@ -31,7 +32,8 @@ impl Server {
                     .await
                 {
                     Ok(assoc) => assoc,
-                    Err(err) => {
+                    Err((err, mut conn)) => {
+                        let _ = conn.shutdown().await;
                         log::warn!("[socks5] [{peer_addr}] [associate] [{assoc_id:#06x}] command reply error: {err}");
                         return;
                     }
@@ -56,6 +58,9 @@ impl Server {
                         let forward = async move {
                             let target_addr = match target_addr {
                                 Address::DomainAddress(domain, port) => {
+                                    let domain = String::from_utf8(domain).map_err(|_e| {
+                                        IoError::new(ErrorKind::InvalidInput, "invalid domain")
+                                    })?;
                                     TuicAddress::DomainAddress(domain, port)
                                 }
                                 Address::SocketAddress(addr) => TuicAddress::SocketAddress(addr),
@@ -79,7 +84,7 @@ impl Server {
                 };
 
                 match tokio::select! {
-                    res = assoc.wait_until_closed() => res,
+                    res = assoc.wait_close() => res,
                     _ = handle_local_incoming_pkt => unreachable!(),
                 } {
                     Ok(()) => {}
@@ -117,17 +122,18 @@ impl Server {
                     .await
                 {
                     Ok(mut assoc) => {
-                        let _ = assoc.shutdown().await;
+                        let _ = assoc.close().await;
                     }
-                    Err(err) => {
-                        log::warn!("[socks5] [{peer_addr}] [associate] [{assoc_id:#06x}] command reply error: {err}")
+                    Err((err, mut conn)) => {
+                        let _ = conn.shutdown().await;
+                        log::warn!("[socks5] [{peer_addr}] [associate] [{assoc_id:#06x}] command reply error: {err}");
                     }
                 }
             }
         }
     }
 
-    pub async fn handle_bind(bind: Bind<bind::NeedFirstReply>) {
+    pub async fn handle_bind(bind: Bind<bind::state::NeedFirstReply>) {
         let peer_addr = bind.peer_addr().unwrap();
         log::warn!("[socks5] [{peer_addr}] [bind] command not supported");
 
@@ -136,26 +142,46 @@ impl Server {
             .await
         {
             Ok(mut bind) => {
-                let _ = bind.shutdown().await;
+                let _ = bind.close().await;
             }
-            Err(err) => log::warn!("[socks5] [{peer_addr}] [bind] command reply error: {err}"),
+            Err((err, mut conn)) => {
+                let _ = conn.shutdown().await;
+                log::warn!("[socks5] [{peer_addr}] [bind] command reply error: {err}");
+            }
         }
     }
 
-    pub async fn handle_connect(conn: Connect<connect::NeedReply>, addr: Address) {
+    pub async fn handle_connect(conn: Connect<connect::state::NeedReply>, addr: Address) {
         let peer_addr = conn.peer_addr().unwrap();
+
         let target_addr = match addr {
-            Address::DomainAddress(domain, port) => TuicAddress::DomainAddress(domain, port),
-            Address::SocketAddress(addr) => TuicAddress::SocketAddress(addr),
+            Address::DomainAddress(domain, port) => String::from_utf8(domain)
+                .map_err(|e| {
+                    IoError::new(
+                        ErrorKind::InvalidInput,
+                        format!(
+                            "invalid domain ~`{}`",
+                            String::from_utf8_lossy(e.as_bytes())
+                        ),
+                    )
+                })
+                .map(|domain| TuicAddress::DomainAddress(domain, port)),
+            Address::SocketAddress(addr) => Ok(TuicAddress::SocketAddress(addr)),
         };
 
-        let relay = match TuicConnection::get().await {
-            Ok(conn) => conn.connect(target_addr.clone()).await,
-            Err(err) => Err(err),
+        let relay = match target_addr {
+            Ok(target_addr) => {
+                let relay_ret = match TuicConnection::get().await {
+                    Ok(conn) => conn.connect(target_addr.clone()).await,
+                    Err(err) => Err(err),
+                };
+                (relay_ret, Some(target_addr))
+            }
+            Err(e) => (Err(e.into()), None),
         };
 
         match relay {
-            Ok(relay) => {
+            (Ok(relay), Some(target_addr)) => {
                 let mut relay = relay.compat();
 
                 match conn.reply(Reply::Succeeded, Address::unspecified()).await {
@@ -167,13 +193,19 @@ impl Server {
                             log::warn!("[socks5] [{peer_addr}] [connect] [{target_addr}] TCP stream relaying error: {err}");
                         }
                     },
-                    Err(err) => {
+                    Err((err, mut conn)) => {
+                        let _ = conn.shutdown().await;
                         let _ = relay.shutdown().await;
                         log::warn!("[socks5] [{peer_addr}] [connect] [{target_addr}] command reply error: {err}");
                     }
                 }
             }
-            Err(err) => {
+            (Ok(_relay), None) => unreachable!(),
+            (Err(err), target_addr) => {
+                let target_addr = target_addr
+                    .map(|a| format!("{}", a))
+                    .unwrap_or(String::from("invalid"));
+
                 log::warn!("[socks5] [{peer_addr}] [connect] [{target_addr}] unable to relay TCP stream: {err}");
 
                 match conn
@@ -183,8 +215,9 @@ impl Server {
                     Ok(mut conn) => {
                         let _ = conn.shutdown().await;
                     }
-                    Err(err) => {
-                        log::warn!("[socks5] [{peer_addr}] [connect] [{target_addr}] command reply error: {err}")
+                    Err((err, mut conn)) => {
+                        let _ = conn.shutdown().await;
+                        log::warn!("[socks5] [{peer_addr}] [connect] [{target_addr}] command reply error: {err}");
                     }
                 }
             }

@@ -4,8 +4,8 @@ use self::side::Side;
 use bytes::{BufMut, Bytes, BytesMut};
 use futures_util::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use quinn::{
-    Connection as QuinnConnection, ConnectionError, RecvStream, SendDatagramError, SendStream,
-    UnknownStream, VarInt,
+    ClosedStream, Connection as QuinnConnection, ConnectionError, RecvStream, SendDatagramError,
+    SendStream, VarInt,
 };
 use std::{
     fmt::{Debug, Formatter, Result as FmtResult},
@@ -408,7 +408,9 @@ impl Connect {
     pub fn addr(&self) -> &Address {
         match &self.model {
             Side::Client(model) => {
-                let Header::Connect(conn) = model.header() else { unreachable!() };
+                let Header::Connect(conn) = model.header() else {
+                    unreachable!()
+                };
                 conn.addr()
             }
             Side::Server(model) => model.addr(),
@@ -419,7 +421,7 @@ impl Connect {
     pub fn reset(
         &mut self,
         error_code: VarInt,
-    ) -> (Result<(), UnknownStream>, Result<(), UnknownStream>) {
+    ) -> (Result<(), ClosedStream>, Result<(), ClosedStream>) {
         let send_res = self.send.reset(error_code);
         let recv_res = self.recv.stop(error_code);
         (send_res, recv_res)

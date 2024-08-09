@@ -3,7 +3,7 @@ use bytes::Bytes;
 use once_cell::sync::OnceCell;
 use parking_lot::Mutex;
 use socket2::{Domain, Protocol, SockAddr, Socket, Type};
-use socks5_proto::Address;
+use socks5_proto::{Address, UdpHeader};
 use socks5_server::AssociatedUdpSocket;
 use std::{
     collections::HashMap,
@@ -66,7 +66,7 @@ impl UdpSession {
         })?;
 
         Ok(Self {
-            socket: Arc::new(AssociatedUdpSocket::from((socket, max_pkt_size))),
+            socket: Arc::new(AssociatedUdpSocket::new(socket, max_pkt_size)),
             assoc_id,
             ctrl_addr,
         })
@@ -79,15 +79,15 @@ impl UdpSession {
             "[socks5] [{ctrl_addr}] [associate] [{assoc_id:#06x}] send packet from {src_addr_display} to {dst_addr}",
             ctrl_addr = self.ctrl_addr,
             assoc_id = self.assoc_id,
-            dst_addr = self.socket.peer_addr().unwrap(),
+            dst_addr = self.socket.get_ref().peer_addr().unwrap(),
         );
 
-        if let Err(err) = self.socket.send(pkt, 0, src_addr).await {
+        if let Err(err) = self.socket.send(pkt, &UdpHeader::new(0, src_addr)).await {
             log::warn!(
                 "[socks5] [{ctrl_addr}] [associate] [{assoc_id:#06x}] send packet from {src_addr_display} to {dst_addr} error: {err}",
                 ctrl_addr = self.ctrl_addr,
                 assoc_id = self.assoc_id,
-                dst_addr = self.socket.peer_addr().unwrap(),
+                dst_addr = self.socket.get_ref().peer_addr().unwrap(),
             );
 
             return Err(Error::Io(err));
@@ -97,9 +97,12 @@ impl UdpSession {
     }
 
     pub async fn recv(&self) -> Result<(Bytes, Address), Error> {
-        let (pkt, frag, dst_addr, src_addr) = self.socket.recv_from().await?;
+        let (pkt, frag, dst_addr, src_addr) = match self.socket.recv_from().await {
+            Ok((pkt, header, src_addr)) => (pkt, header.frag, header.address, src_addr),
+            Err((e, _)) => return Err(Error::Io(e.into())),
+        };
 
-        if let Ok(connected_addr) = self.socket.peer_addr() {
+        if let Ok(connected_addr) = self.socket.get_ref().peer_addr() {
             let connected_addr = match connected_addr {
                 SocketAddr::V4(addr) => {
                     if let SocketAddr::V6(_) = src_addr {
@@ -127,7 +130,7 @@ impl UdpSession {
                 ))?;
             }
         } else {
-            self.socket.connect(src_addr).await?;
+            self.socket.get_ref().connect(src_addr).await?;
         }
 
         if frag != 0 {
@@ -147,6 +150,6 @@ impl UdpSession {
     }
 
     pub fn local_addr(&self) -> Result<SocketAddr, IoError> {
-        self.socket.local_addr()
+        self.socket.get_ref().local_addr()
     }
 }
