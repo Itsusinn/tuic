@@ -20,7 +20,7 @@ mod handle_task;
 mod udp_session;
 
 pub const ERROR_CODE: VarInt = VarInt::from_u32(0);
-pub const DEFAULT_CONCURRENT_STREAMS: u32 = 32;
+pub const DEFAULT_CONCURRENT_STREAMS: u32 = 512;
 
 #[derive(Clone)]
 pub struct Connection {

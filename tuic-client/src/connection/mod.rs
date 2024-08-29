@@ -39,7 +39,7 @@ static CONNECTION: AsyncOnceCell<AsyncRwLock<Connection>> = AsyncOnceCell::const
 static TIMEOUT: AtomicCell<Duration> = AtomicCell::new(Duration::from_secs(0));
 
 pub const ERROR_CODE: VarInt = VarInt::from_u32(0);
-const DEFAULT_CONCURRENT_STREAMS: u32 = 32;
+const DEFAULT_CONCURRENT_STREAMS: u32 = 512;
 
 #[derive(Clone)]
 pub struct Connection {
