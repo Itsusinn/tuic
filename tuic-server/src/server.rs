@@ -65,6 +65,16 @@ impl Server {
         ));
         let mut tp_cfg = TransportConfig::default();
 
+        fn create_bbr_with_initial_window(initial_window: Option<u64>) -> BbrConfig {
+            let mut bbr_config = BbrConfig::default();
+
+            if let Some(window) = initial_window {
+                bbr_config.initial_window(window);
+            }
+
+            bbr_config
+        }
+
         tp_cfg
             .max_concurrent_bidi_streams(VarInt::from(DEFAULT_CONCURRENT_STREAMS))
             .max_concurrent_uni_streams(VarInt::from(DEFAULT_CONCURRENT_STREAMS))
@@ -91,7 +101,8 @@ impl Server {
                 tp_cfg.congestion_controller_factory(Arc::new(NewRenoConfig::default()))
             }
             CongestionControl::Bbr => {
-                tp_cfg.congestion_controller_factory(Arc::new(BbrConfig::default()))
+                let bbr_config = create_bbr_with_initial_window(cfg.initial_window);
+                tp_cfg.congestion_controller_factory(Arc::new(bbr_config));
             }
         };
 
