@@ -85,6 +85,9 @@ pub struct Config {
     #[serde(default = "default::max_external_packet_size")]
     pub max_external_packet_size: usize,
 
+    #[serde(default = "default::initial_window")]
+    pub initial_window: Option<u64>,
+
     #[serde(default = "default::send_window")]
     pub send_window: u64,
 
@@ -189,6 +192,10 @@ mod default {
 
     pub fn max_external_packet_size() -> usize {
         1500
+    }
+
+    pub fn initial_window() -> Option<u64> {
+        None
     }
 
     pub fn send_window() -> u64 {
