@@ -102,7 +102,7 @@ impl Server {
             }
             CongestionControl::Bbr => {
                 let bbr_config = create_bbr_with_initial_window(cfg.initial_window);
-                tp_cfg.congestion_controller_factory(Arc::new(bbr_config));
+                tp_cfg.congestion_controller_factory(Arc::new(bbr_config))
             }
         };
 
