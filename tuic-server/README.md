@@ -103,6 +103,10 @@ replace <tag> with [current version tag](https://github.com/Itsusinn/tuic/pkgs/c
     // Default: 1500
     "max_external_packet_size": 1500,
 
+    // Optional. Sets the initial congestion window size in bytes for the BBR algorithm, which may improve burst performance but could lead to congestion under high concurrency.
+    // Default: None
+    "initial_window": 1048576,
+
     // Optional. Maximum number of bytes to transmit to a peer without acknowledgment
     // Should be set to at least the expected connection latency multiplied by the maximum desired throughput
     // Default: 8MiB * 2
