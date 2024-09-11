@@ -39,9 +39,14 @@ jobs:
           # Linux x86
           - os: ubuntu-latest
             target: x86_64-unknown-linux-gnu
+            release-name: x86_64_v3-linux
+            cross: true
+            rustflags: "-Ctarget-cpu=x86-64-v3"
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
             release-name: x86_64-linux
             cross: true
-            rustflags: "-Ctarget-cpu=sandybridge"
+            rustflags: "-Ctarget-cpu=x86-64-v2"
           - os: ubuntu-latest
             target: i686-unknown-linux-gnu
             release-name: i686-linux
@@ -51,7 +56,7 @@ jobs:
             target: x86_64-unknown-linux-musl
             release-name: x86_64-linux-musl
             cross: true
-            rustflags: "-Ctarget-cpu=sandybridge"
+            rustflags: "-Ctarget-cpu=x86-64-v2"
           - os: ubuntu-latest
             target: i686-unknown-linux-musl
             release-name: i686-linux-musl
@@ -85,10 +90,16 @@ jobs:
           # Windows
           - os: windows-latest
             target: x86_64-pc-windows-msvc
+            release-name: x86_64_v3-windows
+            cross: false
+            postfix: ".exe"
+            rustflags: "-Ctarget-cpu=x86-64-v3"
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
             release-name: x86_64-windows
             cross: false
             postfix: ".exe"
-            rustflags: "-Ctarget-cpu=sandybridge"
+            rustflags: "-Ctarget-cpu=x86-64-v2"
           - os: windows-latest
             target: i686-pc-windows-msvc
             release-name: i686-windows
@@ -100,7 +111,7 @@ jobs:
             target: x86_64-apple-darwin
             release-name: x86_64-darwin
             cross: false
-            rustflags: "-Ctarget-cpu=sandybridge"
+            rustflags: "-Ctarget-cpu=x86-64-v2"
           - os: macos-14
             target: aarch64-apple-darwin
             release-name: aarch64-darwin
