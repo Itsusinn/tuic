@@ -89,7 +89,7 @@ jobs:
             cross: true
           # Windows
           - os: windows-latest
-            target: x86_64-pc-windows-msvc
+            target: x86_64-pc-windows-gnu
             release-name: x86_64_v3-windows
             cross: false
             postfix: ".exe"
