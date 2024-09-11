@@ -58,7 +58,7 @@ impl Server {
 
         crypto.alpn_protocols = cfg.alpn;
         // TODO only set when 0-RTT enabled
-        crypto.max_early_data_size = u32::MAX;
+        crypto.max_early_data_size = 8192;
         crypto.send_half_rtt_data = cfg.zero_rtt_handshake;
 
         let mut config = ServerConfig::with_crypto(Arc::new(
