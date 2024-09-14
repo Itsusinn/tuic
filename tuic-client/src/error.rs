@@ -13,8 +13,6 @@ pub enum Error {
     Connect(#[from] ConnectError),
     #[error(transparent)]
     Model(#[from] ModelError),
-    #[error("load native certificates error: {0}")]
-    LoadNativeCerts(IoError),
     #[error(transparent)]
     Rustls(#[from] RustlsError),
     #[error("{0}: {1}")]
