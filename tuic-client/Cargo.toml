@@ -23,8 +23,8 @@ once_cell = { version = "1", default-features = false, features = ["parking_lot"
 serde = { version = "1", default-features = false, features = ["derive", "std"] }
 serde_json = { version = "1", default-features = false, features = ["std"] }
 socket2 = { version = "0.5", default-features = false }
-socks5-proto = { version = "0.3", default-features = false }
-socks5-server = { version = "0.8", default-features = false }
+socks5-proto = { version = "0.4", default-features = false }
+socks5-server = { version = "0.10", default-features = false }
 
 # Json_comments
 json_comments = "0.2"
@@ -46,7 +46,7 @@ tokio-util = { version = "0.7", default-features = false, features = ["compat"] 
 
 # TLS
 rustls = { version = "0.23", default-features = false }
-rustls-native-certs = { version = "0.7", default-features = false }
+rustls-native-certs = { version = "0.8", default-features = false }
 rustls-pemfile = { version = "2", default-features = false, features = ["std"] }
 
 # Error-handling

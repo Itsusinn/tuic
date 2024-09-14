@@ -1034,9 +1034,9 @@ dependencies = [
 
 [[package]]
 name = "rustls-native-certs"
-version = "0.7.3"
+version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e5bfb394eeed242e909609f56089eecfe5fda225042e8b171791b9c95f5931e5"
+checksum = "fcaf18a4f2be7326cd874a5fa579fae794320a0f388d365dca7e480e55f83f8a"
 dependencies = [
  "openssl-probe",
  "rustls-pemfile",
@@ -1238,20 +1238,20 @@ dependencies = [
 
 [[package]]
 name = "socks5-proto"
-version = "0.3.3"
+version = "0.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b8d1cbdbbffd5e2418d31ae833045a219062f1740f5f0f34baefa8e5bb2053ff"
+checksum = "3d91431c4672e25e372ef46bc554be8f315068c03608f99267a71ad32a12e8c4"
 dependencies = [
- "byteorder",
  "bytes",
+ "thiserror",
  "tokio",
 ]
 
 [[package]]
 name = "socks5-server"
-version = "0.8.3"
+version = "0.10.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cd7260a3af0411620eca9c63032069ec9f0d92ef4214e017672c864f573d6a21"
+checksum = "5223c26981806584cc38c74fddf58808dbdcf4724890471ced69e7a2e8d86345"
 dependencies = [
  "async-trait",
  "bytes",
