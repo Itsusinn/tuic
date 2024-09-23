@@ -323,6 +323,7 @@ jobs:
             echo "TAG_VERSION=ghcr.io/${GITHUB_REPOSITORY_OWNER@L}/tuic-server:${GITHUB_REF#refs/tags/v}" >> $GITHUB_ENV
           else
             echo "TAG_VERSION=ghcr.io/${GITHUB_REPOSITORY_OWNER@L}/tuic-server:0.0.0" >> $GITHUB_ENV
+          fi
           echo "TAG_LATEST=ghcr.io/${GITHUB_REPOSITORY_OWNER@L}/tuic-server:latest" >> $GITHUB_ENV
 
       - name: Build and push
