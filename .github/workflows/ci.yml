@@ -307,8 +307,8 @@ jobs:
 
       - name: Rename binary
         run: |
-          mv ./packages/clash-x86_64-unknown-linux-musl ./packages/tuic-server-amd64
-          mv ./packages/clash-aarch64-unknown-linux-musl ./packages/tuic-server-arm64
+          mv ./packages/tuic-server-x86_64-unknown-linux-musl ./packages/tuic-server-amd64
+          mv ./packages/tuic-server-aarch64-unknown-linux-musl ./packages/tuic-server-arm64
 
       - name: Login to GitHub Container Registry
         uses: docker/login-action@v3
