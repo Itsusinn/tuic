@@ -230,7 +230,7 @@ jobs:
           path: ./packages
 
       - name: Clean git tag & release
-        if: startsWith(github.ref, 'refs/heads/master')
+        if: startsWith(github.ref, 'refs/heads/dev')
         run: |
           # Deleted latest tag and push it
           git tag -d latest || true
