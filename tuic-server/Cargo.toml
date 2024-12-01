@@ -54,7 +54,7 @@ chrono = "0.4"
 tracing = "0.1"
 
 # Error handling
-thiserror = { version = "1", default-features = false }
+thiserror = { version = "2", default-features = false }
 eyre = { version = "0.6" }
 
 # Web

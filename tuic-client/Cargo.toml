@@ -47,5 +47,5 @@ rustls-native-certs = { version = "0.8", default-features = false }
 rustls-pemfile = { version = "2", default-features = false, features = ["std"] }
 
 # Error-handling
-thiserror = { version = "1", default-features = false }
+thiserror = { version = "2", default-features = false }
 anyhow = "1"
