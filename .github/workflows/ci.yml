@@ -123,6 +123,7 @@ jobs:
             release-name: x86_64-freebsd
             tool: cross
             skip-test: true
+            extra-args: "--no-default-features --features ring"
           # RISC-V
           - os: ubuntu-latest
             target: riscv64gc-unknown-linux-gnu
@@ -134,6 +135,7 @@ jobs:
             target: loongarch64-unknown-linux-gnu
             release-name: loongarch64-linux
             tool: cross
+            extra-args: "--no-default-features --features ring"
 
           # Linux mips: tier-3, pity
           # Windows gnu: tokio dont work
