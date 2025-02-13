@@ -159,14 +159,14 @@ jobs:
           components: ${{ matrix.components || 'rustfmt, clippy' }}
 
       - name: Cargo fmt
-        uses: clechasseur/rs-cargo@v2
+        uses: clechasseur/rs-cargo@v3
         with:
           tool: ${{ matrix.tool }}
           command: fmt
           args: --all -- --check
 
       - name: Cargo clippy
-        uses: clechasseur/rs-cargo@v2
+        uses: clechasseur/rs-cargo@v3
         with:
           tool: ${{ matrix.tool }}
           command: clippy
@@ -175,7 +175,7 @@ jobs:
           RUSTFLAGS: ${{ matrix.rustflags }}
 
       - name: Cargo test
-        uses: clechasseur/rs-cargo@v2
+        uses: clechasseur/rs-cargo@v3
         if: ${{ !matrix.skip-test }}
         with:
           tool: ${{ matrix.tool }}
@@ -186,7 +186,7 @@ jobs:
           RUSTFLAGS: ${{ matrix.rustflags }}
 
       - name: Cargo build
-        uses: clechasseur/rs-cargo@v2
+        uses: clechasseur/rs-cargo@v3
         with:
           tool: ${{ matrix.tool }}
           command: build
