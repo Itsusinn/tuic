@@ -122,7 +122,7 @@ jobs:
             target: x86_64-unknown-freebsd
             release-name: x86_64-freebsd
             tool: cross
-            extra-args: "--features bindgen"
+            extra-args: "--no-default-features --features ring"
           # RISC-V
           - os: ubuntu-latest
             target: riscv64gc-unknown-linux-gnu
@@ -134,7 +134,7 @@ jobs:
             target: loongarch64-unknown-linux-gnu
             release-name: loongarch64-linux
             tool: cross
-            extra-args: "--features bindgen"
+            extra-args: "--no-default-features --features ring"
 
           # Linux mips: tier-3, pity
           # Windows gnu: tokio dont work
