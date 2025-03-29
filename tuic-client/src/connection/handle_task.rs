@@ -13,21 +13,30 @@ use crate::{error::Error, socks5::UDP_SESSIONS as SOCKS5_UDP_SESSIONS, utils::Ud
 
 impl Connection {
     pub async fn authenticate(self, zero_rtt_accepted: Option<ZeroRttAccepted>) {
-        if let Some(zero_rtt_accepted) = zero_rtt_accepted {
-            debug!("[relay] [authenticate] waiting for connection to be fully established");
-            zero_rtt_accepted.await;
-        }
+        let wait_zero_rtt = async {
+            if let Some(zero_rtt_accepted) = zero_rtt_accepted {
+                debug!("[relay] [authenticate] waiting for connection to be fully established");
+                match zero_rtt_accepted.await {
+                    true => debug!("[relay] [authenticate] zero rtt acepted"),
+                    false => debug!("[relay] [authenticate] zero rtt rejected"),
+                }
+            }
+        };
 
-        debug!("[relay] [authenticate] sending authentication");
+        let wait_auth = async {
+            debug!("[relay] [authenticate] sending authentication");
 
-        match self
-            .model
-            .authenticate(self.uuid, self.password.clone())
-            .await
-        {
-            Ok(()) => info!("[relay] [authenticate] {uuid}", uuid = self.uuid),
-            Err(err) => warn!("[relay] [authenticate] authentication sending error: {err}"),
-        }
+            match self
+                .model
+                .authenticate(self.uuid, self.password.clone())
+                .await
+            {
+                Ok(()) => info!("[relay] [authenticate] {uuid}", uuid = self.uuid),
+                Err(err) => warn!("[relay] [authenticate] authentication sending error: {err}"),
+            }
+        };
+
+        tokio::join!(wait_zero_rtt, wait_auth);
     }
 
     pub async fn connect(&self, addr: Address) -> Result<Connect, Error> {
