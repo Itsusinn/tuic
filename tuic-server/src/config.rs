@@ -75,6 +75,10 @@ pub struct TlsConfig {
     pub private_key: PathBuf,
     #[educe(Default(expression = Vec::new()))]
     pub alpn: Vec<String>,
+    #[educe(Default(expression = "localhost"))]
+    pub hostname: String,
+    #[educe(Default(expression = false))]
+    pub auto_ssl: bool,
 }
 
 #[derive(Deserialize, Serialize, Educe)]
@@ -151,6 +155,8 @@ impl From<OldConfig> for Config {
                 certificate: value.certificate,
                 private_key: value.private_key,
                 alpn: value.alpn,
+                auto_ssl: value.auto_ssl,
+                hostname: value.hostname,
             },
             udp_relay_ipv6: value.udp_relay_ipv6,
             zero_rtt_handshake: value.zero_rtt_handshake,
@@ -213,7 +219,7 @@ impl From<LogLevel> for LevelFilter {
     }
 }
 
-pub async fn parse_config(args: ArgsOs) -> Result<Config, ConfigError> {
+pub async fn parse_config(args: ArgsOs) -> Result<(Config, Option<PathBuf>), ConfigError> {
     let mut parser = Parser::from_iter(args);
     let mut path = None;
 
@@ -246,7 +252,8 @@ pub async fn parse_config(args: ArgsOs) -> Result<Config, ConfigError> {
     if path.is_none() {
         return Err(ConfigError::NoConfig);
     }
-    let path = path.unwrap().to_string_lossy().to_string();
+    let path_buf = path.unwrap();
+    let path = path_buf.to_string_lossy().to_string();
     let config = if path.ends_with(".toml") || std::env::var("TUIC_FORCE_TOML").is_ok() {
         Figment::from(Serialized::defaults(Config::default()))
             .merge(Toml::file(path))
@@ -257,5 +264,5 @@ pub async fn parse_config(args: ArgsOs) -> Result<Config, ConfigError> {
         let config: OldConfig = serde_json::from_slice(&config_text)?;
         config.into()
     };
-    Ok(config)
+    Ok((config, Some(path_buf.into())))
 }

@@ -37,6 +37,12 @@ pub struct OldConfig {
     #[serde(default = "default::private_key")]
     pub private_key: PathBuf,
 
+    #[serde(default = "default::auto_ssl")]
+    pub auto_ssl: bool,
+
+    #[serde(default = "default::hostname")]
+    pub hostname: String,
+
     #[serde(
         default = "default::congestion_control",
         deserialize_with = "deserialize_from_str"
@@ -194,6 +200,14 @@ mod default {
 
     pub fn private_key() -> PathBuf {
         PathBuf::new()
+    }
+
+    pub fn auto_ssl() -> bool {
+        false
+    }
+
+    pub fn hostname() -> String {
+        "localhost".to_string()
     }
 
     pub fn self_sign() -> bool {

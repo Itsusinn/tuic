@@ -25,12 +25,13 @@ static GLOBAL: Jemalloc = Jemalloc;
 
 struct AppContext {
     pub cfg: Config,
+    pub config_path: Option<std::path::PathBuf>,
 }
 
 #[tokio::main]
 async fn main() -> eyre::Result<()> {
-    let cfg = match parse_config(env::args_os()).await {
-        Ok(cfg) => cfg,
+    let (cfg, config_path) = match parse_config(env::args_os()).await {
+        Ok((cfg, config_path)) => (cfg, config_path),
         Err(ConfigError::Version(msg) | ConfigError::Help(msg)) => {
             println!("{msg}");
             process::exit(0);
@@ -40,7 +41,7 @@ async fn main() -> eyre::Result<()> {
             process::exit(1);
         }
     };
-    let ctx = Arc::new(AppContext { cfg });
+    let ctx = Arc::new(AppContext { cfg, config_path });
 
     let filter = tracing_subscriber::filter::Targets::new()
         .with_targets(vec![

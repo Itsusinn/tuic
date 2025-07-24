@@ -1,4 +1,5 @@
 use std::{
+    fs,
     net::{SocketAddr, UdpSocket as StdUdpSocket},
     sync::Arc,
     time::Duration,
@@ -15,13 +16,16 @@ use rustls::{
     pki_types::{CertificateDer, PrivateKeyDer, PrivatePkcs8KeyDer},
 };
 use socket2::{Domain, Protocol, SockAddr, Socket, Type};
-use tracing::{debug, warn};
+use tracing::{debug, info, warn};
 
 use crate::{
     AppContext,
     connection::{Connection, INIT_CONCURRENT_STREAMS},
     error::Error,
-    tls::CertResolver,
+    tls::{
+        CertResolver, is_certificate_valid, is_valid_domain, provision_acme_certificate,
+        start_certificate_renewal_task,
+    },
     utils::CongestionController,
 };
 
@@ -30,11 +34,119 @@ pub struct Server {
     ctx: Arc<AppContext>,
 }
 
+/// Returns the directory of the configuration file provided as `config_path`
+fn get_config_dir(config_path: &std::path::Path) -> Option<std::path::PathBuf> {
+    config_path.parent().map(|dir| dir.to_path_buf())
+}
+
 impl Server {
     pub async fn init(ctx: Arc<AppContext>) -> Result<Self, Error> {
         let mut crypto: RustlsServerConfig;
-        if ctx.cfg.tls.self_sign {
-            let cert = rcgen::generate_simple_self_signed(vec!["localhost".into()]).unwrap();
+        let hostname = ctx.cfg.tls.hostname.clone();
+        if ctx.cfg.tls.auto_ssl && is_valid_domain(hostname.as_str()) {
+            warn!(
+                "Attempting automatic SSL certificate provisioning for domain: {}",
+                hostname
+            );
+            // Determine certificate and key paths
+            let cert_path = if ctx.cfg.tls.certificate.as_os_str().is_empty() {
+                let base_dir = ctx
+                    .config_path
+                    .as_ref()
+                    .and_then(|path| get_config_dir(path))
+                    .unwrap_or_else(|| std::path::PathBuf::from("."));
+                base_dir.join(format!("{}.cer.pem", hostname))
+            } else {
+                ctx.cfg.tls.certificate.clone()
+            };
+
+            let key_path = if ctx.cfg.tls.private_key.as_os_str().is_empty() {
+                let base_dir = ctx
+                    .config_path
+                    .as_ref()
+                    .and_then(|path| get_config_dir(path))
+                    .unwrap_or_else(|| std::path::PathBuf::from("."));
+                base_dir.join(format!("{}.key.pem", hostname))
+            } else {
+                ctx.cfg.tls.private_key.clone()
+            };
+
+            if is_certificate_valid(&cert_path, &key_path).await {
+                info!(
+                    "Existing ACME certificate is valid, using it instead of provisioning new one"
+                );
+
+                // Use existing valid ACME certificate
+                let cert_resolver =
+                    CertResolver::new(&cert_path, &key_path, Duration::from_secs(10)).await?;
+
+                crypto =
+                    RustlsServerConfig::builder_with_protocol_versions(&[&rustls::version::TLS13])
+                        .with_no_client_auth()
+                        .with_cert_resolver(cert_resolver);
+
+                // Start certificate renewal background task for existing certificate
+                start_certificate_renewal_task(
+                    hostname.clone(),
+                    cert_path.clone(),
+                    key_path.clone(),
+                )
+                .await;
+            } else {
+                info!("No valid ACME certificate found, will provision new one");
+
+                // Attempt ACME certificate provisioning
+                match provision_acme_certificate(hostname.as_str(), &cert_path, &key_path, 2).await
+                {
+                    Ok(()) => {
+                        warn!("Successfully provisioned ACME certificate for {}", hostname);
+
+                        // Start certificate renewal background task
+                        start_certificate_renewal_task(
+                            hostname.clone(),
+                            cert_path.clone(),
+                            key_path.clone(),
+                        )
+                        .await;
+
+                        // Use the provisioned certificate
+                        let cert_resolver =
+                            CertResolver::new(&cert_path, &key_path, Duration::from_secs(10))
+                                .await?;
+
+                        crypto = RustlsServerConfig::builder_with_protocol_versions(&[
+                            &rustls::version::TLS13,
+                        ])
+                        .with_no_client_auth()
+                        .with_cert_resolver(cert_resolver);
+                    }
+                    Err(e) => {
+                        warn!(
+                            "ACME certificate provisioning failed after 2 attempts: {}",
+                            e
+                        );
+                        warn!("Falling back to self-signed certificate");
+
+                        let cert =
+                            rcgen::generate_simple_self_signed(vec![hostname.clone()]).unwrap();
+                        let cert_pem = cert.cert.pem();
+                        let cert_der = CertificateDer::from(cert.cert);
+                        let priv_key = PrivatePkcs8KeyDer::from(cert.key_pair.serialize_der());
+                        fs::write(cert_path, cert_pem)
+                            .unwrap_or_else(|_| warn!("Failed to write certificate to disk"));
+                        fs::write(key_path, cert.key_pair.serialize_pem())
+                            .unwrap_or_else(|_| warn!("Failed to write key to disk"));
+                        crypto = RustlsServerConfig::builder_with_protocol_versions(&[
+                            &rustls::version::TLS13,
+                        ])
+                        .with_no_client_auth()
+                        .with_single_cert(vec![cert_der], PrivateKeyDer::Pkcs8(priv_key))?;
+                    }
+                }
+            }
+        } else if ctx.cfg.tls.self_sign {
+            let cert =
+                rcgen::generate_simple_self_signed(vec![ctx.cfg.tls.hostname.clone()]).unwrap();
             let cert_der = CertificateDer::from(cert.cert);
             let priv_key = PrivatePkcs8KeyDer::from(cert.key_pair.serialize_der());
             crypto = RustlsServerConfig::builder_with_protocol_versions(&[&rustls::version::TLS13])
