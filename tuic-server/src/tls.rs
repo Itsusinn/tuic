@@ -298,7 +298,7 @@ async fn provision_certificate_attempt(
     let (account, _credentials) = Account::builder()?
         .create(
             &NewAccount {
-                contact: &[], // format!("mailto:admin@{}", hostname).as_str()
+                contact: &[format!("mailto:admin@{}", hostname)],
                 terms_of_service_agreed: true,
                 only_return_existing: false,
             },
