@@ -143,7 +143,9 @@ async fn load_priv_key(key_path: &Path) -> eyre::Result<PrivateKeyDer<'static>> 
 /// Check if port 80 is available for HTTP challenge server
 pub fn is_port_80_available() -> bool {
     match TcpListener::bind("[::]:80") {
-        Ok(_) => {
+        Ok(listener) => {
+            // Explicitly drop the TcpListener to release the port
+            drop(listener);
             info!("Port 80 is available for HTTP challenge server");
             true
         }
