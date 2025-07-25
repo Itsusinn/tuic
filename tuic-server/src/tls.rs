@@ -525,8 +525,10 @@ pub async fn is_certificate_valid(cert_path: &Path, key_path: &Path) -> bool {
                         }
                     }
                 }
-                _ => panic!("PEM parsing failed: {:?}", res),
-            }
+                _ => {
+                    warn!("PEM parsing failed: {:?}", res);
+                    false
+                }
         }
         Err(_) => {
             warn!("Cannot read certificate file at {}", cert_path.display());
