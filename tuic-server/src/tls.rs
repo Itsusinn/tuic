@@ -252,18 +252,15 @@ pub async fn provision_acme_certificate(
     max_retries: u32,
 ) -> Result<()> {
     if !is_valid_domain(hostname) {
-        return Err(eyre::eyre!("Invalid domain name: {}", hostname));
+        return Err(eyre::eyre!("Invalid domain name: {hostname}"));
     }
 
-    info!(
-        "Starting ACME certificate provisioning for domain: {}",
-        hostname
-    );
+    info!("Starting ACME certificate provisioning for domain: {hostname}");
 
     for attempt in 1..=max_retries {
         match provision_certificate_attempt(hostname, cert_path, key_path).await {
             Ok(()) => {
-                info!("Successfully provisioned ACME certificate for {}", hostname);
+                info!("Successfully provisioned ACME certificate for {hostname}");
                 return Ok(());
             }
             Err(e) => {
@@ -298,7 +295,7 @@ async fn provision_certificate_attempt(
     let (account, _credentials) = Account::builder()?
         .create(
             &NewAccount {
-                contact: &[format!("mailto:admin@{}", hostname)],
+                contact: &[&format!("mailto:admin@{hostname}")],
                 terms_of_service_agreed: true,
                 only_return_existing: false,
             },
@@ -476,7 +473,7 @@ async fn provision_certificate_attempt(
 }
 
 /// Check if a certificate file is valid (exists, readable, and not expired)
-pub async fn is_certificate_valid(cert_path: &Path, key_path: &Path) -> bool {
+pub async fn is_certificate_valid(cert_path: &Path) -> bool {
     // Try to read and parse the certificate
     match fs::read(cert_path).await {
         Ok(cert_data) => {
@@ -486,7 +483,7 @@ pub async fn is_certificate_valid(cert_path: &Path, key_path: &Path) -> bool {
                     if !rem.is_empty() {
                         warn!("Extra data after certificate");
                     }
-                    if pem.label != String::from("CERTIFICATE") {
+                    if pem.label != "CERTIFICATE" {
                         warn!("Invalid PEM label: {:?}", pem.label);
                     }
                     let res_x509 = parse_x509_certificate(&pem.contents);
@@ -531,6 +528,7 @@ pub async fn is_certificate_valid(cert_path: &Path, key_path: &Path) -> bool {
                     warn!("PEM parsing failed: {:?}", res);
                     false
                 }
+            }
         }
         Err(_) => {
             warn!("Cannot read certificate file at {}", cert_path.display());
@@ -540,43 +538,55 @@ pub async fn is_certificate_valid(cert_path: &Path, key_path: &Path) -> bool {
 }
 
 /// Check if a certificate is about to expire (within the specified days)
-pub async fn is_certificate_expiring(cert_path: &Path, days_threshold: u64) -> Result<bool> {
-    let cert_data = fs::read(cert_path)
-        .await
-        .context("Failed to read certificate file")?;
+pub async fn is_certificate_expiring(cert_path: &Path, days_threshold: u64) -> bool {
+    match fs::read(cert_path).await {
+        Ok(cert_data) => {
+            // Parse the certificate using x509-parser
+            let res = parse_x509_pem(&cert_data);
+            match res {
+                Ok((rem, pem)) => {
+                    if !rem.is_empty() {
+                        warn!("Extra data after certificate");
+                    }
+                    if pem.label != "CERTIFICATE" {
+                        warn!("Invalid PEM label: {:?}", pem.label);
+                    }
+                    let res_x509 = parse_x509_certificate(&pem.contents);
+                    match res_x509 {
+                        Ok((_, parsed_cert)) => {
+                            // Get current time as seconds since Unix epoch
+                            let now = SystemTime::now()
+                                .duration_since(SystemTime::UNIX_EPOCH)
+                                .expect("Failed to get current time")
+                                .as_secs();
 
-    let certs = rustls_pemfile::certs(&mut cert_data.as_slice())
-        .collect::<Result<Vec<_>, _>>()
-        .context("Failed to parse certificate")?;
+                            // Get certificate expiration time
+                            let not_after =
+                                parsed_cert.tbs_certificate.validity.not_after.timestamp() as u64;
 
-    if certs.is_empty() {
-        return Err(eyre::eyre!("No certificates found in file"));
+                            // Calculate threshold time (current time + days_threshold)
+                            let threshold_time = now + (days_threshold * 24 * 60 * 60);
+
+                            // Certificate is expiring if the expiration time is before our threshold
+                            not_after <= threshold_time
+                        }
+                        Err(e) => {
+                            warn!("Failed to parse X.509 certificate: {:?}", e);
+                            false
+                        }
+                    }
+                }
+                Err(e) => {
+                    warn!("Failed to parse PEM certificate: {:?}", e);
+                    false
+                }
+            }
+        }
+        Err(_) => {
+            warn!("Cannot read certificate file at {}", cert_path.display());
+            false
+        }
     }
-
-    // Parse the first certificate to check expiration
-    let _cert = &certs[0];
-
-    // Use x509-parser to parse the certificate and check expiration
-    // For now, we'll use a simple heuristic based on file modification time
-    // In a real implementation, you should parse the certificate properly
-    let metadata = fs::metadata(cert_path)
-        .await
-        .context("Failed to get certificate metadata")?;
-
-    let modified = metadata
-        .modified()
-        .context("Failed to get certificate modification time")?;
-
-    let now = SystemTime::now();
-    let age = now
-        .duration_since(modified)
-        .unwrap_or(Duration::from_secs(0));
-
-    // Assume certificates are valid for 90 days (Let's Encrypt default)
-    let cert_lifetime = Duration::from_secs(90 * 24 * 60 * 60);
-    let threshold = Duration::from_secs(days_threshold * 24 * 60 * 60);
-
-    Ok(age + threshold >= cert_lifetime)
 }
 
 /// Start the certificate renewal background task
@@ -593,7 +603,7 @@ pub async fn start_certificate_renewal_task(
             interval.tick().await;
 
             match is_certificate_expiring(&cert_path, 3).await {
-                Ok(true) => {
+                true => {
                     info!(
                         "Certificate for {} is expiring soon, attempting renewal",
                         hostname
@@ -608,14 +618,8 @@ pub async fn start_certificate_renewal_task(
                         }
                     }
                 }
-                Ok(false) => {
-                    info!("{} certificate check: still valid", hostname);
-                }
-                Err(e) => {
-                    warn!(
-                        "Failed to check certificate expiration for {}: {}",
-                        hostname, e
-                    );
+                false => {
+                    warn!("Failed to check certificate expiration for {hostname}");
                 }
             }
         }

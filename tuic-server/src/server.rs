@@ -1,5 +1,4 @@
 use std::{
-    fs,
     net::{SocketAddr, UdpSocket as StdUdpSocket},
     sync::Arc,
     time::Duration,
@@ -7,26 +6,26 @@ use std::{
 
 use eyre::Context;
 use quinn::{
-    Endpoint, EndpointConfig, IdleTimeout, ServerConfig, TokioRuntime, TransportConfig, VarInt,
-    congestion::{BbrConfig, CubicConfig, NewRenoConfig},
-    crypto::rustls::QuicServerConfig,
+    congestion::{BbrConfig, CubicConfig, NewRenoConfig}, crypto::rustls::QuicServerConfig, Endpoint, EndpointConfig, IdleTimeout, ServerConfig, TokioRuntime,
+    TransportConfig,
+    VarInt,
 };
 use rustls::{
-    ServerConfig as RustlsServerConfig,
     pki_types::{CertificateDer, PrivateKeyDer, PrivatePkcs8KeyDer},
+    ServerConfig as RustlsServerConfig,
 };
 use socket2::{Domain, Protocol, SockAddr, Socket, Type};
 use tracing::{debug, info, warn};
 
 use crate::{
-    AppContext,
     connection::{Connection, INIT_CONCURRENT_STREAMS},
     error::Error,
     tls::{
-        CertResolver, is_certificate_valid, is_valid_domain, provision_acme_certificate,
-        start_certificate_renewal_task,
+        is_certificate_valid, is_valid_domain, provision_acme_certificate, start_certificate_renewal_task,
+        CertResolver,
     },
     utils::CongestionController,
+    AppContext,
 };
 
 pub struct Server {
@@ -55,7 +54,7 @@ impl Server {
                     .as_ref()
                     .and_then(|path| get_config_dir(path))
                     .unwrap_or_else(|| std::path::PathBuf::from("."));
-                base_dir.join(format!("{}.cer.pem", hostname))
+                base_dir.join(format!("{hostname}.cer.pem"))
             } else {
                 ctx.cfg.tls.certificate.clone()
             };
@@ -66,12 +65,12 @@ impl Server {
                     .as_ref()
                     .and_then(|path| get_config_dir(path))
                     .unwrap_or_else(|| std::path::PathBuf::from("."));
-                base_dir.join(format!("{}.key.pem", hostname))
+                base_dir.join(format!("{hostname}.key.pem"))
             } else {
                 ctx.cfg.tls.private_key.clone()
             };
 
-            if is_certificate_valid(&cert_path, &key_path).await {
+            if is_certificate_valid(&cert_path).await {
                 info!(
                     "Existing ACME certificate is valid, using it instead of provisioning new one"
                 );
@@ -135,7 +134,9 @@ impl Server {
                         if let Err(e) = tokio::fs::write(&cert_path, cert_pem).await {
                             warn!("Failed to write certificate to disk: {}", e);
                         }
-                        if let Err(e) = tokio::fs::write(&key_path, cert.key_pair.serialize_pem()).await {
+                        if let Err(e) =
+                            tokio::fs::write(&key_path, cert.key_pair.serialize_pem()).await
+                        {
                             warn!("Failed to write key to disk: {}", e);
                         }
                         crypto = RustlsServerConfig::builder_with_protocol_versions(&[
