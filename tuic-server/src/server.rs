@@ -132,10 +132,12 @@ impl Server {
                         let cert_pem = cert.cert.pem();
                         let cert_der = CertificateDer::from(cert.cert);
                         let priv_key = PrivatePkcs8KeyDer::from(cert.key_pair.serialize_der());
-                        fs::write(cert_path, cert_pem)
-                            .unwrap_or_else(|_| warn!("Failed to write certificate to disk"));
-                        fs::write(key_path, cert.key_pair.serialize_pem())
-                            .unwrap_or_else(|_| warn!("Failed to write key to disk"));
+                        if let Err(e) = tokio::fs::write(&cert_path, cert_pem).await {
+                            warn!("Failed to write certificate to disk: {}", e);
+                        }
+                        if let Err(e) = tokio::fs::write(&key_path, cert.key_pair.serialize_pem()).await {
+                            warn!("Failed to write key to disk: {}", e);
+                        }
                         crypto = RustlsServerConfig::builder_with_protocol_versions(&[
                             &rustls::version::TLS13,
                         ])
