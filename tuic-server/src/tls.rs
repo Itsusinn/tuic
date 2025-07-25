@@ -9,7 +9,7 @@ use std::{
 
 use arc_swap::ArcSwap;
 use axum::{Router, extract::Path as AxumPath, http::StatusCode, routing::get};
-use eyre::{Context, Result, eyre};
+use eyre::{Context, Result};
 use instant_acme::{
     Account, AuthorizationStatus, ChallengeType, Identifier, LetsEncrypt, NewAccount, NewOrder,
     OrderStatus, RetryPolicy,

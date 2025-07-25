@@ -13,8 +13,8 @@ repository.workspace = true
 
 [features]
 default = ["aws-lc-rs"]
-ring = ["rustls/ring", "rcgen/ring", "quinn/rustls-ring", ]
-aws-lc-rs = ["rustls/aws-lc-rs", "rcgen/aws_lc_rs", "quinn/rustls-aws-lc-rs"]
+ring = ["rustls/ring", "rcgen/ring", "quinn/rustls-ring", "instant-acme/ring"]
+aws-lc-rs = ["rustls/aws-lc-rs", "rcgen/aws_lc_rs", "quinn/rustls-aws-lc-rs", "instant-acme/aws-lc-rs"]
 jemallocator = ["tikv-jemallocator"]
 
 [dependencies]
@@ -42,7 +42,7 @@ tokio = { version = "1", default-features = false, features = ["io-util", "macro
 rustls = { version = "0.23", default-features = false }
 rustls-pemfile = { version = "2", default-features = false, features = ["std"]}
 rcgen = { version = "0.13", default-features = false, features = ["crypto", "pem"] }
-instant-acme = "0.8.2"
+instant-acme = { version = "0.8", default-features = false, features = ["hyper-rustls"] }
 x509-parser = "0.17"
 rustls-native-certs = { version = "0.8", default-features = false }
 
