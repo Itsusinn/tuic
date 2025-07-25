@@ -44,7 +44,6 @@ rustls-pemfile = { version = "2", default-features = false, features = ["std"]}
 rcgen = { version = "0.13", default-features = false, features = ["crypto", "pem"] }
 instant-acme = { version = "0.8", default-features = false, features = ["hyper-rustls"] }
 x509-parser = "0.17"
-rustls-native-certs = { version = "0.8", default-features = false }
 
 # Serde
 bytes = { version = "1", default-features = false, features = ["std"] }

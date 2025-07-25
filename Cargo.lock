@@ -2483,7 +2483,6 @@ dependencies = [
  "rcgen 0.13.2",
  "register-count",
  "rustls",
- "rustls-native-certs",
  "rustls-pemfile",
  "serde",
  "serde_json",
