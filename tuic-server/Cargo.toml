@@ -72,4 +72,4 @@ tikv-jemallocator = { version = "0.6", optional = true }
 [dev-dependencies]
 tempfile = "3.10"
 tokio = { version = "1", features = ["full", "test-util"] }
-x509-parser = "0.15"
+x509-parser = "0.17"
