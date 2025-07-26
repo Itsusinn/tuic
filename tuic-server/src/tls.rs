@@ -540,8 +540,8 @@ pub async fn is_certificate_valid(cert_path: &Path) -> bool {
 /// Check if a certificate is about to expire (within the specified days)
 pub async fn is_certificate_expiring(cert_path: &Path, days_threshold: u64) -> Result<bool> {
     let cert_data = fs::read(cert_path)
-            .await
-            .context("Failed to read certificate file")?;
+        .await
+        .context("Failed to read certificate file")?;
 
     // Parse the certificate using x509-parser
     let res = parse_x509_pem(&cert_data);
@@ -558,12 +558,13 @@ pub async fn is_certificate_expiring(cert_path: &Path, days_threshold: u64) -> R
                 Ok((_, parsed_cert)) => {
                     // Get current time as seconds since Unix epoch
                     let now = SystemTime::now()
-                            .duration_since(SystemTime::UNIX_EPOCH)
-                            .context("Failed to get current time")?
-                            .as_secs();
+                        .duration_since(SystemTime::UNIX_EPOCH)
+                        .context("Failed to get current time")?
+                        .as_secs();
 
                     // Get certificate expiration time
-                    let not_after = parsed_cert.tbs_certificate.validity.not_after.timestamp() as u64;
+                    let not_after =
+                        parsed_cert.tbs_certificate.validity.not_after.timestamp() as u64;
 
                     // Calculate threshold time (current time + days_threshold)
                     let threshold_time = now + (days_threshold * 24 * 60 * 60);
@@ -571,14 +572,10 @@ pub async fn is_certificate_expiring(cert_path: &Path, days_threshold: u64) -> R
                     // Certificate is expiring if the expiration time is before our threshold
                     Ok(not_after <= threshold_time)
                 }
-                Err(e) => {
-                    Err(eyre::eyre!("Failed to parse X.509 certificate: {:?}", e))
-                }
+                Err(e) => Err(eyre::eyre!("Failed to parse X.509 certificate: {:?}", e)),
             }
         }
-        Err(e) => {
-            Err(eyre::eyre!("Failed to parse PEM certificate: {:?}", e))
-        }
+        Err(e) => Err(eyre::eyre!("Failed to parse PEM certificate: {:?}", e)),
     }
 }
 

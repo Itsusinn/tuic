@@ -6,26 +6,26 @@ use std::{
 
 use eyre::Context;
 use quinn::{
-    congestion::{BbrConfig, CubicConfig, NewRenoConfig}, crypto::rustls::QuicServerConfig, Endpoint, EndpointConfig, IdleTimeout, ServerConfig, TokioRuntime,
-    TransportConfig,
-    VarInt,
+    Endpoint, EndpointConfig, IdleTimeout, ServerConfig, TokioRuntime, TransportConfig, VarInt,
+    congestion::{BbrConfig, CubicConfig, NewRenoConfig},
+    crypto::rustls::QuicServerConfig,
 };
 use rustls::{
-    pki_types::{CertificateDer, PrivateKeyDer, PrivatePkcs8KeyDer},
     ServerConfig as RustlsServerConfig,
+    pki_types::{CertificateDer, PrivateKeyDer, PrivatePkcs8KeyDer},
 };
 use socket2::{Domain, Protocol, SockAddr, Socket, Type};
 use tracing::{debug, info, warn};
 
 use crate::{
+    AppContext,
     connection::{Connection, INIT_CONCURRENT_STREAMS},
     error::Error,
     tls::{
-        is_certificate_valid, is_valid_domain, provision_acme_certificate, start_certificate_renewal_task,
-        CertResolver,
+        CertResolver, is_certificate_valid, is_valid_domain, provision_acme_certificate,
+        start_certificate_renewal_task,
     },
     utils::CongestionController,
-    AppContext,
 };
 
 pub struct Server {
