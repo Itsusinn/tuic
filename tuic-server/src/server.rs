@@ -33,11 +33,6 @@ pub struct Server {
     ctx: Arc<AppContext>,
 }
 
-/// Returns the directory of the configuration file provided as `config_path`
-fn get_config_dir(config_path: &std::path::Path) -> Option<std::path::PathBuf> {
-    config_path.parent().map(|dir| dir.to_path_buf())
-}
-
 impl Server {
     pub async fn init(ctx: Arc<AppContext>) -> Result<Self, Error> {
         let mut crypto: RustlsServerConfig;
@@ -49,22 +44,14 @@ impl Server {
             );
             // Determine certificate and key paths
             let cert_path = if ctx.cfg.tls.certificate.as_os_str().is_empty() {
-                let base_dir = ctx
-                    .config_path
-                    .as_ref()
-                    .and_then(|path| get_config_dir(path))
-                    .unwrap_or_else(|| std::path::PathBuf::from("."));
+                let base_dir = ctx.cfg.data_dir.clone();
                 base_dir.join(format!("{hostname}.cer.pem"))
             } else {
                 ctx.cfg.tls.certificate.clone()
             };
 
             let key_path = if ctx.cfg.tls.private_key.as_os_str().is_empty() {
-                let base_dir = ctx
-                    .config_path
-                    .as_ref()
-                    .and_then(|path| get_config_dir(path))
-                    .unwrap_or_else(|| std::path::PathBuf::from("."));
+                let base_dir = ctx.cfg.data_dir.clone();
                 base_dir.join(format!("{hostname}.key.pem"))
             } else {
                 ctx.cfg.tls.private_key.clone()

@@ -25,8 +25,8 @@ pub struct Config {
     pub users: HashMap<Uuid, String>,
     pub tls: TlsConfig,
 
-    #[educe(Default = "./data.toml")]
-    pub persistent_data: PathBuf,
+    #[educe(Default = "")]
+    pub data_dir: PathBuf,
 
     #[educe(Default = None)]
     pub restful: Option<RestfulConfig>,
@@ -219,7 +219,7 @@ impl From<LogLevel> for LevelFilter {
     }
 }
 
-pub async fn parse_config(args: ArgsOs) -> Result<(Config, Option<PathBuf>), ConfigError> {
+pub async fn parse_config(args: ArgsOs) -> Result<Config, ConfigError> {
     let mut parser = Parser::from_iter(args);
     let mut path = None;
 
@@ -254,9 +254,10 @@ pub async fn parse_config(args: ArgsOs) -> Result<(Config, Option<PathBuf>), Con
     }
     let path_buf = path.unwrap();
     let path = path_buf.to_string_lossy().to_string();
-    let config = if path.ends_with(".toml") || std::env::var("TUIC_FORCE_TOML").is_ok() {
+    let mut config: Config = if path.ends_with(".toml") || std::env::var("TUIC_FORCE_TOML").is_ok()
+    {
         Figment::from(Serialized::defaults(Config::default()))
-            .merge(Toml::file(path))
+            .merge(Toml::file(&path))
             .extract()
             .unwrap()
     } else {
@@ -264,5 +265,11 @@ pub async fn parse_config(args: ArgsOs) -> Result<(Config, Option<PathBuf>), Con
         let config: OldConfig = serde_json::from_slice(&config_text)?;
         config.into()
     };
-    Ok((config, Some(path_buf.into())))
+
+    if config.data_dir.to_str() == Some("") {
+        config.data_dir = PathBuf::from(&path);
+    } else {
+        tokio::fs::create_dir_all(&config.data_dir).await?;
+    };
+    Ok(config)
 }
