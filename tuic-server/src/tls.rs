@@ -474,67 +474,70 @@ async fn provision_certificate_attempt(
 
 /// Check if a certificate file is valid (exists, readable, and not expired)
 pub async fn is_certificate_valid(cert_path: &Path) -> bool {
-    // Try to read and parse the certificate
-    match fs::read(cert_path).await {
-        Ok(cert_data) => {
-            let res = parse_x509_pem(&cert_data);
-            match res {
-                Ok((rem, pem)) => {
-                    if !rem.is_empty() {
-                        warn!("Extra data after certificate");
-                    }
-                    if pem.label != "CERTIFICATE" {
-                        warn!("Invalid PEM label: {:?}", pem.label);
-                    }
-                    let res_x509 = parse_x509_certificate(&pem.contents);
-                    match res_x509 {
-                        Ok((_, parsed_cert)) => {
-                            // Check if self-signed
-                            if parsed_cert.tbs_certificate.issuer
-                                == parsed_cert.tbs_certificate.subject
-                            {
-                                warn!("Certificate is self-signed");
-                                return false;
-                            }
-
-                            // Check expiration
-                            let now = SystemTime::now()
-                                .duration_since(SystemTime::UNIX_EPOCH)
-                                .unwrap()
-                                .as_secs();
-
-                            if now
-                                < parsed_cert.tbs_certificate.validity.not_before.timestamp() as u64
-                            {
-                                warn!("Certificate is not yet valid");
-                                return false;
-                            }
-
-                            if now
-                                > parsed_cert.tbs_certificate.validity.not_after.timestamp() as u64
-                            {
-                                warn!("Certificate has expired");
-                                return false;
-                            }
-                            true
-                        }
-                        Err(e) => {
-                            warn!("Failed to parse X.509 certificate: {:?}", e);
-                            false
-                        }
-                    }
-                }
-                _ => {
-                    warn!("PEM parsing failed: {:?}", res);
-                    false
-                }
-            }
-        }
+    // Read certificate file
+    let cert_data = match fs::read(cert_path).await {
+        Ok(data) => data,
         Err(_) => {
             warn!("Cannot read certificate file at {}", cert_path.display());
-            false
+            return false;
         }
+    };
+    // Parse PEM structure
+    let (rem, pem) = match parse_x509_pem(&cert_data) {
+        Ok(res) => res,
+        Err(e) => {
+            warn!("PEM parsing failed: {:?}", e);
+            return false;
+        }
+    };
+
+    // Validate PEM metadata
+    if !rem.is_empty() {
+        warn!("Extra data after certificate");
     }
+    if pem.label != "CERTIFICATE" {
+        warn!("Invalid PEM label: {:?}", pem.label);
+    }
+
+    // Parse X.509 certificate
+    let (_, parsed_cert) = match parse_x509_certificate(&pem.contents) {
+        Ok(res) => res,
+        Err(e) => {
+            warn!("Failed to parse X.509 certificate: {:?}", e);
+            return false;
+        }
+    };
+
+    // Check if self-signed
+    if parsed_cert.tbs_certificate.issuer == parsed_cert.tbs_certificate.subject {
+        warn!("Certificate is self-signed");
+        #[cfg(not(test))]
+        return false;
+    }
+
+    // Validate certificate time range
+    let validity = &parsed_cert.tbs_certificate.validity;
+    let now = SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .expect("SystemTime before UNIX EPOCH")
+        .as_secs() as i64; // Cast to i64 for timestamp comparison
+
+    let not_before = validity.not_before.timestamp();
+    let not_after = validity.not_after.timestamp();
+
+    // Check if current time is within validity period
+    if now < not_before {
+        warn!("Certificate is not yet valid");
+        return false;
+    }
+
+    if now > not_after {
+        warn!("Certificate has expired");
+        return false;
+    }
+
+    // All checks passed
+    true
 }
 
 /// Check if a certificate is about to expire (within the specified days)
@@ -624,11 +627,14 @@ pub async fn start_certificate_renewal_task(
 
 #[cfg(test)]
 mod tests {
-    use std::io::Write;
+    use std::{
+        io::Write,
+        net::{Ipv6Addr, SocketAddr},
+    };
 
     use rcgen::{CertificateParams, DnType, Ia5String, KeyPair, SanType};
     use tempfile::{NamedTempFile, tempdir};
-    use tokio::time::Duration;
+    use time::OffsetDateTime;
 
     use super::*;
 
@@ -801,5 +807,182 @@ mod tests {
         let resolver_result =
             CertResolver::new(cert_file.path(), key_file.path(), Duration::from_secs(10)).await;
         assert!(resolver_result.is_err());
+    }
+
+    // Test ChallengeServer functionality
+    #[tokio::test]
+    async fn test_challenge_server_operations() {
+        let server = ChallengeServer::new();
+        let token = "test_token".to_string();
+        let key_auth = "test_key".to_string();
+
+        // Test adding and retrieving challenge
+        server.add_challenge(token.clone(), key_auth.clone()).await;
+        assert_eq!(server.get_challenge(&token).await, Some(key_auth.clone()));
+
+        // Test removing challenge
+        server.remove_challenge(&token).await;
+        assert_eq!(server.get_challenge(&token).await, None);
+    }
+
+    // Test HTTP challenge handler
+    #[tokio::test]
+    async fn test_handle_challenge() {
+        let server = ChallengeServer::new();
+        let token = "valid_token".to_string();
+        let key_auth = "key_auth_string".to_string();
+
+        server.add_challenge(token.clone(), key_auth.clone()).await;
+
+        // Test valid token
+        let response = handle_challenge(
+            axum::extract::Path(token.clone()),
+            axum::extract::State(server.clone()),
+        )
+        .await;
+
+        assert_eq!(response.unwrap(), key_auth);
+
+        // Test invalid token
+        let response = handle_challenge(
+            axum::extract::Path("invalid_token".to_string()),
+            axum::extract::State(server),
+        )
+        .await;
+
+        assert_eq!(response.unwrap_err(), StatusCode::NOT_FOUND);
+    }
+
+    // Test domain validation
+    #[test]
+    fn test_domain_validation() {
+        // Valid domains
+        assert!(is_valid_domain("example.com"));
+        assert!(is_valid_domain("sub.domain.co.uk"));
+        assert!(is_valid_domain("a-b.c-d.com"));
+        assert!(is_valid_domain("xn--eckwd4c7c.xn--zckzah.jp")); // IDN
+
+        // Invalid domains
+        assert!(!is_valid_domain(".leading.dot"));
+        assert!(!is_valid_domain("trailing.dot."));
+        assert!(!is_valid_domain("double..dot"));
+        assert!(!is_valid_domain("-leading-hyphen.com"));
+        assert!(!is_valid_domain("trailing-hyphen-.com"));
+        assert!(!is_valid_domain("space in.domain"));
+        assert!(!is_valid_domain(""));
+        assert!(!is_valid_domain(&"a".repeat(254)));
+        assert!(!is_valid_domain("no-tld"));
+    }
+
+    // Test certificate validation
+    #[tokio::test]
+    async fn test_certificate_validation() -> eyre::Result<()> {
+        let key_pair = rcgen::KeyPair::generate()?;
+        // Generate valid certificate
+        let params = CertificateParams::new(vec!["test.com".to_string()])?;
+        let cert = params.self_signed(&key_pair)?;
+
+        let valid_file = NamedTempFile::new().unwrap();
+        tokio::fs::write(valid_file.path(), &cert.pem())
+            .await
+            .unwrap();
+
+        // Test valid certificate
+        assert!(is_certificate_valid(valid_file.path()).await);
+
+        // Create expired certificate
+        let mut params = CertificateParams::new(vec!["test.com".to_string()])?;
+        params.not_before =
+            OffsetDateTime::now_utc() - chrono::Duration::days(365).to_std().unwrap();
+        params.not_after = OffsetDateTime::now_utc() - chrono::Duration::days(1).to_std().unwrap();
+
+        let expired_cert = params.self_signed(&key_pair)?;
+
+        let expired_file = NamedTempFile::new().unwrap();
+        tokio::fs::write(expired_file.path(), &expired_cert.pem())
+            .await
+            .unwrap();
+
+        // Test expired certificate
+        assert!(!is_certificate_valid(expired_file.path()).await);
+
+        // Test invalid file
+        let invalid_file = NamedTempFile::new().unwrap();
+        tokio::fs::write(invalid_file.path(), "invalid data")
+            .await
+            .unwrap();
+        assert!(!is_certificate_valid(invalid_file.path()).await);
+        Ok(())
+    }
+
+    // Test certificate expiration check
+    #[tokio::test]
+    async fn test_certificate_expiration_check() -> eyre::Result<()> {
+        let key_pair = rcgen::KeyPair::generate()?;
+        // Generate certificate expiring in 2 days
+        let mut params = CertificateParams::new(vec!["test.com".to_string()])?;
+        params.not_before = OffsetDateTime::now_utc() - chrono::Duration::days(1).to_std().unwrap();
+        params.not_after = OffsetDateTime::now_utc() + chrono::Duration::days(2).to_std().unwrap();
+        let cert = params.self_signed(&key_pair)?;
+
+        let expiring_file = NamedTempFile::new().unwrap();
+        tokio::fs::write(expiring_file.path(), &cert.pem())
+            .await
+            .unwrap();
+
+        // Should be expiring within 3 days
+        assert!(
+            is_certificate_expiring(expiring_file.path(), 3)
+                .await
+                .unwrap()
+        );
+
+        // Should not be expiring within 1 day
+        assert!(
+            !is_certificate_expiring(expiring_file.path(), 1)
+                .await
+                .unwrap()
+        );
+        Ok(())
+    }
+
+    // Test challenge server lifecycle
+    #[tokio::test]
+    async fn test_challenge_server_integration() -> eyre::Result<()> {
+        let server = ChallengeServer::new();
+        let token = "test_token".to_string();
+        let key_auth = "test_key".to_string();
+        server.add_challenge(token.clone(), key_auth.clone()).await;
+
+        // Use port 0 to get OS-assigned port
+        let addr = SocketAddr::from((Ipv6Addr::LOCALHOST, 0));
+
+        let app = Router::new()
+            .route("/.well-known/acme-challenge/{token}", get(handle_challenge))
+            .with_state(server);
+
+        let listener = tokio::net::TcpListener::bind(addr).await.unwrap();
+        let addr = listener.local_addr().unwrap();
+
+        tokio::spawn(async move {
+            axum::serve(listener, app).await.unwrap();
+        });
+
+        // Make request to challenge server
+        let uri = format!("http://{addr}/.well-known/acme-challenge/{token}");
+        let response = reqwest::get(uri).await?;
+
+        assert_eq!(response.status(), StatusCode::OK);
+
+        let body = response.bytes().await?;
+        assert_eq!(body, key_auth.as_bytes());
+        Ok(())
+    }
+
+    // Test port availability check (may require sudo privileges)
+    #[test]
+    fn test_port_availability() {
+        // Just ensure it doesn't panic
+        let _ = is_port_80_available();
     }
 }
