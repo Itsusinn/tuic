@@ -70,7 +70,7 @@ axum-extra = { version = "0.10", features = ["typed-header"] }
 tikv-jemallocator = { version = "0.6", optional = true }
 
 [dev-dependencies]
-reqwest = { version = "0.12" }
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"]}
 tempfile = "3"
 tokio = { version = "1", features = ["full", "test-util"] }
 x509-parser = "0.17"
