@@ -25,8 +25,8 @@ pub struct Config {
     pub users: HashMap<Uuid, String>,
     pub tls: TlsConfig,
 
-    #[educe(Default = "./data.toml")]
-    pub persistent_data: PathBuf,
+    #[educe(Default = "")]
+    pub data_dir: PathBuf,
 
     #[educe(Default = None)]
     pub restful: Option<RestfulConfig>,
@@ -75,6 +75,10 @@ pub struct TlsConfig {
     pub private_key: PathBuf,
     #[educe(Default(expression = Vec::new()))]
     pub alpn: Vec<String>,
+    #[educe(Default(expression = "localhost"))]
+    pub hostname: String,
+    #[educe(Default(expression = false))]
+    pub auto_ssl: bool,
 }
 
 #[derive(Deserialize, Serialize, Educe)]
@@ -151,6 +155,8 @@ impl From<OldConfig> for Config {
                 certificate: value.certificate,
                 private_key: value.private_key,
                 alpn: value.alpn,
+                auto_ssl: value.auto_ssl,
+                hostname: value.hostname,
             },
             udp_relay_ipv6: value.udp_relay_ipv6,
             zero_rtt_handshake: value.zero_rtt_handshake,
@@ -246,16 +252,24 @@ pub async fn parse_config(args: ArgsOs) -> Result<Config, ConfigError> {
     if path.is_none() {
         return Err(ConfigError::NoConfig);
     }
-    let path = path.unwrap().to_string_lossy().to_string();
-    let config = if path.ends_with(".toml") || std::env::var("TUIC_FORCE_TOML").is_ok() {
+    let path_buf = path.unwrap();
+    let path = path_buf.to_string_lossy().to_string();
+    let mut config: Config = if path.ends_with(".toml") || std::env::var("TUIC_FORCE_TOML").is_ok()
+    {
         Figment::from(Serialized::defaults(Config::default()))
-            .merge(Toml::file(path))
+            .merge(Toml::file(&path))
             .extract()
             .unwrap()
     } else {
         let config_text = tokio::fs::read(&path).await?;
         let config: OldConfig = serde_json::from_slice(&config_text)?;
         config.into()
+    };
+
+    if config.data_dir.to_str() == Some("") {
+        config.data_dir = PathBuf::from(&path);
+    } else {
+        tokio::fs::create_dir_all(&config.data_dir).await?;
     };
     Ok(config)
 }

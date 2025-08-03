@@ -136,6 +136,16 @@ private_key = "" # Default: ""
 # Application layer protocol negotiation
 alpn = ["h3"] # Default: empty
 
+# Enable automatic SSL certificate provision
+# If enabled, will ignore `self_sign`, if failed, will fallback to self-sign
+# If both certificate and private_key are set, will be the path to save certificate and key
+# Note ACME HTTP-01 challenge requires listen on :80,
+# to allow non-root processes to bind to privileged ports on Linux, run:
+# setcap CAP_NET_BIND_SERVICE=+eip <path to tuic-server binary>
+auto_ssl = true # Default: false
+# Hostname used for automatic SSL certificate provision / self-sign
+hostname = "example.org" # Default: "localhost"
+
 # See `RESTful API` section below in README.
 # If you want disable RESTful function, remove entire `restful` section.
 [restful] # Default: empty
