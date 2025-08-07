@@ -1,9 +1,4 @@
-use std::{
-    collections::HashMap,
-    net::SocketAddr,
-    path::PathBuf,
-    time::Duration,
-};
+use std::{collections::HashMap, net::SocketAddr, path::PathBuf, time::Duration};
 
 use educe::Educe;
 use figment::{
@@ -453,11 +448,15 @@ mod tests {
 
         assert_eq!(
             result.tls.certificate,
-            current_dir.join("__test__relative_path").join("certs/server.crt")
+            current_dir
+                .join("__test__relative_path")
+                .join("certs/server.crt")
         );
         assert_eq!(
             result.tls.private_key,
-            current_dir.join("__test__relative_path").join("certs/server.key")
+            current_dir
+                .join("__test__relative_path")
+                .join("certs/server.key")
         );
     }
 
