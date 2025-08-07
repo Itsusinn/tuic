@@ -21,7 +21,7 @@ impl Display for UdpRelayMode {
     }
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Debug, PartialEq)]
 #[serde(rename_all = "lowercase")]
 #[derive(Educe)]
 #[educe(Default)]

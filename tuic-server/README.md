@@ -118,6 +118,9 @@ max_external_packet_size = 1500
 # How long should server perserve TCP and UDP I/O tasks.
 stream_timeout = "10s" # Default: "10s"
 
+# Working Directory of tuic
+data_dir = "" # Default: `CWD`
+
 # User list, contains user UUID and password
 [users] # Default: empty
 f0e12827-fe60-458c-8269-a05ccb0ff8da = "YOUR_USER_PASSWD_HERE"
@@ -128,10 +131,12 @@ f0e12827-fe60-458c-8269-a05ccb0ff8da = "YOUR_USER_PASSWD_HERE"
 self_sign = true # Default: false
 
 # The path to the certificate file
-certificate = "" # Default: ""
+# Relative path of `data_dir`, if it's relative
+certificate = "/PATH/TO/CERT" # Default: ""
 
 # The path to the private key file
-private_key = "" # Default: ""
+# Relative path of `data_dir`, if it's relative
+private_key = "/PATH/TO/KEY" # Default: ""
 
 # Application layer protocol negotiation
 alpn = ["h3"] # Default: empty
@@ -192,7 +197,9 @@ controller = "bbr" # Default: "bbr"
 initial_window = 1048576 # Default: 1048576
 ```
 ## Notes
-To automatically get TLS cert and key, recommend use [acme.sh](https://github.com/acmesh-official/acme.sh)
+
+TLS cert and key is NECESSARY, to automatically get them, recommend use [acme.sh](https://github.com/acmesh-official/acme.sh)
+
 ```sh
 acme.sh --issue -d www.yourdomain.org --standalone
 acme.sh --install-cert -d www.yourdomain.org \

@@ -1,4 +1,4 @@
-use std::{env, process, sync::Arc};
+use std::{process, sync::Arc};
 
 use config::{Config, parse_config};
 use tracing::level_filters::LevelFilter;
@@ -29,7 +29,7 @@ struct AppContext {
 
 #[tokio::main]
 async fn main() -> eyre::Result<()> {
-    let cfg = match parse_config(env::args_os()).await {
+    let cfg = match parse_config(lexopt::Parser::from_env()).await {
         Ok(cfg) => cfg,
         Err(ConfigError::Version(msg) | ConfigError::Help(msg)) => {
             println!("{msg}");

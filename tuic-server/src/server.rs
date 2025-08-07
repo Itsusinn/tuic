@@ -37,25 +37,14 @@ impl Server {
     pub async fn init(ctx: Arc<AppContext>) -> Result<Self, Error> {
         let mut crypto: RustlsServerConfig;
         let hostname = ctx.cfg.tls.hostname.clone();
+
         if ctx.cfg.tls.auto_ssl && is_valid_domain(hostname.as_str()) {
             warn!(
                 "Attempting automatic SSL certificate provisioning for domain: {}",
                 hostname
             );
-            // Determine certificate and key paths
-            let cert_path = if ctx.cfg.tls.certificate.as_os_str().is_empty() {
-                let base_dir = ctx.cfg.data_dir.clone();
-                base_dir.join(format!("{hostname}.cer.pem"))
-            } else {
-                ctx.cfg.tls.certificate.clone()
-            };
-
-            let key_path = if ctx.cfg.tls.private_key.as_os_str().is_empty() {
-                let base_dir = ctx.cfg.data_dir.clone();
-                base_dir.join(format!("{hostname}.key.pem"))
-            } else {
-                ctx.cfg.tls.private_key.clone()
-            };
+            let cert_path = ctx.cfg.tls.certificate.clone();
+            let key_path = ctx.cfg.tls.private_key.clone();
 
             if is_certificate_valid(&cert_path).await {
                 info!(
@@ -64,7 +53,7 @@ impl Server {
 
                 // Use existing valid ACME certificate
                 let cert_resolver =
-                    CertResolver::new(&cert_path, &key_path, Duration::from_secs(10)).await?;
+                    CertResolver::new(&cert_path, &key_path, Duration::from_secs(30)).await?;
 
                 crypto =
                     RustlsServerConfig::builder_with_protocol_versions(&[&rustls::version::TLS13])
@@ -97,7 +86,7 @@ impl Server {
 
                         // Use the provisioned certificate
                         let cert_resolver =
-                            CertResolver::new(&cert_path, &key_path, Duration::from_secs(10))
+                            CertResolver::new(&cert_path, &key_path, Duration::from_secs(30))
                                 .await?;
 
                         crypto = RustlsServerConfig::builder_with_protocol_versions(&[
@@ -146,7 +135,7 @@ impl Server {
             let cert_resolver = CertResolver::new(
                 &ctx.cfg.tls.certificate,
                 &ctx.cfg.tls.private_key,
-                Duration::from_secs(10),
+                Duration::from_secs(30),
             )
             .await?;
 

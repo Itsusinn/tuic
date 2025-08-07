@@ -117,6 +117,8 @@ pub struct OldConfig {
     pub gc_lifetime: Duration,
 
     pub restful_server: Option<SocketAddr>,
+
+    pub data_dir: PathBuf,
 }
 
 mod default {
@@ -242,16 +244,16 @@ where
 
 #[derive(Debug, Error)]
 pub enum ConfigError {
-    #[error(transparent)]
+    #[error("{0}")]
     Argument(#[from] ArgumentError),
-    #[error("no config file specified")]
+    #[error("no config file specified or file doesn't exist")]
     NoConfig,
     #[error("{0}")]
     Version(&'static str),
     #[error("{0}")]
     Help(&'static str),
-    #[error(transparent)]
+    #[error("{0}")]
     Io(#[from] IoError),
-    #[error(transparent)]
+    #[error("{0}")]
     Serde(#[from] SerdeError),
 }
