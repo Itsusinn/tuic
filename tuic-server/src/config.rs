@@ -71,7 +71,9 @@ pub struct Config {
 #[serde(deny_unknown_fields)]
 pub struct TlsConfig {
     pub self_sign: bool,
+    #[educe(Default(expression = PathBuf::from("PATH/TO/CERT")))]
     pub certificate: PathBuf,
+    #[educe(Default(expression = PathBuf::from("PATH/TO/KEY")))]
     pub private_key: PathBuf,
     #[educe(Default(expression = Vec::new()))]
     pub alpn: Vec<String>,

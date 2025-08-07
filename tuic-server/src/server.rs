@@ -117,12 +117,12 @@ impl Server {
                             rcgen::generate_simple_self_signed(vec![hostname.clone()]).unwrap();
                         let cert_pem = cert.cert.pem();
                         let cert_der = CertificateDer::from(cert.cert);
-                        let priv_key = PrivatePkcs8KeyDer::from(cert.key_pair.serialize_der());
+                        let priv_key = PrivatePkcs8KeyDer::from(cert.signing_key.serialize_der());
                         if let Err(e) = tokio::fs::write(&cert_path, cert_pem).await {
                             warn!("Failed to write certificate to disk: {}", e);
                         }
                         if let Err(e) =
-                            tokio::fs::write(&key_path, cert.key_pair.serialize_pem()).await
+                            tokio::fs::write(&key_path, cert.signing_key.serialize_pem()).await
                         {
                             warn!("Failed to write key to disk: {}", e);
                         }
@@ -138,7 +138,7 @@ impl Server {
             let cert =
                 rcgen::generate_simple_self_signed(vec![ctx.cfg.tls.hostname.clone()]).unwrap();
             let cert_der = CertificateDer::from(cert.cert);
-            let priv_key = PrivatePkcs8KeyDer::from(cert.key_pair.serialize_der());
+            let priv_key = PrivatePkcs8KeyDer::from(cert.signing_key.serialize_der());
             crypto = RustlsServerConfig::builder_with_protocol_versions(&[&rustls::version::TLS13])
                 .with_no_client_auth()
                 .with_single_cert(vec![cert_der], PrivateKeyDer::Pkcs8(priv_key))?;

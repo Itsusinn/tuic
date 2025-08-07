@@ -632,7 +632,7 @@ mod tests {
         net::{Ipv6Addr, SocketAddr},
     };
 
-    use rcgen::{CertificateParams, DnType, Ia5String, KeyPair, SanType};
+    use rcgen::{CertificateParams, DnType, KeyPair, SanType, string::Ia5String};
     use tempfile::{NamedTempFile, tempdir};
     use time::OffsetDateTime;
 
