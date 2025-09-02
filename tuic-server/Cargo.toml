@@ -43,7 +43,7 @@ rustls = { version = "0.23", default-features = false }
 rustls-pemfile = { version = "2", default-features = false, features = ["std"]}
 rcgen = { version = "0.14", default-features = false, features = ["crypto", "pem"] }
 instant-acme = { version = "0.8", default-features = false, features = ["hyper-rustls"] }
-x509-parser = "0.17"
+x509-parser = "0.18"
 
 # Serde
 bytes = { version = "1", default-features = false, features = ["std"] }
@@ -73,5 +73,5 @@ tikv-jemallocator = { version = "0.6", optional = true }
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"]}
 tempfile = "3"
 tokio = { version = "1", features = ["full", "test-util"] }
-x509-parser = "0.17"
+x509-parser = "0.18"
 chrono = "0.4"
