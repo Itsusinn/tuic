@@ -51,11 +51,11 @@ pub struct Config {
     pub task_negotiation_timeout: Duration,
 
     #[serde(with = "humantime_serde")]
-    #[educe(Default(expression = Duration::from_millis(3000)))]
+    #[educe(Default(expression = Duration::from_millis(10000)))]
     pub gc_interval: Duration,
 
     #[serde(alias = "gc_lifetime", with = "humantime_serde")]
-    #[educe(Default(expression = Duration::from_millis(15000)))]
+    #[educe(Default(expression = Duration::from_millis(30000)))]
     pub gc_lifetime: Duration,
 
     #[educe(Default = 1500)]
