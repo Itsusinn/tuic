@@ -43,26 +43,26 @@ pub struct Config {
     pub dual_stack: bool,
 
     #[serde(with = "humantime_serde")]
-    #[educe(Default(expression = Duration::from_millis(3000)))]
+    #[educe(Default(expression = Duration::from_secs(3)))]
     pub auth_timeout: Duration,
 
     #[serde(with = "humantime_serde")]
-    #[educe(Default(expression = Duration::from_millis(3000)))]
+    #[educe(Default(expression = Duration::from_secs(3)))]
     pub task_negotiation_timeout: Duration,
 
     #[serde(with = "humantime_serde")]
-    #[educe(Default(expression = Duration::from_millis(10000)))]
+    #[educe(Default(expression = Duration::from_secs(10)))]
     pub gc_interval: Duration,
 
     #[serde(alias = "gc_lifetime", with = "humantime_serde")]
-    #[educe(Default(expression = Duration::from_millis(30000)))]
+    #[educe(Default(expression = Duration::from_secs(30)))]
     pub gc_lifetime: Duration,
 
     #[educe(Default = 1500)]
     pub max_external_packet_size: usize,
 
     #[serde(with = "humantime_serde")]
-    #[educe(Default(expression = Duration::from_millis(60000)))]
+    #[educe(Default(expression = Duration::from_secs(60)))]
     pub stream_timeout: Duration,
 }
 
@@ -106,7 +106,7 @@ pub struct QuicConfig {
     pub receive_window: u32,
 
     #[serde(with = "humantime_serde")]
-    #[educe(Default(expression = Duration::from_millis(10000)))]
+    #[educe(Default(expression = Duration::from_secs(30)))]
     pub max_idle_time: Duration,
 }
 #[derive(Deserialize, Serialize, Educe)]
