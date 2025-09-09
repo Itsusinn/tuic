@@ -210,7 +210,7 @@ async fn run_udp_forwarder(entry: UdpForward) {
 
 async fn expire_after(assoc_id: u16, timeout: Duration) {
     tokio::time::sleep(timeout).await;
-    if let Some(session) = UDP_SESSIONS.get().and_then(|m| Some(m)) {
+    if let Some(session) = UDP_SESSIONS.get() {
         let mut w = session.write().await;
         if let Some(_s) = w.remove(&assoc_id) {
             debug!(
