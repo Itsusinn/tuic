@@ -13,6 +13,7 @@ use crate::{
 mod config;
 mod connection;
 mod error;
+mod forward;
 mod socks5;
 mod utils;
 
@@ -74,6 +75,8 @@ async fn main() -> eyre::Result<()> {
             process::exit(1);
         }
     }
+
+    forward::start(cfg.local.tcp_forward.clone(), cfg.local.udp_forward.clone()).await;
 
     match Socks5Server::set_config(cfg.local) {
         Ok(()) => {}
