@@ -151,7 +151,31 @@ tuic-client -c PATH/TO/CONFIG
 
         // Optional. Maximum packet size the socks5 server can receive from external, in bytes
         // Default: 1500
-        "max_packet_size": 1500
+        "max_packet_size": 1500,
+      
+        // Optional. TCP/UDP Forwarding allows you to forward one or more TCP/UDP ports
+        // from the server (or any remote host) to the client.
+        "tcp_forward": [
+            {
+              // The address to listen on.
+              "listen": "127.0.0.1:6600",
+              // The address to forward to.
+              "remote": "127.0.0.1:6800" 
+            }
+        ],
+        "udp_forward": [
+            {
+              "listen": "127.0.0.1:16600",
+              "remote": "127.0.0.1:16800",
+              // Optional. The timeout for each UDP session. 
+              // Default: 60 seconds
+              "timeout": "60s"
+            },
+            {
+              "listen": "127.0.0.1:44306",
+              "remote": "8.8.8.8:443"
+            }
+        ]
     },
 
     // Optional. Set the log level
