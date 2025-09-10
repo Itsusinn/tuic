@@ -9,7 +9,10 @@ use tuic::Address;
 use tuic_quinn::{Connect, Packet};
 
 use super::Connection;
-use crate::{error::Error, socks5::UDP_SESSIONS as SOCKS5_UDP_SESSIONS, utils::UdpRelayMode};
+use crate::{
+    error::Error, forward::UDP_SESSIONS as FWD_UDP_SESSIONS,
+    socks5::UDP_SESSIONS as SOCKS5_UDP_SESSIONS, utils::UdpRelayMode,
+};
 
 impl Connection {
     pub async fn authenticate(self, zero_rtt_accepted: Option<ZeroRttAccepted>) {
@@ -154,10 +157,27 @@ impl Connection {
                         );
                     }
                 } else {
-                    warn!(
-                        "[relay] [packet] [{assoc_id:#06x}] [from-native] [{pkt_id:#06x}] unable \
-                         to find socks5 associate session"
-                    );
+                    let fwd_session = FWD_UDP_SESSIONS
+                        .get()
+                        .unwrap()
+                        .read()
+                        .await
+                        .get(&assoc_id)
+                        .cloned();
+
+                    if let Some(session) = fwd_session {
+                        if let Err(err) = session.send(pkt).await {
+                            warn!(
+                                "[relay] [packet] [{assoc_id:#06x}] [from-native] [{pkt_id:#06x}] \
+                                 failed sending packet to UDP forwarder client: {err}",
+                            );
+                        }
+                    } else {
+                        warn!(
+                            "[relay] [packet] [{assoc_id:#06x}] [from-native] [{pkt_id:#06x}] \
+                             unable to find UDP session"
+                        );
+                    }
                 }
             }
             Ok(None) => {}

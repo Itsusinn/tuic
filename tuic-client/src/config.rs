@@ -143,6 +143,33 @@ pub struct Local {
 
     #[serde(default = "default::local::max_packet_size")]
     pub max_packet_size: usize,
+
+    #[serde(default)]
+    pub tcp_forward: Vec<TcpForward>,
+
+    #[serde(default)]
+    pub udp_forward: Vec<UdpForward>,
+}
+
+#[derive(Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct TcpForward {
+    pub listen: SocketAddr,
+    #[serde(deserialize_with = "deserialize_server")]
+    pub remote: (String, u16),
+}
+
+#[derive(Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct UdpForward {
+    pub listen: SocketAddr,
+    #[serde(deserialize_with = "deserialize_server")]
+    pub remote: (String, u16),
+    #[serde(
+        default = "default::forward::udp_timeout",
+        deserialize_with = "deserialize_duration"
+    )]
+    pub timeout: Duration,
 }
 
 impl Config {
@@ -266,6 +293,13 @@ mod default {
     pub mod local {
         pub fn max_packet_size() -> usize {
             1500
+        }
+    }
+
+    pub mod forward {
+        use std::time::Duration;
+        pub fn udp_timeout() -> Duration {
+            Duration::from_secs(60)
         }
     }
 
