@@ -1,23 +1,59 @@
 use std::{
     collections::hash_map::Entry,
     io::{Error as IoError, ErrorKind},
-    net::SocketAddr,
+    net::{IpAddr, SocketAddr},
 };
 
 use bytes::Bytes;
 use eyre::{OptionExt, eyre};
 use tokio::{
     io::AsyncWriteExt,
-    net::{self, TcpStream},
+    net::{self, TcpSocket, TcpStream},
 };
 use tracing::{info, warn};
 use tuic::Address;
 use tuic_quinn::{Authenticate, Connect, Packet};
 
 use super::{Connection, ERROR_CODE, UdpSession};
-use crate::{error::Error, io::exchange_tcp, restful, utils::UdpRelayMode};
+use crate::{
+    error::Error,
+    io::exchange_tcp,
+    restful,
+    utils::{IpMode, UdpRelayMode},
+};
 
 impl Connection {
+    fn get_bind_ip(&self, is_ipv6: bool) -> Option<IpAddr> {
+        if is_ipv6 {
+            self.ctx.cfg.outbound.default.bind_ipv6.map(IpAddr::from)
+        } else {
+            self.ctx.cfg.outbound.default.bind_ipv4.map(IpAddr::from)
+        }
+    }
+
+    fn create_socket(&self, target_addr: &SocketAddr) -> std::io::Result<TcpSocket> {
+        let socket = if target_addr.is_ipv4() {
+            TcpSocket::new_v4()?
+        } else {
+            TcpSocket::new_v6()?
+        };
+
+        socket.bind_device(
+            self.ctx
+                .cfg
+                .outbound
+                .default
+                .bind_device
+                .as_ref()
+                .map(|s| s.as_bytes()),
+        )?;
+        if let Some(bind_ip) = self.get_bind_ip(target_addr.is_ipv6()) {
+            socket.bind(SocketAddr::new(bind_ip, 0))?;
+        }
+
+        Ok(socket)
+    }
+
     pub async fn handle_authenticate(&self, auth: Authenticate) {
         info!(
             "[{id:#010x}] [{addr}] [{user}] [AUTH] {auth_uuid}",
@@ -39,51 +75,32 @@ impl Connection {
         );
 
         let process = async {
-            let mut stream = None;
-            let mut last_err = None;
+            // Resolve DNS and collect all addresses.
+            let addrs = self.resolve_and_filter_addresses(conn.addr()).await?;
+            let mut stream = self.connect_to_addresses(addrs).await?;
 
-            match resolve_dns(conn.addr()).await {
-                Ok(addrs) => {
-                    for addr in addrs {
-                        match TcpStream::connect(addr).await {
-                            Ok(s) => {
-                                s.set_nodelay(true)?;
-                                stream = Some(s);
-                                break;
-                            }
-                            Err(err) => last_err = Some(err),
-                        }
-                    }
-                }
-                Err(err) => last_err = Some(err),
-            }
+            stream.set_nodelay(true)?;
 
-            if let Some(mut stream) = stream {
-                // a -> b tx
-                // a <- b rx
-                let (tx, rx, err) = exchange_tcp(&mut conn, &mut stream).await;
-                if err.is_some() {
-                    _ = conn.reset(ERROR_CODE);
-                } else {
-                    _ = conn.finish();
-                }
-                _ = stream.shutdown().await;
-
-                let uuid = self
-                    .auth
-                    .get()
-                    .ok_or_eyre("Unexpected autherization state")?;
-                restful::traffic_tx(&self.ctx, &uuid, tx as u64);
-                restful::traffic_rx(&self.ctx, &uuid, rx as u64);
-                if let Some(err) = err {
-                    return Err(err);
-                }
-                Ok(())
+            // a -> b tx
+            // a <- b rx
+            let (tx, rx, err) = exchange_tcp(&mut conn, &mut stream).await;
+            if err.is_some() {
+                _ = conn.reset(ERROR_CODE);
             } else {
-                let _ = conn.shutdown().await;
-                Err(last_err
-                    .unwrap_or_else(|| IoError::new(ErrorKind::NotFound, "no address resolved")))?
+                _ = conn.finish();
             }
+            _ = stream.shutdown().await;
+
+            let uuid = self
+                .auth
+                .get()
+                .ok_or_eyre("Unexpected autherization state")?;
+            restful::traffic_tx(&self.ctx, &uuid, tx as u64);
+            restful::traffic_rx(&self.ctx, &uuid, rx as u64);
+            if let Some(err) = err {
+                return Err(err);
+            }
+            Ok(())
         };
 
         match process.await {
@@ -95,6 +112,50 @@ impl Connection {
                 user = self.auth,
             ),
         }
+    }
+
+    async fn resolve_and_filter_addresses(&self, addr: &Address) -> eyre::Result<Vec<SocketAddr>> {
+        let mut addrs: Vec<SocketAddr> = resolve_dns(addr).await?.collect();
+
+        match self.ctx.cfg.outbound.default.ip_mode.unwrap() {
+            IpMode::PreferV4 => {
+                addrs.sort_by_key(|a| !a.is_ipv4());
+            }
+            IpMode::PreferV6 => {
+                addrs.sort_by_key(|a| !a.is_ipv6());
+            }
+            IpMode::OnlyV4 => {
+                addrs.retain(|a| a.is_ipv4());
+            }
+            IpMode::OnlyV6 => {
+                addrs.retain(|a| a.is_ipv6());
+            }
+            _ => {}
+        }
+
+        if addrs.is_empty() {
+            return Err(eyre!("No addresses available after filtering"));
+        }
+
+        Ok(addrs)
+    }
+
+    async fn connect_to_addresses(&self, addrs: Vec<SocketAddr>) -> eyre::Result<TcpStream> {
+        let mut last_error = None;
+
+        for addr in addrs {
+            match self.create_socket(&addr) {
+                Ok(socket) => match socket.connect(addr).await {
+                    Ok(stream) => return Ok(stream),
+                    Err(err) => last_error = Some(err),
+                },
+                Err(err) => last_error = Some(err),
+            }
+        }
+
+        Err(last_error
+            .map(|e| eyre!(e))
+            .unwrap_or_else(|| eyre!("Failed to connect to any address")))
     }
 
     pub async fn handle_packet(&self, pkt: Packet, mode: UdpRelayMode) {

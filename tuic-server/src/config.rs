@@ -1,4 +1,9 @@
-use std::{collections::HashMap, net::SocketAddr, path::PathBuf, time::Duration};
+use std::{
+    collections::HashMap,
+    net::{Ipv4Addr, Ipv6Addr, SocketAddr},
+    path::PathBuf,
+    time::Duration,
+};
 
 use educe::Educe;
 use figment::{
@@ -12,7 +17,7 @@ use uuid::Uuid;
 
 use crate::{
     old_config::{ConfigError, OldConfig},
-    utils::CongestionController,
+    utils::{CongestionController, IpMode},
 };
 
 #[derive(Deserialize, Serialize, Educe)]
@@ -64,6 +69,9 @@ pub struct Config {
     #[serde(with = "humantime_serde")]
     #[educe(Default(expression = Duration::from_secs(60)))]
     pub stream_timeout: Duration,
+
+    #[serde(default)]
+    pub outbound: OutboundConfig,
 }
 
 #[derive(Deserialize, Serialize, Educe)]
@@ -109,6 +117,64 @@ pub struct QuicConfig {
     #[educe(Default(expression = Duration::from_secs(30)))]
     pub max_idle_time: Duration,
 }
+
+/// The `default` rule is mandatory when named rules are present; other named
+/// rules are optional.
+#[derive(Deserialize, Serialize, Educe, Clone, Debug)]
+#[educe(Default)]
+pub struct OutboundConfig {
+    /// The default outbound rule (used when no name is specified).
+    #[serde(default)]
+    pub default: OutboundRule,
+
+    /// Additional named outbound rules (e.g., `prefer_v4`, `through_socks5`).
+    #[serde(flatten)]
+    pub named: std::collections::HashMap<String, OutboundRule>,
+}
+
+/// Represents a single outbound rule (e.g., direct, socks5).
+#[derive(Deserialize, Serialize, Educe, Clone, Debug)]
+#[educe(Default)]
+#[serde(deny_unknown_fields)]
+pub struct OutboundRule {
+    /// The type of outbound: "direct" or "socks5".
+    #[educe(Default = "direct".to_string())]
+    #[serde(rename = "type")]
+    pub kind: String,
+
+    /// Mode for direct connections: "prefer_v4", "prefer_v6", "only_v4",
+    /// "only_v6", "auto". (only used when kind == "direct")
+    #[educe(Default(expression = Some(IpMode::Auto)))]
+    pub ip_mode: Option<IpMode>,
+
+    /// Optional IPv4 address to bind to for direct connections (only used when
+    /// kind == "direct").
+    #[serde(default)]
+    pub bind_ipv4: Option<Ipv4Addr>,
+
+    /// Optional IPv6 address to bind to for direct connections (only used when
+    /// kind == "direct").
+    #[serde(default)]
+    pub bind_ipv6: Option<Ipv6Addr>,
+
+    /// Optional device/interface name to bind to (only used when kind ==
+    /// "direct").
+    #[serde(default)]
+    pub bind_device: Option<String>,
+
+    /// SOCKS5 address (only used when kind == "socks5").
+    #[serde(default)]
+    pub addr: Option<String>,
+
+    /// Optional SOCKS5 username (only used when kind == "socks5").
+    #[serde(default)]
+    pub username: Option<String>,
+
+    /// Optional SOCKS5 password (only used when kind == "socks5").
+    #[serde(default)]
+    pub password: Option<String>,
+}
+
 #[derive(Deserialize, Serialize, Educe)]
 #[educe(Default)]
 #[serde(deny_unknown_fields)]
@@ -139,6 +205,15 @@ impl Config {
                 users
             },
             restful: Some(RestfulConfig::default()),
+            // Provide a minimal outbound example
+            outbound: OutboundConfig {
+                default: OutboundRule {
+                    kind: "direct".into(),
+                    ip_mode: Some(IpMode::Auto),
+                    ..Default::default()
+                },
+                ..Default::default()
+            },
             ..Default::default()
         }
     }
@@ -297,6 +372,7 @@ pub async fn parse_config(mut parser: Parser) -> Result<Config, ConfigError> {
     } else {
         config.tls.private_key.clone()
     };
+
     Ok(config)
 }
 
@@ -510,5 +586,71 @@ mod tests {
         let args = vec!["test_binary".to_owned()];
         let result = parse_config(Parser::from_iter(args.into_iter())).await;
         assert!(matches!(result, Err(ConfigError::NoConfig)));
+    }
+
+    #[tokio::test]
+    async fn test_outbound_no_configuration() {
+        // Test that when no outbound configuration is provided, default is used
+        let config = r#"
+            [users]
+            "123e4567-e89b-12d3-a456-426614174000" = "password1"
+
+            [tls]
+            self_sign = true
+        "#;
+
+        let result = test_parse_config(config, ".toml", &[]).await.unwrap();
+
+        // Should have default outbound configuration
+        assert_eq!(result.outbound.default.kind, "direct");
+        assert_eq!(result.outbound.named.len(), 0);
+    }
+
+    #[tokio::test]
+    async fn test_outbound_valid_with_default() {
+        // Test that when named outbound rules exist with a proper default, validation
+        // passes
+        let config = r#"
+            [users]
+            "123e4567-e89b-12d3-a456-426614174000" = "password1"
+
+            [tls]
+            self_sign = true
+
+            [outbound.default]
+            type = "direct"
+            ip_mode = "auto"
+
+            [outbound.prefer_v4]
+            type = "direct"
+            ip_mode = "prefer_v4"
+            bind_ipv4 = "2.4.6.8"
+            bind_ipv6 = "0:0:0:0:0:ffff:0204:0608"
+            bind_device = "eth233"
+
+            [outbound.through_socks5]
+            type = "socks5"
+            addr = "127.0.0.1:1080"
+            username = "optional"
+            password = "optional"
+        "#;
+
+        let result = test_parse_config(config, ".toml", &[]).await.unwrap();
+
+        // Should have default and named outbound configurations
+        assert_eq!(result.outbound.default.kind, "direct");
+        assert_eq!(result.outbound.named.len(), 3);
+
+        let prefer_v4 = result.outbound.named.get("prefer_v4").unwrap();
+        assert_eq!(prefer_v4.kind, "direct");
+        assert_eq!(prefer_v4.ip_mode, Some(IpMode::PreferV4));
+        assert_eq!(prefer_v4.bind_ipv4, Some("2.4.6.8".parse().unwrap()));
+        assert_eq!(prefer_v4.bind_device, Some("eth233".to_string()));
+
+        let socks5 = result.outbound.named.get("through_socks5").unwrap();
+        assert_eq!(socks5.kind, "socks5");
+        assert_eq!(socks5.addr, Some("127.0.0.1:1080".to_string()));
+        assert_eq!(socks5.username, Some("optional".to_string()));
+        assert_eq!(socks5.password, Some("optional".to_string()));
     }
 }

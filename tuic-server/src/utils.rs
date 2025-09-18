@@ -67,3 +67,14 @@ where
         }
     }
 }
+
+/// Preference for selecting IP addresses when resolving a domain.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum IpMode {
+    PreferV4,
+    PreferV6,
+    OnlyV4,
+    OnlyV6,
+    Auto,
+}
