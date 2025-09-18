@@ -37,7 +37,7 @@ impl Connection {
         } else {
             TcpSocket::new_v6()?
         };
-
+        #[cfg(any(target_os = "android", target_os = "fuchsia", target_os = "linux"))]
         socket.bind_device(
             self.ctx
                 .cfg
