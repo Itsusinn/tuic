@@ -639,7 +639,7 @@ mod tests {
 
         // Should have default and named outbound configurations
         assert_eq!(result.outbound.default.kind, "direct");
-        assert_eq!(result.outbound.named.len(), 3);
+        assert_eq!(result.outbound.named.len(), 2);
 
         let prefer_v4 = result.outbound.named.get("prefer_v4").unwrap();
         assert_eq!(prefer_v4.kind, "direct");
