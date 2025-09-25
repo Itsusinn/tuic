@@ -195,6 +195,42 @@ controller = "bbr" # Default: "bbr"
 
 # Sets the initial congestion window size in bytes for the congestion controller algorithm, which may improve burst performance but could lead to congestion under high concurrency.
 initial_window = 1048576 # Default: 1048576
+
+[outbound]
+# If no default outbound rule is configured then the following default rule will be used
+# The name of the outbound will be used in ACL rules, 
+# TODO: currently ONLY the 'default' outbound rule is used, others are ignored. 
+[outbound.default]
+type = "direct"
+ip_mode = "auto"
+[outbound.prefer_v4]
+# "direct" / "socks5"
+type = "direct"
+# Optional, default to "auto", the dual-stack "happy eyeballs" mode. The client will attempt to connect to 
+# the destination using both IPv4 and IPv6 addresses (if available), and use the first one that succeeds.
+# Available options: `prefer_v4`, `prefer_v6`, `only_v4`, `only_v6`, `auto`
+ip_mode = "prefer_v4"
+# Optional, the local IPv4 address to bind to when the proxy target is IPv4
+bind_ipv4 = "1.2.3.4"
+# Optional, the local IPv6 address to bind to when the proxy target is IPv6
+bind_ipv6 = "0:0:0:0:0:ffff:0102:0304"
+# Optional, The local network interface to bind to. Sets the value for the `SO_BINDTODEVICE` option on outbound sockets.
+# If a socket is bound to an interface, only packets received from that particular interface are processed by the
+# socket. Note that this only works for some socket types, particularly AF_INET sockets.
+bind_device = "eth1234"
+[outbound.v6_only]
+type = "direct"
+ip_mode = "only_v6"
+[outbound.through_socks5]
+# TODO: `socks5` outbound is not implemented yet
+type = "socks5"
+# SOCKS5 proxy addr
+addr = "127.0.0.1:1080"
+# Optional
+username = "optional"
+# Optional
+password = "optional" 
+
 ```
 ## Notes
 
