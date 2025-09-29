@@ -96,7 +96,7 @@ impl Connection {
                     };
                     let dom_l = dom.to_ascii_lowercase();
                     let suf_l = stripped.to_ascii_lowercase();
-                    dom_l == suf_l || dom_l.ends_with(&format!(".{}", suf_l))
+                    dom_l == suf_l || dom_l.ends_with(&format!(".{suf_l}"))
                 }
                 _ => false,
             }

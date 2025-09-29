@@ -534,7 +534,7 @@ impl<'de> Deserialize<'de> for AclRule {
         let addr = helper.addr.parse::<AclAddress>().map_err(|e| {
             de::Error::invalid_value(
                 Unexpected::Str(&helper.addr),
-                &format!("valid address: {}", e).as_str(),
+                &format!("valid address: {e}").as_str(),
             )
         })?;
 
@@ -542,7 +542,7 @@ impl<'de> Deserialize<'de> for AclRule {
             Some(ports_str.parse::<AclPorts>().map_err(|e| {
                 de::Error::invalid_value(
                     Unexpected::Str(&ports_str),
-                    &format!("valid ports: {}", e).as_str(),
+                    &format!("valid ports: {e}").as_str(),
                 )
             })?)
         } else {

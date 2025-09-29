@@ -224,10 +224,10 @@ impl fmt::Display for AclRule {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{} {}", self.outbound, self.addr)?;
         if let Some(ports) = &self.ports {
-            write!(f, " {}", ports)?;
+            write!(f, " {ports}")?;
         }
         if let Some(hijack) = &self.hijack {
-            write!(f, " {}", hijack)?;
+            write!(f, " {hijack}")?;
         }
         Ok(())
     }
@@ -236,10 +236,10 @@ impl fmt::Display for AclRule {
 impl fmt::Display for AclAddress {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            AclAddress::Ip(ip) => write!(f, "{}", ip),
-            AclAddress::Cidr(cidr) => write!(f, "{}", cidr),
-            AclAddress::Domain(domain) => write!(f, "{}", domain),
-            AclAddress::WildcardDomain(domain) => write!(f, "{}", domain),
+            AclAddress::Ip(ip) => write!(f, "{ip}"),
+            AclAddress::Cidr(cidr) => write!(f, "{cidr}"),
+            AclAddress::Domain(domain) => write!(f, "{domain}"),
+            AclAddress::WildcardDomain(domain) => write!(f, "{domain}"),
             AclAddress::Localhost => write!(f, "localhost"),
             AclAddress::Any => write!(f, "*"),
         }
@@ -275,8 +275,8 @@ impl fmt::Display for AclProtocol {
 impl fmt::Display for AclPortSpec {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            AclPortSpec::Single(port) => write!(f, "{}", port),
-            AclPortSpec::Range(start, end) => write!(f, "{}-{}", start, end),
+            AclPortSpec::Single(port) => write!(f, "{port}"),
+            AclPortSpec::Range(start, end) => write!(f, "{start}-{end}"),
         }
     }
 }
@@ -387,7 +387,7 @@ pub(crate) fn parse_acl_port_entry(entry: &str) -> Result<AclPortEntry, String> 
         let protocol = match protocol_str.to_lowercase().as_str() {
             "tcp" => AclProtocol::Tcp,
             "udp" => AclProtocol::Udp,
-            _ => return Err(format!("Invalid protocol: {}", protocol_str)),
+            _ => return Err(format!("Invalid protocol: {protocol_str}")),
         };
         let port_spec = parse_port_spec(port_str)?;
         Ok(AclPortEntry {
@@ -410,13 +410,13 @@ fn parse_port_spec(port_str: &str) -> Result<AclPortSpec, String> {
         // Port range
         let start = start_str
             .parse::<u16>()
-            .map_err(|_| format!("Invalid start port: {}", start_str))?;
+            .map_err(|_| format!("Invalid start port: {start_str}"))?;
         let end = end_str
             .parse::<u16>()
-            .map_err(|_| format!("Invalid end port: {}", end_str))?;
+            .map_err(|_| format!("Invalid end port: {end_str}"))?;
 
         if start > end {
-            return Err(format!("Invalid port range: {} > {}", start, end));
+            return Err(format!("Invalid port range: {start} > {end}"));
         }
 
         Ok(AclPortSpec::Range(start, end))
@@ -424,7 +424,7 @@ fn parse_port_spec(port_str: &str) -> Result<AclPortSpec, String> {
         // Single port
         let port = port_str
             .parse::<u16>()
-            .map_err(|_| format!("Invalid port: {}", port_str))?;
+            .map_err(|_| format!("Invalid port: {port_str}"))?;
         Ok(AclPortSpec::Single(port))
     }
 }
