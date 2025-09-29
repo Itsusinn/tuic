@@ -173,6 +173,14 @@ impl Address {
     pub fn is_ipv6(&self) -> bool {
         matches!(self, Self::SocketAddress(SocketAddr::V6(_)))
     }
+
+    pub fn port(&self) -> u16 {
+        match self {
+            Self::None => 0u16,
+            Self::DomainAddress(_, port) => *port,
+            Self::SocketAddress(addr) => addr.port(),
+        }
+    }
 }
 
 impl Display for Address {

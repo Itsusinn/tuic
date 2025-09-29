@@ -1161,6 +1161,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "ip_network"
+version = "0.4.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "aa2f047c0a98b2f299aa5d6d7088443570faae494e9ae1305e48be000c9e0eb1"
+
+[[package]]
 name = "ipnet"
 version = "2.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2555,7 +2561,7 @@ checksum = "e421abadd41a4225275504ea4d6566923418b7f05506fbc9c0fe86ba7396114b"
 
 [[package]]
 name = "tuic"
-version = "1.4.6"
+version = "1.5.0"
 dependencies = [
  "bytes",
  "futures-util",
@@ -2568,7 +2574,7 @@ dependencies = [
 
 [[package]]
 name = "tuic-client"
-version = "1.4.6"
+version = "1.5.0"
 dependencies = [
  "anyhow",
  "bytes",
@@ -2602,7 +2608,7 @@ dependencies = [
 
 [[package]]
 name = "tuic-quinn"
-version = "1.4.6"
+version = "1.5.0"
 dependencies = [
  "bytes",
  "eyre",
@@ -2616,7 +2622,7 @@ dependencies = [
 
 [[package]]
 name = "tuic-server"
-version = "1.4.6"
+version = "1.5.0"
 dependencies = [
  "arc-swap",
  "axum",
@@ -2630,6 +2636,7 @@ dependencies = [
  "humantime",
  "humantime-serde",
  "instant-acme",
+ "ip_network",
  "lexopt",
  "quinn",
  "rcgen",

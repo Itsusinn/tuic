@@ -1,5 +1,6 @@
 use std::{
     collections::HashMap,
+    fmt,
     net::{Ipv4Addr, Ipv6Addr, SocketAddr},
     path::PathBuf,
     time::Duration,
@@ -11,11 +12,15 @@ use figment::{
     providers::{Format, Serialized, Toml},
 };
 use lexopt::{Arg, Parser};
-use serde::{Deserialize, Serialize};
+use serde::{
+    Deserialize, Deserializer, Serialize,
+    de::{self, Unexpected, Visitor},
+};
 use tracing::{level_filters::LevelFilter, warn};
 use uuid::Uuid;
 
 use crate::{
+    acl::{AclAddress, AclPorts, AclRule},
     old_config::{ConfigError, OldConfig},
     utils::{CongestionController, IpMode},
 };
@@ -72,6 +77,11 @@ pub struct Config {
 
     #[serde(default)]
     pub outbound: OutboundConfig,
+
+    /// Access Control List rules
+    #[serde(default, deserialize_with = "deserialize_acl")]
+    #[educe(Default(expression = Vec::new()))]
+    pub acl: Vec<AclRule>,
 }
 
 #[derive(Deserialize, Serialize, Educe)]
@@ -173,6 +183,14 @@ pub struct OutboundRule {
     /// Optional SOCKS5 password (only used when kind == "socks5").
     #[serde(default)]
     pub password: Option<String>,
+
+    /// Whether to allow UDP traffic when this outbound is selected.
+    /// Only effective for kind == "socks5". Default behavior is to block UDP
+    /// (i.e., drop UDP packets) to avoid leaking QUIC/HTTP3 over direct path.
+    /// Set to true to allow UDP (still sent directly; UDP over SOCKS5 is not
+    /// implemented).
+    #[serde(default)]
+    pub allow_udp: Option<bool>,
 }
 
 #[derive(Deserialize, Serialize, Educe)]
@@ -214,6 +232,8 @@ impl Config {
                 },
                 ..Default::default()
             },
+            // Example ACL list (empty by default)
+            acl: Vec::new(),
             ..Default::default()
         }
     }
@@ -376,16 +396,179 @@ pub async fn parse_config(mut parser: Parser) -> Result<Config, ConfigError> {
     Ok(config)
 }
 
+/// Deserialize the `acl` field which may be either:
+///   * an array of TOML tables (array-of-tables format)
+///   * a single multiline string with space-separated rules
+fn deserialize_acl<'de, D>(deserializer: D) -> Result<Vec<AclRule>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    struct AclVisitor;
+
+    impl<'de> Visitor<'de> for AclVisitor {
+        type Value = Vec<AclRule>;
+
+        fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+            formatter.write_str("a sequence of ACL rule tables or a multiline string")
+        }
+
+        // Handle array-of-tables format: [[acl]] entries
+        fn visit_seq<A>(self, mut seq: A) -> Result<Self::Value, A::Error>
+        where
+            A: de::SeqAccess<'de>,
+        {
+            let mut vec = Vec::new();
+            while let Some(rule) = seq.next_element::<AclRule>()? {
+                vec.push(rule);
+            }
+            Ok(vec)
+        }
+
+        // Handle multiline string format
+        fn visit_str<E>(self, v: &str) -> Result<Self::Value, E>
+        where
+            E: de::Error,
+        {
+            parse_multiline_acl_string(v)
+                .map_err(|e| de::Error::invalid_value(Unexpected::Str(v), &e.as_str()))
+        }
+
+        fn visit_string<E>(self, v: String) -> Result<Self::Value, E>
+        where
+            E: de::Error,
+        {
+            self.visit_str(&v)
+        }
+    }
+
+    deserializer.deserialize_any(AclVisitor)
+}
+
+/// Parse a multiline string into ACL rules
+/// Format: <outbound_name> <address> <optional:port(s)>
+/// <optional:hijack_ip_address>
+fn parse_multiline_acl_string(input: &str) -> Result<Vec<AclRule>, String> {
+    let mut rules = Vec::new();
+
+    for (line_num, line) in input.lines().enumerate() {
+        let line = line.trim();
+
+        // Skip empty lines and comments
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+
+        // Split by whitespace
+        let parts: Vec<&str> = line.split_whitespace().collect();
+
+        if parts.len() < 2 {
+            return Err(format!(
+                "Line {}: Invalid ACL rule format. Expected: <outbound> <address> [ports] [hijack]",
+                line_num + 1
+            ));
+        }
+
+        let outbound = parts[0].to_string();
+        let addr_str = parts[1];
+
+        // Parse address
+        let addr = addr_str.parse::<AclAddress>().map_err(|e| {
+            format!(
+                "Line {}: Invalid address '{}': {}",
+                line_num + 1,
+                addr_str,
+                e
+            )
+        })?;
+
+        // Parse optional ports (3rd parameter)
+        let ports = if parts.len() > 2 && parts[2].parse::<std::net::IpAddr>().is_err() {
+            // If the 3rd part is not an IP address, treat it as ports
+            Some(parts[2].parse::<AclPorts>().map_err(|e| {
+                format!("Line {}: Invalid ports '{}': {}", line_num + 1, parts[2], e)
+            })?)
+        } else {
+            None
+        };
+
+        // Parse optional hijack IP (last parameter if it's an IP)
+        let hijack = if parts.len() > 2 {
+            let last_part = parts[parts.len() - 1];
+            if last_part.parse::<std::net::IpAddr>().is_ok() {
+                Some(last_part.to_string())
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
+        rules.push(AclRule {
+            outbound,
+            addr,
+            ports,
+            hijack,
+        });
+    }
+
+    Ok(rules)
+}
+
+// You'll also need to implement Deserialize for AclRule to handle TOML table
+// format
+impl<'de> Deserialize<'de> for AclRule {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        #[derive(Deserialize)]
+        struct AclRuleHelper {
+            outbound: String,
+            addr: String,
+            ports: Option<String>,
+            hijack: Option<String>,
+        }
+
+        let helper = AclRuleHelper::deserialize(deserializer)?;
+
+        let addr = helper.addr.parse::<AclAddress>().map_err(|e| {
+            de::Error::invalid_value(
+                Unexpected::Str(&helper.addr),
+                &format!("valid address: {}", e).as_str(),
+            )
+        })?;
+
+        let ports = if let Some(ports_str) = helper.ports {
+            Some(ports_str.parse::<AclPorts>().map_err(|e| {
+                de::Error::invalid_value(
+                    Unexpected::Str(&ports_str),
+                    &format!("valid ports: {}", e).as_str(),
+                )
+            })?)
+        } else {
+            None
+        };
+
+        Ok(AclRule {
+            outbound: helper.outbound,
+            addr,
+            ports,
+            hijack: helper.hijack,
+        })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::{
         env, fs,
-        net::{Ipv6Addr, SocketAddrV6},
+        net::{Ipv6Addr, SocketAddr, SocketAddrV6},
     };
 
     use tempfile::tempdir;
 
     use super::*;
+    use crate::acl::{AclPortSpec, AclProtocol};
 
     async fn test_parse_config(
         config_content: &str,
@@ -652,5 +835,119 @@ mod tests {
         assert_eq!(socks5.addr, Some("127.0.0.1:1080".to_string()));
         assert_eq!(socks5.username, Some("optional".to_string()));
         assert_eq!(socks5.password, Some("optional".to_string()));
+    }
+
+    #[tokio::test]
+    async fn test_acl_parsing() {
+        let config = r#"
+                    acl = """
+allow localhost udp/53
+allow localhost udp/53,tcp/80,tcp/443,udp/443
+# which is equivalent to:
+# allow localhost udp/53,tcp/80,443
+# if udp/tcp is omited, match both
+allow localhost 443
+reject 10.6.0.0/16
+allow google.com
+allow *.google.com
+reject *.cn
+# localhost means both 127.0.0.1 and [::1], regardless of whether you've configured it in /etc/hosts
+reject localhost
+# which is equivalent to:
+# reject localhost *
+custom_outbound_name example.com 80,443
+# Hijack 8.8.4.4:53/udp to 1.1.1.1:53/udp using default outbound
+default 8.8.4.4 udp/53 1.1.1.1
+"""
+
+            [users]
+            "123e4567-e89b-12d3-a456-426614174000" = "password1"
+
+            [tls]
+            self_sign = true
+
+
+        "#;
+
+        let result = test_parse_config(config, ".toml", &[]).await.unwrap();
+
+        assert_eq!(result.acl.len(), 10);
+
+        // Test first rule: "allow localhost udp/53"
+        let rule1 = &result.acl[0];
+        assert_eq!(rule1.outbound, "allow");
+        assert_eq!(rule1.addr, AclAddress::Localhost);
+        assert!(rule1.ports.is_some());
+        let ports1 = rule1.ports.as_ref().unwrap();
+        assert_eq!(ports1.entries.len(), 1);
+        assert_eq!(ports1.entries[0].protocol, Some(AclProtocol::Udp));
+        assert_eq!(ports1.entries[0].port_spec, AclPortSpec::Single(53));
+        assert!(rule1.hijack.is_none());
+
+        // Test complex ports rule: "allow localhost udp/53,tcp/80,tcp/443,udp/443"
+        let rule2 = &result.acl[1];
+        assert_eq!(rule2.outbound, "allow");
+        assert_eq!(rule2.addr, AclAddress::Localhost);
+        let ports2 = rule2.ports.as_ref().unwrap();
+        assert_eq!(ports2.entries.len(), 4);
+
+        // Test CIDR rule: "reject 10.6.0.0/16"
+        let rule4 = &result.acl[3];
+        assert_eq!(rule4.outbound, "reject");
+        assert_eq!(rule4.addr, AclAddress::Cidr("10.6.0.0/16".to_string()));
+
+        // Test wildcard domain: "allow *.google.com"
+        let rule6 = &result.acl[5];
+        assert_eq!(rule6.outbound, "allow");
+        assert_eq!(
+            rule6.addr,
+            AclAddress::WildcardDomain("*.google.com".to_string())
+        );
+
+        // Test hijack rule: "default 8.8.4.4 udp/53 1.1.1.1"
+        let rule10 = &result.acl[9];
+        assert_eq!(rule10.outbound, "default");
+        assert_eq!(rule10.addr, AclAddress::Ip("8.8.4.4".to_string()));
+        assert!(rule10.ports.is_some());
+        assert_eq!(rule10.hijack, Some("1.1.1.1".to_string()));
+    }
+
+    #[tokio::test]
+    async fn test_acl_parsing_edge_cases() {
+        // Test individual parsing functions
+        assert_eq!(
+            crate::acl::parse_acl_address("localhost").unwrap(),
+            AclAddress::Localhost
+        );
+        assert_eq!(
+            crate::acl::parse_acl_address("*.example.com").unwrap(),
+            AclAddress::WildcardDomain("*.example.com".to_string())
+        );
+        assert_eq!(
+            crate::acl::parse_acl_address("192.168.1.0/24").unwrap(),
+            AclAddress::Cidr("192.168.1.0/24".to_string())
+        );
+        assert_eq!(
+            crate::acl::parse_acl_address("127.0.0.1").unwrap(),
+            AclAddress::Ip("127.0.0.1".to_string())
+        );
+        assert_eq!(
+            crate::acl::parse_acl_address("example.com").unwrap(),
+            AclAddress::Domain("example.com".to_string())
+        );
+
+        // Test port parsing
+        let ports = crate::acl::parse_acl_ports("80,443,1000-2000,udp/53").unwrap();
+        assert_eq!(ports.entries.len(), 4);
+        assert_eq!(ports.entries[0].port_spec, AclPortSpec::Single(80));
+        assert_eq!(ports.entries[2].port_spec, AclPortSpec::Range(1000, 2000));
+        assert_eq!(ports.entries[3].protocol, Some(AclProtocol::Udp));
+
+        // Test rule parsing
+        let rule = crate::acl::parse_acl_rule("allow google.com 80,443").unwrap();
+        assert_eq!(rule.outbound, "allow");
+        assert_eq!(rule.addr, AclAddress::Domain("google.com".to_string()));
+        assert!(rule.ports.is_some());
+        assert!(rule.hijack.is_none());
     }
 }
