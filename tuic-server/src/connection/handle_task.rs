@@ -64,11 +64,11 @@ impl Connection {
                     }
                     match entry.port_spec {
                         AclPortSpec::Single(p) => {
-                            allowed.insert((p, entry.protocol.clone()));
+                            allowed.insert((p, entry.protocol));
                         }
                         AclPortSpec::Range(start, end) => {
                             for p in start..=end {
-                                allowed.insert((p, entry.protocol.clone()));
+                                allowed.insert((p, entry.protocol));
                             }
                         }
                     }

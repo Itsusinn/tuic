@@ -163,11 +163,11 @@ impl AclRule {
 
                 match &entry.port_spec {
                     AclPortSpec::Single(p) => {
-                        allowed.insert((*p, entry.protocol.clone()));
+                        allowed.insert((*p, entry.protocol));
                     }
                     AclPortSpec::Range(start, end) => {
                         for p in *start..=*end {
-                            allowed.insert((p, entry.protocol.clone()));
+                            allowed.insert((p, entry.protocol));
                         }
                     }
                 }
@@ -188,7 +188,7 @@ impl AclRule {
     }
 }
 /// A single port entry with optional protocol specification
-#[derive(Debug, Clone, PartialEq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Copy)]
 pub struct AclPortEntry {
     /// Protocol (TCP, UDP, or both if None)
     pub protocol: Option<AclProtocol>,
@@ -197,14 +197,14 @@ pub struct AclPortEntry {
 }
 
 /// Protocol specification
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Copy)]
 pub enum AclProtocol {
     Tcp,
     Udp,
 }
 
 /// Port specification (single port or range)
-#[derive(Debug, Clone, PartialEq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Copy)]
 pub enum AclPortSpec {
     /// Single port
     Single(u16),

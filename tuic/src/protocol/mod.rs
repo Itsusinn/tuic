@@ -113,8 +113,9 @@ impl Header {
 /// fragment of a UDP packet.
 ///
 /// The port number is encoded in 2 bytes after the Domain name / IP address.
-#[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+#[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, Default)]
 pub enum Address {
+    #[default]
     None,
     DomainAddress(String, u16),
     SocketAddress(SocketAddr),
@@ -190,11 +191,5 @@ impl Display for Address {
             Self::DomainAddress(addr, port) => write!(f, "{addr}:{port}"),
             Self::SocketAddress(addr) => write!(f, "{addr}"),
         }
-    }
-}
-
-impl Default for Address {
-    fn default() -> Self {
-        Self::None
     }
 }
