@@ -121,6 +121,38 @@ stream_timeout = "10s" # Default: "10s"
 # Working Directory of tuic
 data_dir = "" # Default: `CWD`
 
+# The ACLs are matched in a top-to-bottom order. If no rule matches, the `default` outbound will be used.
+# For security, builtin rule `drop localhost` will be appended at bottom automatically to drop clients' access to
+# server's services on localhost.
+[[acl]]
+# Address: ipv4/ipv6 single address / range, domain name (exact match or wildcard using `*` or `suffix:`), localhost
+# e.g. 1.1.1.1, 2606:4700:4700::1111, [::1], 10.0.0.0/8, 2001:250::/32, google.com, *.google.*, *.google.*.*
+# suffix:cn (will match all levels of subdomains, including itself if valid), suffix:edu.cn (including edu.cn)
+# localhost (matches both 127.0.0.1 and ::1, regardless of whether you've configured it in /etc/hosts)
+addr = "127.0.0.1"
+# Port(s): Optional. When specified, will filter by a `,` separated list of port or port range.
+# White space will be ignored
+# e.g. "443", "1000-2000", "80,443", "22,80,11000-12000,443"
+# for each port or port range, you can specify protocol: "udp/53", "tcp/80", "udp/10000-20000"
+# Note "udp/53,tcp/80,443" === "udp/53,tcp/80,tcp/443,udp/443"
+ports = "udp/53"
+# The outbound to use: direct / default / drop / <custom_outbound_name>
+outbound = "default"
+# Hijack address: Optional. When specified, the connection matching this rule will be hijacked to the specified address.
+hijack = "1.1.1.1"
+[[acl]]
+addr = "localhost"
+outbound = "drop"
+
+# you can configure ACL as a multi-line string, if you feel the toml syntax is tiresome.
+# For each line, the format is: (no white space inside <optional:port(s)>)
+# <outbound_name> <address> <optional:port(s)> <optional:hijack_ip_address>
+# e.g.
+# acl = '''
+# direct localhost tcp/80,tcp/443,udp/443
+# drop localhost
+# '''
+
 # User list, contains user UUID and password
 [users] # Default: empty
 f0e12827-fe60-458c-8269-a05ccb0ff8da = "YOUR_USER_PASSWD_HERE"
@@ -199,7 +231,6 @@ initial_window = 1048576 # Default: 1048576
 [outbound]
 # If no default outbound rule is configured then the following default rule will be used
 # The name of the outbound will be used in ACL rules, 
-# TODO: currently ONLY the 'default' outbound rule is used, others are ignored. 
 [outbound.default]
 type = "direct"
 ip_mode = "auto"
@@ -222,14 +253,18 @@ bind_device = "eth1234"
 type = "direct"
 ip_mode = "only_v6"
 [outbound.through_socks5]
-# TODO: `socks5` outbound is not implemented yet
 type = "socks5"
-# SOCKS5 proxy addr
+# SOCKS5 proxy addr (TCP outbound via SOCKS5 is supported)
+# UDP over SOCKS5 is NOT supported. By default, when this outbound is selected,
+# UDP traffic is BLOCKED to avoid leaking QUIC/HTTP3 over direct path. You can
+# explicitly allow UDP (which will still go DIRECT) by setting `allow_udp = true`.
 addr = "127.0.0.1:1080"
 # Optional
 username = "optional"
 # Optional
-password = "optional" 
+password = "optional"
+# Optional (socks5 only). Default: false (block UDP when socks5 is selected)
+allow_udp = false
 
 ```
 ## Notes
