@@ -117,7 +117,7 @@ pub struct OldConfig {
     pub gc_lifetime: Duration,
 
     pub restful_server: Option<SocketAddr>,
-
+    #[serde(default = "default::data_dir")]
     pub data_dir: PathBuf,
 }
 
@@ -218,6 +218,10 @@ mod default {
 
     pub fn alpn() -> Vec<String> {
         Vec::new()
+    }
+
+    pub fn data_dir() -> PathBuf {
+        PathBuf::from("")
     }
 }
 
