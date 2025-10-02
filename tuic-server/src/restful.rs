@@ -67,7 +67,6 @@ pub async fn start(ctx: Arc<AppContext>) {
 
     let mut traffic = HashMap::new();
     for (user, _) in ctx.cfg.users.iter() {
-        // TODO use persist
         traffic.insert(user.to_owned(), (AtomicU64::new(0), AtomicU64::new(0)));
     }
 
@@ -90,10 +89,11 @@ pub async fn start(ctx: Arc<AppContext>) {
 
 async fn kick(
     State(ctx): State<Arc<AppContext>>,
-    token: Authorization<Bearer>,
+    token: TypedHeader<Authorization<Bearer>>,
     Json(users): Json<Vec<Uuid>>,
 ) -> StatusCode {
     if let Some(restful) = &ctx.cfg.restful
+        && restful.secret == ""
         && restful.secret != token.token()
     {
         return StatusCode::UNAUTHORIZED;
@@ -110,9 +110,10 @@ async fn kick(
 
 async fn list_online(
     State(ctx): State<Arc<AppContext>>,
-    token: Option<TypedHeader<Authorization<Bearer>>>,
+    token: TypedHeader<Authorization<Bearer>>,
 ) -> (StatusCode, Json<HashMap<Uuid, u64>>) {
     if let Some(restful) = &ctx.cfg.restful
+        && restful.secret == ""
         && restful.secret != token.token()
     {
         return (StatusCode::UNAUTHORIZED, Json(HashMap::new()));
@@ -130,11 +131,10 @@ async fn list_online(
 
 async fn list_detailed_online(
     State(ctx): State<Arc<AppContext>>,
-    token: Option<TypedHeader<Authorization<Bearer>>>,
+    token: TypedHeader<Authorization<Bearer>>,
 ) -> (StatusCode, Json<HashMap<Uuid, Vec<SocketAddr>>>) {
     if let Some(restful) = &ctx.cfg.restful
-        && !restful.secret.is_empty()
-        && let Some(TypedHeader(token)) = token
+        && restful.secret == ""
         && restful.secret != token.token()
     {
         return (StatusCode::UNAUTHORIZED, Json(HashMap::new()));
@@ -152,11 +152,10 @@ async fn list_detailed_online(
 
 async fn list_traffic(
     State(ctx): State<Arc<AppContext>>,
-    token: Option<TypedHeader<Authorization<Bearer>>>,
+    token: TypedHeader<Authorization<Bearer>>,
 ) -> (StatusCode, Json<HashMap<Uuid, serde_json::Value>>) {
     if let Some(restful) = &ctx.cfg.restful
-        && !restful.secret.is_empty()
-        && let Some(TypedHeader(token)) = token
+        && restful.secret == ""
         && restful.secret != token.token()
     {
         return (StatusCode::UNAUTHORIZED, Json(HashMap::new()));
@@ -175,11 +174,10 @@ async fn list_traffic(
 
 async fn reset_traffic(
     State(ctx): State<Arc<AppContext>>,
-    token: Option<TypedHeader<Authorization<Bearer>>>,
+    token: TypedHeader<Authorization<Bearer>>,
 ) -> (StatusCode, Json<HashMap<Uuid, serde_json::Value>>) {
     if let Some(restful) = &ctx.cfg.restful
-        && !restful.secret.is_empty()
-        && let Some(TypedHeader(token)) = token
+        && restful.secret == ""
         && restful.secret != token.token()
     {
         return (StatusCode::UNAUTHORIZED, Json(HashMap::new()));
