@@ -90,12 +90,10 @@ pub async fn start(ctx: Arc<AppContext>) {
 
 async fn kick(
     State(ctx): State<Arc<AppContext>>,
-    token: Option<TypedHeader<Authorization<Bearer>>>,
+    token: Authorization<Bearer>,
     Json(users): Json<Vec<Uuid>>,
 ) -> StatusCode {
     if let Some(restful) = &ctx.cfg.restful
-        && !restful.secret.is_empty()
-        && let Some(TypedHeader(token)) = token
         && restful.secret != token.token()
     {
         return StatusCode::UNAUTHORIZED;
@@ -115,8 +113,6 @@ async fn list_online(
     token: Option<TypedHeader<Authorization<Bearer>>>,
 ) -> (StatusCode, Json<HashMap<Uuid, u64>>) {
     if let Some(restful) = &ctx.cfg.restful
-        && !restful.secret.is_empty()
-        && let Some(TypedHeader(token)) = token
         && restful.secret != token.token()
     {
         return (StatusCode::UNAUTHORIZED, Json(HashMap::new()));
