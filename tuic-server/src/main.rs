@@ -1,12 +1,19 @@
-use std::{process, sync::Arc};
+use std::{
+    collections::{HashMap, HashSet},
+    process,
+    sync::{Arc, atomic::AtomicUsize},
+};
 
+use chashmap::CHashMap;
 use config::{Config, parse_config};
 use tracing::level_filters::LevelFilter;
 use tracing_subscriber::{fmt::time::LocalTime, layer::SubscriberExt, util::SubscriberInitExt};
+use uuid::Uuid;
 
-use crate::{old_config::ConfigError, server::Server};
+use crate::{compat::QuicClient, old_config::ConfigError, server::Server};
 
 mod acl;
+mod compat;
 mod config;
 mod connection;
 mod error;
@@ -26,6 +33,9 @@ static GLOBAL: Jemalloc = Jemalloc;
 
 struct AppContext {
     pub cfg: Config,
+    pub online_counter: HashMap<Uuid, AtomicUsize>,
+    pub online_clients: CHashMap<Uuid, HashSet<QuicClient>>,
+    pub traffic_stats: HashMap<Uuid, (AtomicUsize, AtomicUsize)>,
 }
 
 #[tokio::main]
@@ -41,7 +51,23 @@ async fn main() -> eyre::Result<()> {
             process::exit(1);
         }
     };
-    let ctx = Arc::new(AppContext { cfg });
+
+    let mut online_counter = HashMap::new();
+    for (user, _) in cfg.users.iter() {
+        online_counter.insert(user.to_owned(), AtomicUsize::new(0));
+    }
+
+    let mut traffic_stats = HashMap::new();
+    for (user, _) in cfg.users.iter() {
+        traffic_stats.insert(user.to_owned(), (AtomicUsize::new(0), AtomicUsize::new(0)));
+    }
+
+    let ctx = Arc::new(AppContext {
+        cfg,
+        online_counter,
+        online_clients: CHashMap::new(),
+        traffic_stats,
+    });
 
     let filter = tracing_subscriber::filter::Targets::new()
         .with_targets(vec![

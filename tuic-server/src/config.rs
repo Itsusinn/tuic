@@ -211,7 +211,7 @@ pub struct RestfulConfig {
     #[educe(Default = "YOUR_SECRET_HERE")]
     pub secret: String,
     #[educe(Default = 0)]
-    pub maximum_clients_per_user: u64,
+    pub maximum_clients_per_user: usize,
 }
 
 impl Config {
