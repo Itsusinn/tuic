@@ -238,8 +238,8 @@ impl Connection {
                 .auth
                 .get()
                 .ok_or_eyre("Unexpected autherization state")?;
-            restful::traffic_tx(&self.ctx, &uuid, tx as u64);
-            restful::traffic_rx(&self.ctx, &uuid, rx as u64);
+            restful::traffic_tx(&self.ctx, &uuid, tx);
+            restful::traffic_rx(&self.ctx, &uuid, rx);
             if let Some(err) = err {
                 return Err(err);
             }
@@ -453,7 +453,7 @@ impl Connection {
                 .auth
                 .get()
                 .ok_or_eyre("Unexpected autherization state")?;
-            restful::traffic_tx(&self.ctx, &uuid, pkt.len() as u64);
+            restful::traffic_tx(&self.ctx, &uuid, pkt.len());
             if let Some(session) = session.upgrade() {
                 session.send(pkt, socket_addr).await
             } else {
@@ -512,7 +512,7 @@ impl Connection {
         restful::traffic_rx(
             &self.ctx,
             &self.auth.get().ok_or_eyre("Unreachable")?,
-            pkt.len() as u64,
+            pkt.len(),
         );
 
         let res = match self.udp_relay_mode.load().unwrap() {

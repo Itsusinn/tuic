@@ -1,14 +1,9 @@
 use std::{
     collections::{HashMap, HashSet},
     net::SocketAddr,
-    ops::Deref,
-    sync::{
-        Arc, LazyLock,
-        atomic::{AtomicU64, Ordering},
-    },
+    sync::{Arc, atomic::Ordering},
 };
 
-use arc_swap::ArcSwap;
 use axum::{
     Json, Router,
     extract::State,
@@ -19,7 +14,6 @@ use axum_extra::{
     TypedHeader,
     headers::{Authorization, authorization::Bearer},
 };
-use chashmap::CHashMap;
 use quinn::{Connection as QuinnConnection, VarInt};
 use serde_json::json;
 use tracing::warn;
@@ -27,52 +21,7 @@ use uuid::Uuid;
 
 use crate::AppContext;
 
-static ONLINE_COUNTER: LazyLock<ArcSwap<HashMap<Uuid, AtomicU64>>> =
-    LazyLock::new(ArcSwap::default);
-static ONLINE_CLIENTS: LazyLock<CHashMap<Uuid, HashSet<QuicClient>>> = LazyLock::new(CHashMap::new);
-static TRAFFIC_STATS: LazyLock<ArcSwap<HashMap<Uuid, (AtomicU64, AtomicU64)>>> =
-    LazyLock::new(ArcSwap::default); // (tx, rx)
-
-#[derive(Clone)]
-struct QuicClient(QuinnConnection);
-impl Deref for QuicClient {
-    type Target = QuinnConnection;
-
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
-impl From<QuinnConnection> for QuicClient {
-    fn from(value: QuinnConnection) -> Self {
-        Self(value)
-    }
-}
-impl std::hash::Hash for QuicClient {
-    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        self.0.stable_id().hash(state);
-    }
-}
-impl PartialEq for QuicClient {
-    fn eq(&self, other: &Self) -> bool {
-        self.0.stable_id() == other.0.stable_id()
-    }
-}
-impl Eq for QuicClient {}
-
 pub async fn start(ctx: Arc<AppContext>) {
-    let mut online = HashMap::new();
-    for (user, _) in ctx.cfg.users.iter() {
-        online.insert(user.to_owned(), AtomicU64::new(0));
-    }
-
-    let mut traffic = HashMap::new();
-    for (user, _) in ctx.cfg.users.iter() {
-        traffic.insert(user.to_owned(), (AtomicU64::new(0), AtomicU64::new(0)));
-    }
-
-    ONLINE_COUNTER.swap(Arc::new(online));
-    TRAFFIC_STATS.swap(Arc::new(traffic));
-
     let restful = ctx.cfg.restful.as_ref().unwrap();
     let addr = restful.addr;
     let app = Router::new()
@@ -93,13 +42,13 @@ async fn kick(
     Json(users): Json<Vec<Uuid>>,
 ) -> StatusCode {
     if let Some(restful) = &ctx.cfg.restful
-        && restful.secret == ""
+        && restful.secret.is_empty()
         && restful.secret != token.token()
     {
         return StatusCode::UNAUTHORIZED;
     }
     for user in users {
-        if let Some(list) = ONLINE_CLIENTS.get(&user).await {
+        if let Some(list) = ctx.online_clients.get(&user).await {
             for client in list.iter() {
                 client.close(VarInt::from_u32(6002), "Client got kicked".as_bytes());
             }
@@ -111,15 +60,15 @@ async fn kick(
 async fn list_online(
     State(ctx): State<Arc<AppContext>>,
     token: TypedHeader<Authorization<Bearer>>,
-) -> (StatusCode, Json<HashMap<Uuid, u64>>) {
+) -> (StatusCode, Json<HashMap<Uuid, usize>>) {
     if let Some(restful) = &ctx.cfg.restful
-        && restful.secret == ""
+        && restful.secret.is_empty()
         && restful.secret != token.token()
     {
         return (StatusCode::UNAUTHORIZED, Json(HashMap::new()));
     }
     let mut result = HashMap::new();
-    for (user, count) in ONLINE_COUNTER.load().iter() {
+    for (user, count) in ctx.online_counter.iter() {
         let count = count.load(Ordering::Relaxed);
         if count != 0 {
             result.insert(user.to_owned(), count);
@@ -134,13 +83,13 @@ async fn list_detailed_online(
     token: TypedHeader<Authorization<Bearer>>,
 ) -> (StatusCode, Json<HashMap<Uuid, Vec<SocketAddr>>>) {
     if let Some(restful) = &ctx.cfg.restful
-        && restful.secret == ""
+        && restful.secret.is_empty()
         && restful.secret != token.token()
     {
         return (StatusCode::UNAUTHORIZED, Json(HashMap::new()));
     }
     let mut result = HashMap::new();
-    for (user, list) in ONLINE_CLIENTS.clone_locking().await.into_iter() {
+    for (user, list) in ctx.online_clients.clone_locking().await.into_iter() {
         if list.is_empty() {
             continue;
         }
@@ -155,13 +104,13 @@ async fn list_traffic(
     token: TypedHeader<Authorization<Bearer>>,
 ) -> (StatusCode, Json<HashMap<Uuid, serde_json::Value>>) {
     if let Some(restful) = &ctx.cfg.restful
-        && restful.secret == ""
+        && restful.secret.is_empty()
         && restful.secret != token.token()
     {
         return (StatusCode::UNAUTHORIZED, Json(HashMap::new()));
     }
     let mut result = HashMap::new();
-    for (uuid, (tx, rx)) in TRAFFIC_STATS.load().iter() {
+    for (uuid, (tx, rx)) in ctx.traffic_stats.iter() {
         let tx = tx.load(Ordering::Relaxed);
         let rx = rx.load(Ordering::Relaxed);
         if tx != 0 || rx != 0 {
@@ -177,13 +126,13 @@ async fn reset_traffic(
     token: TypedHeader<Authorization<Bearer>>,
 ) -> (StatusCode, Json<HashMap<Uuid, serde_json::Value>>) {
     if let Some(restful) = &ctx.cfg.restful
-        && restful.secret == ""
+        && restful.secret.is_empty()
         && restful.secret != token.token()
     {
         return (StatusCode::UNAUTHORIZED, Json(HashMap::new()));
     }
     let mut result = HashMap::new();
-    for (uuid, (tx, rx)) in TRAFFIC_STATS.load().iter() {
+    for (uuid, (tx, rx)) in ctx.traffic_stats.iter() {
         let tx = tx.swap(0, Ordering::Relaxed);
         let rx = rx.swap(0, Ordering::Relaxed);
         if tx != 0 || rx != 0 {
@@ -195,12 +144,9 @@ async fn reset_traffic(
 }
 
 pub async fn client_connect(ctx: &AppContext, uuid: &Uuid, conn: QuinnConnection) {
-    if ctx.cfg.restful.is_none() {
-        return;
-    }
     let cfg = ctx.cfg.restful.as_ref().unwrap();
-    let current = ONLINE_COUNTER
-        .load()
+    let current = ctx
+        .online_counter
         .get(uuid)
         .expect("Authorized UUID not present in users table")
         .fetch_add(1, Ordering::Release);
@@ -211,40 +157,30 @@ pub async fn client_connect(ctx: &AppContext, uuid: &Uuid, conn: QuinnConnection
         );
         return;
     }
-    ONLINE_CLIENTS
+    ctx.online_clients
         .upsert(*uuid, HashSet::new, |v| {
             v.insert(conn.into());
         })
         .await;
 }
 pub async fn client_disconnect(ctx: &AppContext, uuid: &Uuid, conn: QuinnConnection) {
-    if ctx.cfg.restful.is_none() {
-        return;
-    }
-    ONLINE_COUNTER
-        .load()
+    ctx.online_counter
         .get(uuid)
         .expect("Authorized UUID not present in users table")
         .fetch_sub(1, Ordering::SeqCst);
-    if let Some(mut pair) = ONLINE_CLIENTS.get_mut(uuid).await {
+    if let Some(mut pair) = ctx.online_clients.get_mut(uuid).await {
         pair.remove(&conn.into());
     }
 }
 
-pub fn traffic_tx(ctx: &AppContext, uuid: &Uuid, size: u64) {
-    if ctx.cfg.restful.is_none() {
-        return;
-    }
-    if let Some((tx, _)) = TRAFFIC_STATS.load().get(uuid) {
+pub fn traffic_tx(ctx: &AppContext, uuid: &Uuid, size: usize) {
+    if let Some((tx, _)) = ctx.traffic_stats.get(uuid) {
         tx.fetch_add(size, Ordering::SeqCst);
     }
 }
 
-pub fn traffic_rx(ctx: &AppContext, uuid: &Uuid, size: u64) {
-    if ctx.cfg.restful.is_none() {
-        return;
-    }
-    if let Some((__, rx)) = TRAFFIC_STATS.load().get(uuid) {
+pub fn traffic_rx(ctx: &AppContext, uuid: &Uuid, size: usize) {
+    if let Some((__, rx)) = ctx.traffic_stats.get(uuid) {
         rx.fetch_add(size, Ordering::SeqCst);
     }
 }
