@@ -187,7 +187,6 @@ hostname = "example.org" # Default: "localhost"
 # If you want disable RESTful function, remove entire `restful` section.
 [restful] # Default: empty
 addr = "127.0.0.1:8443" # Default: "127.0.0.1:8443"
-# Set secret to "" to disable authorization
 secret = "YOUR_SECRET_HERE" # Default: "YOUR_SECRET_HERE"
 
 # Limit how many clients one uuid can have at the same time.
