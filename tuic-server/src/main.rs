@@ -6,6 +6,7 @@ use tracing_subscriber::{fmt::time::LocalTime, layer::SubscriberExt, util::Subsc
 
 use crate::{old_config::ConfigError, server::Server};
 
+mod acl;
 mod config;
 mod connection;
 mod error;
