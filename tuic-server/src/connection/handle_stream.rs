@@ -11,7 +11,7 @@ use super::Connection;
 use crate::{error::Error, utils::UdpRelayMode};
 
 impl Connection {
-    pub async fn handle_uni_stream(self, recv: RecvStream, _reg: Register) {
+    pub async fn handle_uni_stream(self, recv: RecvStream, reg: Register) {
         debug!(
             "[{id:#010x}] [{addr}] [{user}] incoming unidirectional stream",
             id = self.id(),
@@ -19,14 +19,23 @@ impl Connection {
             user = self.auth,
         );
 
-        let max = self.max_concurrent_uni_streams.load(Ordering::Relaxed);
+        let current_max = self.max_concurrent_uni_streams.load(Ordering::Relaxed);
 
-        if self.remote_uni_stream_cnt.count() as u32 == max {
-            self.max_concurrent_uni_streams
-                .store(max * 2, Ordering::Relaxed);
-
+        if self.remote_uni_stream_cnt.count() as u32 >= current_max - 1
+            && let Ok(_) = self.max_concurrent_uni_streams.compare_exchange(
+                current_max,
+                current_max * 2,
+                Ordering::AcqRel,
+                Ordering::Acquire,
+            )
+        {
+            debug!(
+                "[{id:#010x}] reached max concurrent uni_streams, setting bigger limitation={num}",
+                id = self.id(),
+                num = current_max * 2
+            );
             self.inner
-                .set_max_concurrent_uni_streams(VarInt::from(max * 2));
+                .set_max_concurrent_uni_streams(VarInt::from(current_max * 2));
         }
 
         let pre_process = async {
@@ -71,9 +80,10 @@ impl Connection {
                 self.close();
             }
         }
+        drop(reg);
     }
 
-    pub async fn handle_bi_stream(self, (send, recv): (SendStream, RecvStream), _reg: Register) {
+    pub async fn handle_bi_stream(self, (send, recv): (SendStream, RecvStream), reg: Register) {
         debug!(
             "[{id:#010x}] [{addr}] [{user}] incoming bidirectional stream",
             id = self.id(),
@@ -81,14 +91,23 @@ impl Connection {
             user = self.auth,
         );
 
-        let max = self.max_concurrent_bi_streams.load(Ordering::Relaxed);
+        let current_max = self.max_concurrent_bi_streams.load(Ordering::Relaxed);
 
-        if self.remote_bi_stream_cnt.count() as u32 == max {
-            self.max_concurrent_bi_streams
-                .store(max * 2, Ordering::Relaxed);
-
+        if self.remote_bi_stream_cnt.count() as u32 >= current_max - 1
+            && let Ok(_) = self.max_concurrent_bi_streams.compare_exchange(
+                current_max,
+                current_max * 2,
+                Ordering::AcqRel,
+                Ordering::Acquire,
+            )
+        {
+            debug!(
+                "[{id:#010x}] reached max concurrent bi_streams, setting bigger limitation={num}",
+                id = self.id(),
+                num = current_max * 2
+            );
             self.inner
-                .set_max_concurrent_bi_streams(VarInt::from(max * 2));
+                .set_max_concurrent_bi_streams(VarInt::from(current_max * 2));
         }
 
         let pre_process = async {
@@ -121,6 +140,7 @@ impl Connection {
                 self.close();
             }
         }
+        drop(reg);
     }
 
     pub async fn handle_datagram(self, dg: Bytes) {
