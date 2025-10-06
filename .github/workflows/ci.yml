@@ -14,7 +14,9 @@ concurrency:
 env:
   PACKAGE: "tuic-server"
   PACKAGE2: "tuic-client"
-  RUST_TOOLCHAIN: "nightly-2025-07-01"
+  RUST_TOOLCHAIN: "nightly-2025-10-05"
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: 0
 
 jobs:
   compile:
@@ -145,15 +147,17 @@ jobs:
       - uses: actions/checkout@v5
         with:
           submodules: true
+          fetch-depth: 1
 
-      - uses: actions/cache@v4
+      - uses: Swatinem/rust-cache@v2
         with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-          key: ${{ matrix.release-name || matrix.target }}-${{ hashFiles('**/Cargo.toml') }}
-          restore-keys: |
-            ${{ matrix.release-name || matrix.target }}
+          key: ${{ matrix.release-name || matrix.target }}
+          shared-key: rust-${{ hashFiles('**/Cargo.lock') }}
+          cache-directories: |
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
 
       - uses: dtolnay/rust-toolchain@master
         with:
@@ -165,8 +169,7 @@ jobs:
         if: matrix.tool == 'cross'
         run: |
           rustup target add ${TARGET}
-          rm -f ~/.cargo/bin/cross*
-          cargo install cross --git https://github.com/cross-rs/cross
+          cargo install cross --git https://github.com/cross-rs/cross --force
         env:
           TARGET: ${{ matrix.target }}
 
@@ -191,10 +194,11 @@ jobs:
         with:
           tool: ${{ matrix.tool }}
           command: test
-          args: --all --target ${{ matrix.target }} ${{ matrix.extra-args }}
+          args: --all --target ${{ matrix.target }} ${{ matrix.extra-args }} -- --nocapture
         env:
           CROSS_CONTAINER_OPTS: "--network host"
           RUSTFLAGS: ${{ matrix.rustflags }}
+          RUST_TEST_THREADS: 8
 
       - name: Cargo build
         uses: clechasseur/rs-cargo@v4
@@ -203,49 +207,44 @@ jobs:
           command: build
           args: --workspace --release --target ${{ matrix.target }} ${{ matrix.extra-args }}
         env:
-          RUSTFLAGS: ${{ matrix.rustflags }}
+          RUSTFLAGS: "${{ matrix.rustflags }} -C link-arg=-s"
+          CARGO_PROFILE_RELEASE_LTO: true
+          CARGO_PROFILE_RELEASE_CODEGEN_UNITS: 1
 
-      - name: Rename binary
-        run: mv target/${{ matrix.target }}/release/${{ env.PACKAGE }}${{ matrix.postfix }} ${{ env.PACKAGE }}-${{ matrix.release-name || matrix.target }}${{ matrix.postfix }}
-
-      - name: Upload binaries
-        uses: actions/upload-artifact@v4
-        with:
-          name: ${{ env.PACKAGE }}-${{ matrix.release-name || matrix.target }}
-          path: ${{ env.PACKAGE }}-${{ matrix.release-name || matrix.target }}${{ matrix.postfix }}
-
-      - name: Rename binary
-        run: mv target/${{ matrix.target }}/release/${{ env.PACKAGE2 }}${{ matrix.postfix }} ${{ env.PACKAGE2 }}-${{ matrix.release-name || matrix.target }}${{ matrix.postfix }}
+      - name: Prepare binaries
+        shell: bash
+        run: |
+          mkdir -p artifacts
+          cp target/${{ matrix.target }}/release/${{ env.PACKAGE }}${{ matrix.postfix }} artifacts/${{ env.PACKAGE }}-${{ matrix.release-name || matrix.target }}${{ matrix.postfix }}
+          cp target/${{ matrix.target }}/release/${{ env.PACKAGE2 }}${{ matrix.postfix }} artifacts/${{ env.PACKAGE2 }}-${{ matrix.release-name || matrix.target }}${{ matrix.postfix }}
 
       - name: Upload binaries
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ env.PACKAGE2 }}-${{ matrix.release-name || matrix.target }}
-          path: ${{ env.PACKAGE2 }}-${{ matrix.release-name || matrix.target }}${{ matrix.postfix }}
+          name: ${{ matrix.release-name || matrix.target }}-binaries
+          path: artifacts/
+          if-no-files-found: error
+          retention-days: 3
 
 
   release:
     name: Release
     needs: [compile]
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v5
         with:
           fetch-depth: 0
           fetch-tags: true
 
-      - name: Merge binaries
-        uses: actions/upload-artifact/merge@v4
-        with:
-          name: binaries
-          pattern: '*'
-          retention-days: 1
-
       - name: Download binaries
         uses: actions/download-artifact@v5
         with:
-          name: binaries
+          pattern: "*-binaries"
           path: ./packages
+          merge-multiple: true
 
       - name: Clean git tag & release
         if: startsWith(github.ref, 'refs/heads/dev')
@@ -310,23 +309,22 @@ jobs:
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
+        with:
+          buildkitd-flags: --debug
 
-      - name: Download binaries amd64
+      - name: Download binaries
         uses: actions/download-artifact@v5
         with:
-          name: tuic-server-x86_64-linux-musl
+          pattern: "*-binaries"
           path: ./packages
+          merge-multiple: true
 
-      - name: Download binaries arm64
-        uses: actions/download-artifact@v5
-        with:
-          name: tuic-server-aarch64-linux-musl
-          path: ./packages
-
-      - name: Rename binary
+      - name: Prepare binaries for Docker
         run: |
-          mv ./packages/tuic-server-x86_64-linux-musl ./packages/tuic-server-amd64
-          mv ./packages/tuic-server-aarch64-linux-musl ./packages/tuic-server-arm64
+          mkdir -p ./docker-bins
+          cp ./packages/tuic-server-x86_64-linux-musl ./docker-bins/tuic-server-amd64
+          cp ./packages/tuic-server-aarch64-linux-musl ./docker-bins/tuic-server-arm64
+          chmod +x ./docker-bins/tuic-server-*
 
       - name: Login to GitHub Container Registry
         uses: docker/login-action@v3
@@ -353,3 +351,7 @@ jobs:
           push: ${{ startsWith(github.ref, 'refs/tags/v') }}
           tags: ${{ env.TAG_VERSION }},${{ env.TAG_LATEST }}
           provenance: false
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          build-args: |
+            BINARY_DIR=./docker-bins
