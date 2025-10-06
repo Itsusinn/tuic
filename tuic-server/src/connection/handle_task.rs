@@ -18,7 +18,7 @@ use super::{Connection, ERROR_CODE, UdpSession};
 use crate::{
     config::OutboundRule,
     error::Error,
-    io::exchange_tcp,
+    io::copy_io,
     restful,
     utils::{IpMode, UdpRelayMode},
 };
@@ -226,7 +226,7 @@ impl Connection {
 
             // a -> b tx
             // a <- b rx
-            let (tx, rx, err) = exchange_tcp(&mut conn, &mut stream).await;
+            let (tx, rx, err) = copy_io(&mut conn, &mut stream).await;
             if err.is_some() {
                 _ = conn.reset(ERROR_CODE);
             } else {
@@ -241,9 +241,9 @@ impl Connection {
             restful::traffic_tx(&self.ctx, &uuid, tx);
             restful::traffic_rx(&self.ctx, &uuid, rx);
             if let Some(err) = err {
-                return Err(err);
+                return Err(err.into());
             }
-            Ok(())
+            eyre::Ok(())
         };
 
         match process.await {

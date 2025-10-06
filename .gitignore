@@ -2,3 +2,5 @@
 target/
 .DS_Store
 .idea/
+
+tuic-server/dbg.toml

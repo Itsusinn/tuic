@@ -19,4 +19,4 @@ thiserror = { version = "2", default-features = false }
 tuic = { path = "../tuic", default-features = false, features = ["async_marshal", "marshal", "model"] }
 uuid = { version = "1", default-features = false, features = ["std"] }
 tokio = { version = "1", default-features = false, features = ["io-util"] }
-eyre = { version = "0" }
+eyre = { version = "0.6" }

@@ -153,7 +153,7 @@ pub async fn client_connect(ctx: &AppContext, uuid: &Uuid, conn: QuinnConnection
     if cfg.maximum_clients_per_user != 0 && current > cfg.maximum_clients_per_user {
         conn.close(
             VarInt::from_u32(6001),
-            "Reached maximum clients limitation".as_bytes(),
+            b"Reached maximum clients limitation",
         );
         return;
     }
