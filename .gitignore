@@ -4,3 +4,5 @@ target/
 .idea/
 
 tuic-server/dbg.toml
+
+client.json

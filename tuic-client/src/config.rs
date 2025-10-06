@@ -17,7 +17,7 @@ use serde_json::Error as SerdeError;
 use thiserror::Error;
 use uuid::Uuid;
 
-use crate::utils::{CongestionControl, UdpRelayMode};
+use crate::utils::{CongestionControl, StackPrefer, UdpRelayMode};
 
 const HELP_MSG: &str = r#"
 Usage tuic-client [arguments]
@@ -51,6 +51,12 @@ pub struct Relay {
     pub password: Arc<[u8]>,
 
     pub ip: Option<IpAddr>,
+
+    #[serde(
+        default = "default::relay::ipstack_prefer",
+        deserialize_with = "deserialize_from_str"
+    )]
+    pub ipstack_prefer: StackPrefer,
 
     #[serde(default = "default::relay::certificates")]
     pub certificates: Vec<PathBuf>,
@@ -209,7 +215,10 @@ mod default {
     pub mod relay {
         use std::{path::PathBuf, time::Duration};
 
-        use crate::utils::{CongestionControl, UdpRelayMode};
+        use crate::utils::{CongestionControl, StackPrefer, UdpRelayMode};
+        pub fn ipstack_prefer() -> StackPrefer {
+            StackPrefer::V4first
+        }
 
         pub fn certificates() -> Vec<PathBuf> {
             Vec::new()
