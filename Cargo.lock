@@ -2568,7 +2568,7 @@ checksum = "e421abadd41a4225275504ea4d6566923418b7f05506fbc9c0fe86ba7396114b"
 
 [[package]]
 name = "tuic"
-version = "1.5.1"
+version = "1.5.2"
 dependencies = [
  "bytes",
  "futures-util",
@@ -2581,7 +2581,7 @@ dependencies = [
 
 [[package]]
 name = "tuic-client"
-version = "1.5.1"
+version = "1.5.2"
 dependencies = [
  "anyhow",
  "bytes",
@@ -2615,7 +2615,7 @@ dependencies = [
 
 [[package]]
 name = "tuic-quinn"
-version = "1.5.1"
+version = "1.5.2"
 dependencies = [
  "bytes",
  "eyre",
@@ -2629,7 +2629,7 @@ dependencies = [
 
 [[package]]
 name = "tuic-server"
-version = "1.5.1"
+version = "1.5.2"
 dependencies = [
  "arc-swap",
  "axum",

@@ -432,18 +432,16 @@ impl Endpoint {
         };
 
         match connect_to.await {
-            Ok((conn, zero_rtt_accepted)) => {
-                Ok(Connection::new(
-                    conn,
-                    zero_rtt_accepted,
-                    self.udp_relay_mode,
-                    self.uuid,
-                    self.password.clone(),
-                    self.heartbeat,
-                    self.gc_interval,
-                    self.gc_lifetime,
-                ))
-            }
+            Ok((conn, zero_rtt_accepted)) => Ok(Connection::new(
+                conn,
+                zero_rtt_accepted,
+                self.udp_relay_mode,
+                self.uuid,
+                self.password.clone(),
+                self.heartbeat,
+                self.gc_interval,
+                self.gc_lifetime,
+            )),
             Err(err) => Err(err),
         }
     }
