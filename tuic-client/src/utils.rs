@@ -4,6 +4,27 @@ use std::{
     path::PathBuf,
     str::FromStr,
 };
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum StackPrefer {
+    V4only,
+    V6only,
+    V4first,
+    V6first,
+}
+
+impl FromStr for StackPrefer {
+    type Err = &'static str;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.to_ascii_lowercase().as_str() {
+            "v4" => Ok(StackPrefer::V4only),
+            "v6" => Ok(StackPrefer::V6only),
+            "v4v6" => Ok(StackPrefer::V4first),
+            "v6v4" => Ok(StackPrefer::V6first),
+            _ => Err("invalid stack preference"),
+        }
+    }
+}
 
 use anyhow::Context;
 use rustls::{RootCertStore, pki_types::CertificateDer};
@@ -39,11 +60,17 @@ pub struct ServerAddr {
     domain: String,
     port: u16,
     ip: Option<IpAddr>,
+    pub ipstack_prefer: StackPrefer,
 }
 
 impl ServerAddr {
-    pub fn new(domain: String, port: u16, ip: Option<IpAddr>) -> Self {
-        Self { domain, port, ip }
+    pub fn new(domain: String, port: u16, ip: Option<IpAddr>, ipstack_prefer: StackPrefer) -> Self {
+        Self {
+            domain,
+            port,
+            ip,
+            ipstack_prefer,
+        }
     }
 
     pub fn server_name(&self) -> &str {
@@ -51,13 +78,28 @@ impl ServerAddr {
     }
 
     pub async fn resolve(&self) -> Result<impl Iterator<Item = SocketAddr>, Error> {
+        // no extra imports needed
         if let Some(ip) = self.ip {
             Ok(vec![SocketAddr::from((ip, self.port))].into_iter())
         } else {
-            Ok(net::lookup_host((self.domain.as_str(), self.port))
+            let mut addrs: Vec<SocketAddr> = net::lookup_host((self.domain.as_str(), self.port))
                 .await?
-                .collect::<Vec<_>>()
-                .into_iter())
+                .collect();
+            match self.ipstack_prefer {
+                StackPrefer::V4only => {
+                    addrs.retain(|a| matches!(a, SocketAddr::V4(_)));
+                }
+                StackPrefer::V6only => {
+                    addrs.retain(|a| matches!(a, SocketAddr::V6(_)));
+                }
+                StackPrefer::V4first => {
+                    addrs.sort_by_key(|a| if a.is_ipv4() { 0 } else { 1 });
+                }
+                StackPrefer::V6first => {
+                    addrs.sort_by_key(|a| if a.is_ipv6() { 0 } else { 1 });
+                }
+            }
+            Ok(addrs.into_iter())
         }
     }
 }

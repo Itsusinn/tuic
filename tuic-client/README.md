@@ -49,6 +49,17 @@ tuic-client -c PATH/TO/CONFIG
         // If not set, the HOST in the "server" field is used for DNS resolving
         "ip": "127.0.0.1",
 
+
+        // Optional. Preferred IP stack for connecting to the server.
+        // Affects Server dns priority adjustment, therefore this option is invalid when `ip` is set.
+        // Can be:
+        // - "v4": Only use IPv4 addresses
+        // - "v6": Only use IPv6 addresses
+        // - "v4v6": Prefer IPv4 addresses, fallback to IPv6
+        // - "v6v4": Prefer IPv6 addresses, fallback to IPv4
+        // Default: "v4v6"
+        "ipstack_prefer": "v4v6",
+
         // Optional. A list of certificates for TLS handshake
         // System native certificates are also loaded by default
         // When using self-signed certificates, the full certificate chain must be provided

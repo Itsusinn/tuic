@@ -19,8 +19,6 @@ pub enum Error {
     Socket(&'static str, IoError),
     #[error("timeout establishing connection")]
     Timeout,
-    #[error("cannot resolve the server name")]
-    DnsResolve,
     #[error("received packet from an unexpected source")]
     WrongPacketSource,
     #[error("invalid socks5 authentication")]
