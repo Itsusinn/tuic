@@ -151,8 +151,7 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
         with:
-          key: ${{ matrix.release-name || matrix.target }}
-          shared-key: rust-${{ hashFiles('**/Cargo.lock') }}
+          shared-key: ${{ matrix.release-name || matrix.target }}-${{ hashFiles('**/Cargo.lock') }}
           cache-directories: |
             ~/.cargo/registry/index/
             ~/.cargo/registry/cache/
