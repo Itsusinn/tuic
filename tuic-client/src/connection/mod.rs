@@ -1,9 +1,11 @@
+// Standard library imports for networking, synchronization, and timing
 use std::{
-    net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, UdpSocket},
+    net::{Ipv4Addr, Ipv6Addr, SocketAddr, UdpSocket},
     sync::{Arc, atomic::AtomicU32},
     time::Duration,
 };
 
+// Error handling and utility crates
 use anyhow::Context;
 use crossbeam_utils::atomic::AtomicCell;
 use once_cell::sync::OnceCell;
@@ -23,6 +25,7 @@ use tokio::{
     time,
 };
 use tracing::{debug, info, warn};
+// Importing custom QUIC connection model and side marker
 use tuic_quinn::{Connection as Model, side};
 use uuid::Uuid;
 
@@ -35,30 +38,48 @@ use crate::{
 mod handle_stream;
 mod handle_task;
 
+// Global state for endpoint, connection, and timeout
 static ENDPOINT: OnceCell<AsyncRwLock<Endpoint>> = OnceCell::new();
 static CONNECTION: AsyncOnceCell<AsyncRwLock<Connection>> = AsyncOnceCell::const_new();
 static TIMEOUT: AtomicCell<Duration> = AtomicCell::new(Duration::from_secs(0));
 
+/// Default error code for QUIC connection
 pub const ERROR_CODE: VarInt = VarInt::from_u32(0);
+/// Default maximum concurrent streams
 const DEFAULT_CONCURRENT_STREAMS: u32 = 32;
 
+/// Represents a client QUIC connection, including stream counters and
+/// configuration
 #[derive(Clone)]
 pub struct Connection {
+    /// Underlying QUIC connection
     conn: QuinnConnection,
+    /// Model for handling protocol logic
     model: Model<side::Client>,
+    /// Unique identifier for the connection
     uuid: Uuid,
+    /// Password for authentication
     password: Arc<[u8]>,
+    /// UDP relay mode
     udp_relay_mode: UdpRelayMode,
+    /// Counter for remote unidirectional streams
     remote_uni_stream_cnt: Counter,
+    /// Counter for remote bidirectional streams
     remote_bi_stream_cnt: Counter,
+    /// Max concurrent unidirectional streams
     max_concurrent_uni_streams: Arc<AtomicU32>,
+    /// Max concurrent bidirectional streams
     max_concurrent_bi_streams: Arc<AtomicU32>,
 }
 
 impl Connection {
+    /// Initialize the global endpoint and connection configuration
     pub async fn set_config(cfg: Relay) -> Result<(), Error> {
+        // Load certificates for TLS
         let certs = utils::load_certs(cfg.certificates, cfg.disable_native_certs)?;
 
+        // Build TLS client config, optionally skipping certificate verification (for
+        // development/testing)
         let mut crypto = if cfg.skip_cert_verify {
             #[derive(Debug)]
             struct SkipServerVerification(Arc<rustls::crypto::CryptoProvider>);
@@ -73,6 +94,8 @@ impl Connection {
                 }
             }
 
+            // Custom certificate verifier that skips all checks (dangerous, use only for
+            // testing)
             impl rustls::client::danger::ServerCertVerifier for SkipServerVerification {
                 fn verify_server_cert(
                     &self,
@@ -134,6 +157,7 @@ impl Connection {
         crypto.enable_early_data = true;
         crypto.enable_sni = !cfg.disable_sni;
 
+        // Build QUIC client and transport configuration
         let mut config = ClientConfig::new(Arc::new(
             QuicClientConfig::try_from(crypto).context("no initial cipher suite found")?,
         ));
@@ -155,6 +179,7 @@ impl Connection {
             tp_cfg.mtu_discovery_config(None);
         }
 
+        // Set congestion control algorithm
         match cfg.congestion_control {
             CongestionControl::Cubic => {
                 tp_cfg.congestion_controller_factory(Arc::new(CubicConfig::default()))
@@ -169,19 +194,9 @@ impl Connection {
 
         config.transport_config(Arc::new(tp_cfg));
 
-        let server = ServerAddr::new(cfg.server.0, cfg.server.1, cfg.ip);
-        let server_ip: Option<IpAddr> = match server.resolve().await?.next() {
-            Some(SocketAddr::V4(v4)) => Some(v4.ip().to_owned().into()),
-            Some(SocketAddr::V6(v6)) => Some(v6.ip().to_owned().into()),
-            None => None,
-        };
-        let server_ip = server_ip.expect("Server ip not found");
-        let socket = if server_ip.is_ipv4() {
-            UdpSocket::bind(SocketAddr::from((Ipv4Addr::UNSPECIFIED, 0)))?
-        } else {
-            UdpSocket::bind(SocketAddr::from((Ipv6Addr::UNSPECIFIED, 0)))?
-        };
-
+        // Prepare server address and create the primary endpoint with IPv4 binding
+        let server = ServerAddr::new(cfg.server.0, cfg.server.1, cfg.ip, cfg.ipstack_prefer);
+        let socket = UdpSocket::bind(SocketAddr::from((Ipv4Addr::UNSPECIFIED, 0)))?;
         let mut ep = QuinnEndpoint::new(
             EndpointConfig::default(),
             None,
@@ -191,6 +206,7 @@ impl Connection {
 
         ep.set_default_client_config(config);
 
+        // Store endpoint and configuration globally
         let ep = Endpoint {
             ep,
             server,
@@ -213,6 +229,7 @@ impl Connection {
         Ok(())
     }
 
+    /// Get a connection, establishing a new one if needed
     pub async fn get_conn() -> Result<Connection, Error> {
         let try_init_conn = async {
             ENDPOINT
@@ -247,6 +264,7 @@ impl Connection {
         Ok(conn)
     }
 
+    /// Create a new Connection instance and spawn background tasks
     #[allow(clippy::too_many_arguments)]
     fn new(
         conn: QuinnConnection,
@@ -278,6 +296,8 @@ impl Connection {
         conn
     }
 
+    /// Initialize background tasks for authentication, heartbeat, and garbage
+    /// collection
     async fn init(
         self,
         zero_rtt_accepted: Option<ZeroRttAccepted>,
@@ -311,10 +331,12 @@ impl Connection {
         warn!("[relay] connection error: {err}");
     }
 
+    /// Check if the connection is closed
     fn is_closed(&self) -> bool {
         self.conn.close_reason().is_some()
     }
 
+    /// Periodically collect garbage fragments from the model
     async fn collect_garbage(self, gc_interval: Duration, gc_lifetime: Duration) {
         loop {
             time::sleep(gc_interval).await;
@@ -329,6 +351,7 @@ impl Connection {
     }
 }
 
+/// Represents a QUIC endpoint and its configuration
 struct Endpoint {
     ep: QuinnEndpoint,
     server: ServerAddr,
@@ -342,41 +365,86 @@ struct Endpoint {
 }
 
 impl Endpoint {
+    /// Establish a new QUIC connection to the server, rebinding if necessary
+    /// for IP family
     async fn connect(&self) -> Result<Connection, Error> {
-        let mut last_err = None;
-
-        for addr in self.server.resolve().await? {
-            let connect_to = async {
-                let conn = self.ep.connect(addr, self.server.server_name())?;
-                let (conn, zero_rtt_accepted) = if self.zero_rtt_handshake {
-                    match conn.into_0rtt() {
-                        Ok((conn, zero_rtt_accepted)) => (conn, Some(zero_rtt_accepted)),
-                        Err(conn) => (conn.await?, None),
-                    }
-                } else {
-                    (conn.await?, None)
-                };
-
-                Ok((conn, zero_rtt_accepted))
-            };
-
-            match connect_to.await {
-                Ok((conn, zero_rtt_accepted)) => {
-                    return Ok(Connection::new(
-                        conn,
-                        zero_rtt_accepted,
-                        self.udp_relay_mode,
-                        self.uuid,
-                        self.password.clone(),
-                        self.heartbeat,
-                        self.gc_interval,
-                        self.gc_lifetime,
-                    ));
+        let server_addr = self
+            .server
+            .resolve()
+            .await?
+            .next()
+            .context("no resolved address")?;
+        // Check if endpoint's local address IP family matches the server's resolved IP
+        // family
+        let mut need_rebind = false;
+        if self.ep.local_addr()?.is_ipv4() && !server_addr.ip().is_ipv4() {
+            need_rebind = true;
+        }
+        if need_rebind {
+            // Log the IP family and binding action
+            match server_addr.ip() {
+                std::net::IpAddr::V4(_) => {
+                    warn!(
+                        "[relay] Rebinding endpoint: Detected IPv4 server address, binding to \
+                         0.0.0.0:0"
+                    );
+                    let socket = UdpSocket::bind(SocketAddr::from((Ipv4Addr::UNSPECIFIED, 0)))?;
+                    warn!(
+                        "[relay] Successfully bound to IPv4 socket: {:?}",
+                        socket.local_addr().ok()
+                    );
+                    self.ep.rebind(socket)?;
+                    warn!("[relay] Endpoint successfully rebound to IPv4 socket");
                 }
-                Err(err) => last_err = Some(err),
+                std::net::IpAddr::V6(_) => {
+                    warn!(
+                        "[relay] Rebinding endpoint: Detected IPv6 server address, binding to \
+                         [::]:0"
+                    );
+                    let socket = UdpSocket::bind(SocketAddr::from((Ipv6Addr::UNSPECIFIED, 0)))?;
+                    warn!(
+                        "[relay] Successfully bound to IPv6 socket: {:?}",
+                        socket.local_addr().ok()
+                    );
+                    self.ep.rebind(socket)?;
+                    warn!("[relay] Endpoint successfully rebound to IPv6 socket");
+                }
             }
         }
+        info!(
+            "[relay] Connecting to server at {:?} using endpoint with local address: {:?}",
+            server_addr,
+            self.ep.local_addr().ok()
+        );
 
-        Err(last_err.unwrap_or(Error::DnsResolve))
+        let connect_to = async {
+            let conn = self.ep.connect(server_addr, self.server.server_name())?;
+            let (conn, zero_rtt_accepted) = if self.zero_rtt_handshake {
+                match conn.into_0rtt() {
+                    Ok((conn, zero_rtt_accepted)) => (conn, Some(zero_rtt_accepted)),
+                    Err(conn) => (conn.await?, None),
+                }
+            } else {
+                (conn.await?, None)
+            };
+
+            Ok((conn, zero_rtt_accepted))
+        };
+
+        match connect_to.await {
+            Ok((conn, zero_rtt_accepted)) => {
+                Ok(Connection::new(
+                    conn,
+                    zero_rtt_accepted,
+                    self.udp_relay_mode,
+                    self.uuid,
+                    self.password.clone(),
+                    self.heartbeat,
+                    self.gc_interval,
+                    self.gc_lifetime,
+                ))
+            }
+            Err(err) => Err(err),
+        }
     }
 }
