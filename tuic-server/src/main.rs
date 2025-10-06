@@ -40,6 +40,7 @@ struct AppContext {
 
 #[tokio::main]
 async fn main() -> eyre::Result<()> {
+
     let cfg = match parse_config(lexopt::Parser::from_env()).await {
         Ok(cfg) => cfg,
         Err(ConfigError::Version(msg) | ConfigError::Help(msg)) => {
@@ -51,7 +52,10 @@ async fn main() -> eyre::Result<()> {
             process::exit(1);
         }
     };
+    run(cfg).await
+}
 
+pub async fn run(cfg: Config) -> eyre::Result<()> {
     let mut online_counter = HashMap::new();
     for (user, _) in cfg.users.iter() {
         online_counter.insert(user.to_owned(), AtomicUsize::new(0));
