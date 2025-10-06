@@ -21,7 +21,7 @@ impl Connection {
 
         let current_max = self.max_concurrent_uni_streams.load(Ordering::Relaxed);
 
-        if self.remote_uni_stream_cnt.count() as u32 >= current_max - 1
+        if self.remote_uni_stream_cnt.count() >= (current_max as f32 * 0.7) as usize
             && let Ok(_) = self.max_concurrent_uni_streams.compare_exchange(
                 current_max,
                 current_max * 2,
@@ -93,7 +93,7 @@ impl Connection {
 
         let current_max = self.max_concurrent_bi_streams.load(Ordering::Relaxed);
 
-        if self.remote_bi_stream_cnt.count() as u32 >= current_max - 1
+        if self.remote_bi_stream_cnt.count() >= (current_max as f32 * 0.7) as usize
             && let Ok(_) = self.max_concurrent_bi_streams.compare_exchange(
                 current_max,
                 current_max * 2,
