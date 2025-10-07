@@ -1,45 +1,78 @@
 # tuic-server
 
-Minimalistic TUIC server implementation as a reference
+Minimalistic TUIC server implementation as a reference.
 
-[![Version](https://img.shields.io/crates/v/tuic-server.svg?style=flat)](https://crates.io/crates/tuic-server)
-[![License](https://img.shields.io/crates/l/tuic-server.svg?style=flat)](https://github.com/EAimTY/tuic/blob/dev/LICENSE)
+---
 
-# Overview
+## Table of Contents
 
-The main goal of this TUIC server implementation is not to provide a full-featured, production-ready TUIC server, but to provide a minimal reference for the TUIC protocol server implementation.
+- [Overview](#overview)
+- [Features](#features)
+- [Installation](#installation)
+- [Usage](#usage)
+- [Configuration](#configuration)
+- [RESTful API](#restful-api)
+- [TLS Certificates](#tls-certificates)
+- [Contributing](#contributing)
+- [License](#license)
 
-This implementation only contains the most basic requirements of a functional TUIC protocol server. If you are looking for features like outbound-control, DNS-caching, etc., try other implementations, or implement them yourself.
+---
 
-## Usage
+## Overview
 
-Download the latest binary from [releases](https://github.com/Itsusinn/tuic/releases).
+`tuic-server` is a robust and actively developed implementation of the TUIC protocol server. It is a fork of the original TUIC project with significant enhancements and additional features. While it started as a reference implementation, it has evolved to include many production-ready capabilities.
 
-Or install from [crates.io](https://crates.io/crates/tuic-server):
+This fork includes advanced features such as Docker support, self-signed certificate capabilities, automatic certificate hot-reloading, updated dependencies, and improved performance through more relaxed locks. It is suitable for both learning and production environments.
+
+---
+
+## Features
+
+- Minimal TUIC protocol server implementation
+- TOML and legacy JSON configuration support
+- Flexible ACL (Access Control List) system
+- Multiple outbound proxy modes (direct, SOCKS5, etc.)
+- TLS support with auto-provisioning and self-signed certificates
+- RESTful API for monitoring and management
+- Docker and Docker Compose deployment options
+
+---
+
+## Installation
+
+### Download Prebuilt Binary
+
+Get the latest release from [GitHub Releases](https://github.com/Itsusinn/tuic/releases).
+
+### Install via Cargo
 
 ```bash
 cargo install --git https://github.com/Itsusinn/tuic.git tuic-server
 ```
 
-Run the TUIC server with configuration file:
+---
+
+## Usage
+
+Run the TUIC server with a configuration file:
 
 ```bash
 tuic-server -c PATH/TO/CONFIG
 ```
 
-Or with Docker
+### Docker
 
 ```bash
 docker run --name tuic-server \
   --restart always \
   --network host \
   -v /PATH/TO/CONFIG:/etc/tuic/config.json \
-  -v /PATH/TO/CERTIFICATE:PATH/TO/CERTIFICATE \
-  -v /PATH/TO/PRIVATE_KEY:PATH/TO/PRIVATE_KEY \
+  -v /PATH/TO/CERTIFICATE:/PATH/TO/CERTIFICATE \
+  -v /PATH/TO/PRIVATE_KEY:/PATH/TO/PRIVATE_KEY \
   -dit ghcr.io/itsusinn/tuic-server:latest
 ```
 
-Or with Docker Compose
+### Docker Compose
 
 ```yaml
 services:
@@ -54,8 +87,7 @@ services:
       - ./key.crt:/PATH/TO/KEY:ro
 ```
 
-If you use TOML format configuration
-
+#### TOML Configuration with Docker Compose
 
 ```yaml
 services:
@@ -65,253 +97,223 @@ services:
     container_name: tuic
     network_mode: host
     volumes:
-      - ./config.toml:/etc/tuic/config.json:ro # Must be /path/to/toml:/etc/tuic/*config.json*:ro, this will be fix in 2.0.0.
+      - ./config.toml:/etc/tuic/config.json:ro # Must be /path/to/toml:/etc/tuic/*config.json*:ro, this will be fixed in 2.0.0.
       - ./cert.crt:/PATH/TO/CERT:ro
       - ./key.crt:/PATH/TO/KEY:ro
     environment:
       - TUIC_FORCE_TOML=1
 ```
 
+---
+
 ## Configuration
 
-Since `tuic-server 1.2.0`, the new TOML format has been used. The old JSON format will be kept until `2.0.0`.
 
-`tuic-server -c server.toml`
+# Example configuration
 
 ```toml
-# server.toml
-### You can generate example configuration by using `tuic-server -i` or `tuic-server --init`
-### ALL settings are OPTIONAL, if you leave one empty, default value will be used
+# Logging level: trace, debug, info, warn, error, off
+log_level = "info"
 
-log_level = "info" # Default: info
+# Socket address to listen on
+server = "[::]:443"
 
-# The socket address to listen on
-server = "[::]:443" # Default: "[::]:443"
+# Working directory for tuic-server (used for relative certificate/key paths)
+data_dir = ""
 
-# Whether the server should create separate UDP sockets for relaying IPv6 UDP packets
-udp_relay_ipv6 = true # Default: true
-
-# Enable 0-RTT QUIC connection handshake on the server side
-# This is not impacting much on the performance, as the protocol is fully multiplexed
-# WARNING: Disabling this is highly recommended, as it is vulnerable to replay attacks. See https://blog.cloudflare.com/even-faster-connection-establishment-with-quic-0-rtt-resumption/#attack-of-the-clones
-zero_rtt_handshake = false # Default: false
-
-# Set if the listening socket should be dual-stack
-# If this option is not set, the socket behavior is platform dependent
-dual_stack = true # Default: true
-
-# How long the server should wait for the client to send the authentication command
-auth_timeout = "3s" # Default: "3s"
-
-# Maximum duration server expects for task negotiation
-task_negotiation_timeout = "3s" # Default: "3s"
-
+# Create separate UDP sockets for relaying IPv6 UDP packets
+udp_relay_ipv6 = true
+# Enable 0-RTT QUIC handshake (recommended: false for security)
+zero_rtt_handshake = false
+# Set if listening socket should be dual-stack (IPv4/IPv6)
+dual_stack = true
+# How long to wait for client authentication command
+auth_timeout = "3s"
+# Maximum duration for task negotiation
+task_negotiation_timeout = "3s"
 # Interval between UDP packet fragment garbage collection
-gc_interval = "3s" # Default: "3s"
-
-# How long the server should keep a UDP packet fragment. Outdated fragments will be dropped
-gc_lifetime = "15s" # Default: "15s"
-
-# Maximum packet size the server can receive from outbound UDP sockets, in bytes
+gc_interval = "10s"
+# How long to keep UDP packet fragments before dropping
+gc_lifetime = "30s"
+# Maximum packet size received from outbound UDP sockets (bytes)
 max_external_packet_size = 1500
+# How long to preserve TCP and UDP I/O tasks
+stream_timeout = "60s"
 
-# How long should server perserve TCP and UDP I/O tasks.
-stream_timeout = "10s" # Default: "10s"
+# Access Control List (ACL) rules - can be specified in two formats:
 
-# Working Directory of tuic
-data_dir = "" # Default: `CWD`
-
-# The ACLs are matched in a top-to-bottom order. If no rule matches, the `default` outbound will be used.
-# For security, builtin rule `drop localhost` will be appended at bottom automatically to drop clients' access to
-# server's services on localhost.
+# Format 1: Array of tables format
 [[acl]]
-# Address: ipv4/ipv6 single address / range, domain name (exact match or wildcard using `*` or `suffix:`), localhost
-# e.g. 1.1.1.1, 2606:4700:4700::1111, [::1], 10.0.0.0/8, 2001:250::/32, google.com, *.google.*, *.google.*.*
-# suffix:cn (will match all levels of subdomains, including itself if valid), suffix:edu.cn (including edu.cn)
-# localhost (matches both 127.0.0.1 and ::1, regardless of whether you've configured it in /etc/hosts)
+# Address: IPv4/IPv6, CIDR, domain, wildcard, or localhost
 addr = "127.0.0.1"
-# Port(s): Optional. When specified, will filter by a `,` separated list of port or port range.
-# White space will be ignored
-# e.g. "443", "1000-2000", "80,443", "22,80,11000-12000,443"
-# for each port or port range, you can specify protocol: "udp/53", "tcp/80", "udp/10000-20000"
-# Note "udp/53,tcp/80,443" === "udp/53,tcp/80,tcp/443,udp/443"
+
+# Ports: comma-separated list, can specify protocol (e.g. "udp/53,tcp/80,udp/10000-20000,443")
 ports = "udp/53"
-# The outbound to use: direct / default / drop / <custom_outbound_name>
+# Outbound: direct / default / drop / <custom_outbound_name>
 outbound = "default"
-# Hijack address: Optional. When specified, the connection matching this rule will be hijacked to the specified address.
+# Hijack: optional, redirect to specified address
 hijack = "1.1.1.1"
+
 [[acl]]
 addr = "localhost"
 outbound = "drop"
 
-# you can configure ACL as a multi-line string, if you feel the toml syntax is tiresome.
-# For each line, the format is: (no white space inside <optional:port(s)>)
-# <outbound_name> <address> <optional:port(s)> <optional:hijack_ip_address>
-# e.g.
-# acl = '''
-# direct localhost tcp/80,tcp/443,udp/443
-# drop localhost
-# '''
+# Format 2: Multi-line string format (more concise)
+acl = '''
+# Format: <outbound_name> <address> [<ports>] [<hijack_address>]
+direct localhost tcp/80,tcp/443,udp/443
+drop localhost
+default 8.8.4.4 udp/53 1.1.1.1
+'''
 
-# User list, contains user UUID and password
-[users] # Default: empty
-f0e12827-fe60-458c-8269-a05ccb0ff8da = "YOUR_USER_PASSWD_HERE"
+[users]
+# User list: UUID = password
+f0e12827-fe60-458c-8269-a05ccb0ff8da = "password"
 
 [tls]
-# Whether use auto-generated self-signed certificate and key.
-# When enabled, the follwing `certificate` and `private_key` fields will be ignored.
-self_sign = true # Default: false
+# Use auto-generated self-signed certificate and key
+self_sign = false
+# Path to certificate file (relative to data_dir if not absolute)
+certificate = ""
+# Path to private key file (relative to data_dir if not absolute)
+private_key = ""
+# ALPN protocols (e.g. ["h3"])
+alpn = []
+# Domain name for certificate issuance or self-sign
+hostname = "localhost"
+# Enable built-in ACME automatic SSL certificate provisioning
+auto_ssl = false
 
-# The path to the certificate file
-# Relative path of `data_dir`, if it's relative
-certificate = "/PATH/TO/CERT" # Default: ""
-
-# The path to the private key file
-# Relative path of `data_dir`, if it's relative
-private_key = "/PATH/TO/KEY" # Default: ""
-
-# Application layer protocol negotiation
-alpn = ["h3"] # Default: empty
-
-# Enable automatic SSL certificate provision
-# If enabled, will ignore `self_sign`, if failed, will fallback to self-sign
-# If both certificate and private_key are set, will be the path to save certificate and key
-# Note ACME HTTP-01 challenge requires listen on :80,
-# to allow non-root processes to bind to privileged ports on Linux, run:
-# setcap CAP_NET_BIND_SERVICE=+eip <path to tuic-server binary>
-auto_ssl = true # Default: false
-# Hostname used for automatic SSL certificate provision / self-sign
-hostname = "example.org" # Default: "localhost"
-
-# See `RESTful API` section below in README.
-# If you want disable RESTful function, remove entire `restful` section.
-[restful] # Default: empty
-addr = "127.0.0.1:8443" # Default: "127.0.0.1:8443"
-secret = "YOUR_SECRET_HERE" # Default: "YOUR_SECRET_HERE"
-
-# Limit how many clients one uuid can have at the same time.
-# Clients under same IP are considered as DIFFERENT clients
+[restful]
+# Address to bind RESTful API server
+addr = "127.0.0.1:8443"
+# Bearer token for API authentication
+secret = "YOUR_SECRET_HERE"
+# Limit for simultaneous clients per user UUID (0 = unlimited)
 maximum_clients_per_user = 0
 
 [quic]
-# The initial value to be used as the maximum UDP payload size before running MTU discovery
-# Must be at least 1200
-initial_mtu = 1200
-
-# The maximum UDP payload size guaranteed to be supported by the network.
-# Must be at least 1200
-min_mtu = 1200 # Default: 1200
-
-# Whether to use `Generic Segmentation Offload` to accelerate transmits, when supported by the environment.
-gso = true # Default: true
-
-# Whether to enable Path MTU Discovery to optimize packet size for transmission.
-pmtu = true # Default: true
-
-# Maximum number of bytes to transmit to a peer without acknowledgment
-# Should be set to at least the expected connection latency multiplied by the maximum desired throughput
-send_window = 16777216 # Default: 8MiB * 2
-
-# Maximum number of bytes the peer may transmit without acknowledgement on any one stream before becoming blocked
-# Should be set to at least the expected connection latency multiplied by the maximum desired throughput
-receive_window = 8388608 # Default: 8MiB
-
-# How long the server should wait before closing an idle connection
-max_idle_time = "10s"
-
-
+# Congestion control configuration
 [quic.congestion_control]
-# Congestion control algorithm, available options: "cubic", "new_reno", "bbr"
-controller = "bbr" # Default: "bbr"
+# Congestion control algorithm: bbr, cubic, new_reno
+controller = "bbr"
+# Initial congestion window size in bytes
+initial_window = 1048576
 
-# Sets the initial congestion window size in bytes for the congestion controller algorithm, which may improve burst performance but could lead to congestion under high concurrency.
-initial_window = 1048576 # Default: 1048576
+# Initial UDP payload size before MTU discovery
+initial_mtu = 1200
+# Minimum UDP payload size
+min_mtu = 1200
+# Enable Generic Segmentation Offload
+gso = true
+# Enable Path MTU Discovery
+pmtu = true
+# Max bytes to transmit to peer without acknowledgment
+send_window = 16777216
+# Max bytes peer may transmit without acknowledgment per stream
+receive_window = 8388608
+# How long to wait before closing idle connection
+max_idle_time = "30s"
 
+# Outbound configuration
 [outbound]
-# If no default outbound rule is configured then the following default rule will be used
-# The name of the outbound will be used in ACL rules, 
+# Default outbound rule used when no name is specified
 [outbound.default]
+# Outbound type: direct or socks5
 type = "direct"
+# IP mode: auto, prefer_v4, prefer_v6, only_v4, only_v6
 ip_mode = "auto"
+
+# Named outbound rules - these are referenced from ACL rules
+# The named outbound rules get merged into [outbound.named] map in the config
 [outbound.prefer_v4]
-# "direct" / "socks5"
 type = "direct"
-# Optional, default to "auto", the dual-stack "happy eyeballs" mode. The client will attempt to connect to 
-# the destination using both IPv4 and IPv6 addresses (if available), and use the first one that succeeds.
-# Available options: `prefer_v4`, `prefer_v6`, `only_v4`, `only_v6`, `auto`
 ip_mode = "prefer_v4"
-# Optional, the local IPv4 address to bind to when the proxy target is IPv4
+# Local addresses to bind for direct connections
 bind_ipv4 = "1.2.3.4"
-# Optional, the local IPv6 address to bind to when the proxy target is IPv6
 bind_ipv6 = "0:0:0:0:0:ffff:0102:0304"
-# Optional, The local network interface to bind to. Sets the value for the `SO_BINDTODEVICE` option on outbound sockets.
-# If a socket is bound to an interface, only packets received from that particular interface are processed by the
-# socket. Note that this only works for some socket types, particularly AF_INET sockets.
+# Network interface to bind for direct connections
 bind_device = "eth1234"
-[outbound.v6_only]
-type = "direct"
-ip_mode = "only_v6"
+
 [outbound.through_socks5]
 type = "socks5"
-# SOCKS5 proxy addr (TCP outbound via SOCKS5 is supported)
-# UDP over SOCKS5 is NOT supported. By default, when this outbound is selected,
-# UDP traffic is BLOCKED to avoid leaking QUIC/HTTP3 over direct path. You can
-# explicitly allow UDP (which will still go DIRECT) by setting `allow_udp = true`.
+# SOCKS5 proxy address
 addr = "127.0.0.1:1080"
-# Optional
+# SOCKS5 username (optional)
 username = "optional"
-# Optional
+# SOCKS5 password (optional)
 password = "optional"
-# Optional (socks5 only). Default: false (block UDP when socks5 is selected)
+# Allow UDP when using SOCKS5 outbound (default: false)
 allow_udp = false
-
 ```
-## Notes
 
-TLS cert and key is NECESSARY, to automatically get them, recommend use [acme.sh](https://github.com/acmesh-official/acme.sh)
+---
+
+## RESTful API
+
+The server exposes a RESTful API for monitoring and management. Authenticate using the `Authorization: Bearer` header.
+
+Example:
+
+```bash
+curl -H 'Authorization: Bearer YOUR_SECRET_HERE' http://ip:port/online
+```
+
+Endpoints:
+
+- `GET /online`: List online clients' count.
+- `GET /detailed_online`: List online clients' IP addresses and ports.
+- `POST /kick`: Kick specified users (clients can reconnect).
+- `GET /traffic`: Get current traffic stats.
+- `GET /reset_traffic`: Reset and return previous traffic stats.
+
+> Traffic data is lost when the server restarts.
+
+---
+
+## TLS Certificates
+
+TLS is required for secure connections.
+
+### Built-in ACME Support
+
+`tuic-server` includes built-in ACME support for automatic SSL certificate provisioning via Let's Encrypt. This allows the server to automatically obtain and renew certificates without external tools.
+
+To enable built-in ACME, set the following options in your configuration:
+
+```toml
+[tls]
+auto_ssl = true
+hostname = "your.domain.com" # The domain name for certificate issuance
+```
+
+**Notes:**
+- The server must be accessible from the public internet on port 80 for ACME HTTP-01 challenge.
+- If running as a non-root user on Linux, you may need to allow binding to privileged ports:
+  ```sh
+  setcap CAP_NET_BIND_SERVICE=+eip <path to tuic-server binary>
+  ```
+- If ACME provisioning fails, tuic-server will fall back to self-signed certificates if configured.
+
+You can also use [acme.sh](https://github.com/acmesh-official/acme.sh) or other tools to manually obtain certificates:
 
 ```sh
 acme.sh --issue -d www.yourdomain.org --standalone
 acme.sh --install-cert -d www.yourdomain.org \
---key-file       /CERT_PATH/key.crt  \
---fullchain-file /CERT_PATH/cert.crt
+  --key-file       /CERT_PATH/key.crt  \
+  --fullchain-file /CERT_PATH/cert.crt
 ```
 
-## RESTful API
-With authorization header when making a request. `curl -H 'Authorization: Bearer YOUR_SECRET_HERE' http://ip:port/path`
+Alternatively, you may use self-signed certificates or provide your own.
 
-Or with authorization disabled `curl  http://ip:port/path`
+---
 
-APIs:
-- GET `http://ip:port/online`
-  > List online clients' count.
-  Response: TODO
+## Contributing
 
-- GET `http://ip:port/detailed_online`
-  > List online clients' IP address and port.
-  Response: TODO
+Contributions, bug reports, and feature requests are welcome! Please open issues or pull requests on [GitHub](https://github.com/Itsusinn/tuic).
 
-- POST `http://ip:port/kick`
-
-  Request: ["userA", "userB"]
-  > Clients can always reconnect after being kicked.
-
-  Response: TODO
-
-- GET `http://ip:port/traffic`
-
-  Return current traffic stats.
-  > Traffic data will be lost when `tuic-server` restarts.
-
-  Response: TODO
-
-- GET `http://ip:port/reset_traffic`
-
-  Reset traffic stats and return previous traffic stats.
-  > Traffic data will be lost when `tuic-server` restarts.
-
-  Response: TODO
+---
 
 ## License
 
-GNU General Public License v3.0
+GNU General Public License v3.0. See [LICENSE](../LICENSE) for details.
