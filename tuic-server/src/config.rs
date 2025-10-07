@@ -30,7 +30,7 @@ use crate::{
 #[serde(deny_unknown_fields)]
 pub struct Config {
     pub log_level: LogLevel,
-    #[educe(Default(expression = "[::]:443".parse().unwrap()))]
+    #[educe(Default(expression = "[::]:8443".parse().unwrap()))]
     pub server: SocketAddr,
     pub users: HashMap<Uuid, String>,
     pub tls: TlsConfig,
