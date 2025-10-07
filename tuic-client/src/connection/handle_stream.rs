@@ -13,7 +13,7 @@ impl Connection {
     pub async fn accept_uni_stream(&self) -> Result<(RecvStream, Register), Error> {
         let max = self.max_concurrent_uni_streams.load(Ordering::Relaxed);
 
-        if self.remote_uni_stream_cnt.count() as u32 == max {
+        if self.remote_uni_stream_cnt.count() >= (max as f32 * 0.8) as usize {
             self.max_concurrent_uni_streams
                 .store(max * 2, Ordering::Relaxed);
 
@@ -29,7 +29,7 @@ impl Connection {
     pub async fn accept_bi_stream(&self) -> Result<(SendStream, RecvStream, Register), Error> {
         let max = self.max_concurrent_bi_streams.load(Ordering::Relaxed);
 
-        if self.remote_bi_stream_cnt.count() as u32 == max {
+        if self.remote_bi_stream_cnt.count() >= (max as f32 * 0.8) as usize {
             self.max_concurrent_bi_streams
                 .store(max * 2, Ordering::Relaxed);
 
@@ -46,7 +46,7 @@ impl Connection {
         Ok(self.conn.read_datagram().await?)
     }
 
-    pub async fn handle_uni_stream(self, recv: RecvStream, _reg: Register) {
+    pub async fn handle_uni_stream(self, recv: RecvStream, reg: Register) {
         debug!("[relay] incoming unidirectional stream");
 
         let res = match self.model.accept_uni_stream(recv).await {
@@ -64,9 +64,10 @@ impl Connection {
         if let Err(err) = res {
             warn!("[relay] incoming unidirectional stream error: {err}");
         }
+        drop(reg);
     }
 
-    pub async fn handle_bi_stream(self, send: SendStream, recv: RecvStream, _reg: Register) {
+    pub async fn handle_bi_stream(self, send: SendStream, recv: RecvStream, reg: Register) {
         debug!("[relay] incoming bidirectional stream");
 
         let res = match self.model.accept_bi_stream(send, recv).await {
@@ -77,6 +78,7 @@ impl Connection {
         if let Err(err) = res {
             warn!("[relay] incoming bidirectional stream error: {err}");
         }
+        drop(reg);
     }
 
     pub async fn handle_datagram(self, dg: Bytes) {

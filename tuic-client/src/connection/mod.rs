@@ -41,7 +41,7 @@ mod handle_task;
 // Global state for endpoint, connection, and timeout
 static ENDPOINT: OnceCell<AsyncRwLock<Endpoint>> = OnceCell::new();
 static CONNECTION: AsyncOnceCell<AsyncRwLock<Connection>> = AsyncOnceCell::const_new();
-static TIMEOUT: AtomicCell<Duration> = AtomicCell::new(Duration::from_secs(0));
+static TIMEOUT: AtomicCell<Duration> = AtomicCell::new(Duration::from_secs(8));
 
 /// Default error code for QUIC connection
 pub const ERROR_CODE: VarInt = VarInt::from_u32(0);
@@ -169,6 +169,7 @@ impl Connection {
             .send_window(cfg.send_window)
             .stream_receive_window(VarInt::from_u32(cfg.receive_window))
             .max_idle_timeout(None)
+            //.max_idle_timeout(Some(IdleTimeout::from(VarInt::from_u32(10))))
             .initial_mtu(cfg.initial_mtu)
             .min_mtu(cfg.min_mtu);
 

@@ -71,7 +71,9 @@ async fn main() -> eyre::Result<()> {
         .try_init()?;
 
     match Connection::set_config(cfg.relay).await {
-        Ok(()) => {}
+        Ok(()) => {
+            Connection::get_conn().await?;
+        }
         Err(err) => {
             eprintln!("{err}");
             process::exit(1);
