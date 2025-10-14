@@ -1,0 +1,178 @@
+name: Build Rust Binary
+
+on:
+  workflow_call:
+    inputs:
+      rust-toolchain:
+        description: 'Rust toolchain to use'
+        required: false
+        type: string
+        default: 'stable'
+      packages:
+        description: 'Comma-separated list of package names'
+        required: true
+        type: string
+      target-config-file:
+        description: 'Path to the TOML file containing target configurations'
+        required: false
+        type: string
+        default: '.github/target.toml'
+      run-tests:
+        description: 'Whether to run tests (can be overridden by matrix config)'
+        required: false
+        type: boolean
+        default: true
+      cache-key-prefix:
+        description: 'Prefix for cache key to avoid collisions'
+        required: false
+        type: string
+        default: 'rust-build'
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    outputs:
+      target_config: ${{ steps.parse_config.outputs.targets }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+
+      - name: Install yj tool
+        run: |
+          # Install yj for TOML to JSON conversion
+          curl -fsSL https://github.com/sclevine/yj/releases/latest/download/yj-linux-amd64 -o /usr/local/bin/yj
+          chmod +x /usr/local/bin/yj
+
+      - name: Parse TOML configuration
+        id: parse_config
+        run: |
+          if [ ! -f "${{ inputs.target-config-file }}" ]; then
+            echo "Error: Target configuration file not found at ${{ inputs.target-config-file }}"
+            exit 1
+          fi
+          TARGETS_JSON=$(cat ${{ inputs.target-config-file }} | yj -tj | jq -c '.target')
+          echo "targets=$TARGETS_JSON" >> $GITHUB_OUTPUT
+
+  compile:
+    needs: prepare
+    name: ${{ matrix.release-name || matrix.target || 'Unknown' }}
+    permissions:
+      contents: write
+    runs-on: ${{ matrix.os || 'ubuntu-latest' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(needs.prepare.outputs.target_config) }}
+
+    steps:
+      #--------------------------------------------------
+      # Setup Steps
+      #--------------------------------------------------
+      - name: Checkout code
+        uses: actions/checkout@v5
+        with:
+          submodules: true
+          fetch-depth: 1
+
+      - name: Setup Rust cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: ${{ inputs.cache-key-prefix }}-${{ matrix.release-name || matrix.target }}-${{ hashFiles('**/Cargo.lock') }}
+          cache-directories: |
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ matrix.toolchain || inputs.rust-toolchain }}
+          target: ${{ matrix.target }}
+          components: ${{ matrix.components || 'rustfmt, clippy' }}
+
+      - name: Install cross-compilation tools
+        if: matrix.tool == 'cross'
+        run: |
+          rustup target add ${TARGET}
+          cargo install cross --git https://github.com/cross-rs/cross --force
+        env:
+          TARGET: ${{ matrix.target }}
+          
+      - name: Print build information
+        run: |
+          echo "Building for target: ${{ matrix.target }}"
+          echo "Using toolchain: ${{ matrix.toolchain || inputs.rust-toolchain }}"
+          echo "Building packages: ${{ inputs.packages }}"
+
+      #--------------------------------------------------
+      # Code Quality Steps
+      #--------------------------------------------------
+      - name: Check code formatting
+        uses: clechasseur/rs-cargo@v4
+        with:
+          command: fmt
+          args: --all -- --check
+        continue-on-error: ${{ matrix.ignore-fmt-errors == true }}
+
+      - name: Run linter
+        uses: clechasseur/rs-cargo@v4
+        with:
+          tool: ${{ matrix.tool }}
+          command: clippy
+          args: --all --target ${{ matrix.target }} ${{ matrix.extra-args }} -- -D warnings
+        env:
+          RUSTFLAGS: ${{ matrix.rustflags }}
+        continue-on-error: ${{ matrix.ignore-clippy-errors == true }}
+
+      #--------------------------------------------------
+      # Build & Test Steps
+      #--------------------------------------------------
+      - name: Run tests
+        uses: clechasseur/rs-cargo@v4
+        if: ${{ inputs.run-tests != false && !matrix.skip-test }}
+        with:
+          tool: ${{ matrix.tool }}
+          command: test
+          args: --all --target ${{ matrix.target }} ${{ matrix.extra-args }} -- --nocapture
+        env:
+          CROSS_CONTAINER_OPTS: "--network host"
+          RUSTFLAGS: ${{ matrix.rustflags }}
+          RUST_TEST_THREADS: ${{ matrix.test-threads || 8 }}
+        timeout-minutes: ${{ matrix.test-timeout || 15 }}
+
+      - name: Build release binaries
+        id: build
+        uses: clechasseur/rs-cargo@v4
+        with:
+          tool: ${{ matrix.tool }}
+          command: build
+          args: --workspace --release --target ${{ matrix.target }} ${{ matrix.extra-args }}
+        env:
+          RUSTFLAGS: ${{ matrix.rustflags }}
+          CARGO_PROFILE_RELEASE_LTO: ${{ matrix.lto || true }}
+          CARGO_PROFILE_RELEASE_CODEGEN_UNITS: ${{ matrix.codegen-units || 1 }}
+          CARGO_PROFILE_RELEASE_STRIP: ${{ matrix.strip || true }}
+
+      #--------------------------------------------------
+      # Artifact Steps
+      #--------------------------------------------------
+      - name: Prepare binary artifacts
+        shell: bash
+        id: prepare-artifacts
+        run: |
+          mkdir -p artifacts
+          IFS=',' read -ra PACKAGES <<< "${{ inputs.packages }}"
+          for package in "${PACKAGES[@]}"; do
+            source_file="target/${{ matrix.target }}/release/${package}${{ matrix.postfix }}"
+            target_file="artifacts/${package}-${{ matrix.release-name || matrix.target }}${{ matrix.postfix }}"
+            cp "$source_file" "$target_file"
+          done
+
+      - name: Upload binary artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.release-name || matrix.target }}-binaries
+          path: artifacts/
+          if-no-files-found: error
+          retention-days: ${{ matrix.retention-days || 3 }}
