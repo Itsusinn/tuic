@@ -1,0 +1,114 @@
+name: Build and Publish Docker Image
+
+on:
+  workflow_call:
+    inputs:
+      docker-file:
+        description: 'Path to Dockerfile'
+        required: false
+        type: string
+        default: '.github/Dockerfile'
+      image-name:
+        description: 'Base name of the Docker image'
+        required: false
+        type: string
+        default: 'tuic-server'
+      platforms:
+        description: 'Platforms to build for'
+        required: false
+        type: string
+        default: 'linux/amd64,linux/arm64'
+      binary-dir:
+        description: 'Directory containing the binaries'
+        required: false
+        type: string
+        default: './docker-bins'
+      server-binary-amd64:
+        description: 'Path to amd64 server binary'
+        required: false
+        type: string
+        default: 'tuic-server-x86_64-linux-musl'
+      server-binary-arm64:
+        description: 'Path to arm64 server binary'
+        required: false
+        type: string
+        default: 'tuic-server-aarch64-linux-musl'
+
+jobs:
+  docker:
+    name: Docker
+    runs-on: ubuntu-latest
+    steps:
+      #--------------------------------------------------
+      # Setup Steps
+      #--------------------------------------------------
+      - name: Checkout code
+        uses: actions/checkout@v5
+
+      - name: Set up QEMU for multi-architecture builds
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+        with:
+          buildkitd-flags: --debug
+
+      #--------------------------------------------------
+      # Binary Preparation
+      #--------------------------------------------------
+      - name: Download compiled binaries
+        uses: actions/download-artifact@v5
+        with:
+          pattern: "*-binaries"
+          path: ./packages
+          merge-multiple: true
+
+      - name: Prepare binaries for multi-arch Docker image
+        run: |
+          mkdir -p ${{ inputs.binary-dir }}
+          cp ./packages/${{ inputs.server-binary-amd64 }} ${{ inputs.binary-dir }}/tuic-server-amd64
+          cp ./packages/${{ inputs.server-binary-arm64 }} ${{ inputs.binary-dir }}/tuic-server-arm64
+          chmod +x ${{ inputs.binary-dir }}/tuic-server-*
+
+      #--------------------------------------------------
+      # Docker Registry Authentication
+      #--------------------------------------------------
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.repository_owner }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      #--------------------------------------------------
+      # Docker Tag Management
+      #--------------------------------------------------
+      - name: Configure Docker image tags
+        id: docker_tags
+        run: |
+          if [[ $GITHUB_REF == refs/heads/main ]] || [[ $GITHUB_REF == refs/pull/*/merge ]]; then
+            # Development build
+            echo "VERSION_TAG=ghcr.io/${GITHUB_REPOSITORY_OWNER@L}/${{ inputs.image-name }}:0.0.0" >> $GITHUB_OUTPUT
+            echo "LATEST_TAG=ghcr.io/${GITHUB_REPOSITORY_OWNER@L}/${{ inputs.image-name }}:latest" >> $GITHUB_OUTPUT
+          else
+            # Release build
+            echo "VERSION_TAG=ghcr.io/${GITHUB_REPOSITORY_OWNER@L}/${{ inputs.image-name }}:${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
+            echo "LATEST_TAG=ghcr.io/${GITHUB_REPOSITORY_OWNER@L}/${{ inputs.image-name }}:latest" >> $GITHUB_OUTPUT
+          fi
+
+      #--------------------------------------------------
+      # Docker Build & Push
+      #--------------------------------------------------
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ${{ inputs.docker-file }}
+          platforms: ${{ inputs.platforms }}
+          push: ${{ startsWith(github.ref, 'refs/tags/v') }}
+          tags: ${{ steps.docker_tags.outputs.VERSION_TAG }},${{ steps.docker_tags.outputs.LATEST_TAG }}
+          provenance: false
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          build-args: |
+            BINARY_DIR=${{ inputs.binary-dir }}
