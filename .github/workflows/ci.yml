@@ -6,7 +6,7 @@ name: CI
 on:
   push:
     tags: ["v*"]
-    branches: ["dev"]
+    branches: ["main"]
   pull_request:
     branches: ["main"]
 
@@ -303,8 +303,8 @@ jobs:
       #--------------------------------------------------
       # Git Tag Management
       #--------------------------------------------------
-      - name: Manage dev branch tags
-        if: startsWith(github.ref, 'refs/heads/dev')
+      - name: Manage main branch tags
+        if: startsWith(github.ref, 'refs/heads/main')
         run: |
           gh release delete latest --cleanup-tag --yes --repo $GITHUB_REPOSITORY || true
           # Move latest tag to current commit locally
@@ -349,7 +349,7 @@ jobs:
 
       - name: Publish nightly release
         uses: softprops/action-gh-release@v2
-        if: startsWith(github.ref, 'refs/heads/dev')
+        if: startsWith(github.ref, 'refs/heads/main')
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           prerelease: true
@@ -412,7 +412,7 @@ jobs:
       - name: Configure Docker image tags
         id: docker_tags
         run: |
-          if [[ $GITHUB_REF == refs/heads/dev ]] || [[ $GITHUB_REF == refs/pull/*/merge ]]; then
+          if [[ $GITHUB_REF == refs/heads/main ]] || [[ $GITHUB_REF == refs/pull/*/merge ]]; then
             # Development build
             echo "VERSION_TAG=ghcr.io/${GITHUB_REPOSITORY_OWNER@L}/tuic-server:0.0.0" >> $GITHUB_OUTPUT
             echo "LATEST_TAG=ghcr.io/${GITHUB_REPOSITORY_OWNER@L}/tuic-server:latest" >> $GITHUB_OUTPUT
