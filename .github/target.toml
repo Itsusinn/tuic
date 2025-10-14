@@ -1,0 +1,168 @@
+# TUIC Build Target Configuration
+# This file defines the build targets and configurations used in CI/CD workflows
+
+# [[target]]
+# os = ""                       # GitHub runner OS (e.g., ubuntu-latest, windows-latest, macos-14)
+# target = ""                   # Rust target triple (e.g., x86_64-unknown-linux-gnu)
+# release-name = ""             # Name for release artifacts (e.g., x86_64-linux)
+# tool = ""                     # Optional: Build tool (e.g., "cross" for cross-compilation)
+# postfix = ""                  # Optional: Filename suffix (e.g., ".exe" for Windows)
+# skip-test = false             # Optional: Skip testing phase (true/false)
+# extra-args = ""               # Optional: Additional cargo flags (e.g., features)
+
+# ==================== Linux Targets (GNU) ====================
+
+# 64-bit Linux (GNU)
+[[target]]
+os = "ubuntu-latest"
+target = "x86_64-unknown-linux-gnu"
+release-name = "x86_64-linux"
+tool = "cross"
+extra-args = "--features jemallocator"
+
+# 32-bit Linux (GNU)
+[[target]]
+os = "ubuntu-latest"
+target = "i686-unknown-linux-gnu"
+release-name = "i686-linux"
+tool = "cross"
+extra-args = "--features jemallocator"
+
+# ==================== Linux Targets (MUSL) ====================
+
+# 64-bit Linux (MUSL - statically linked)
+[[target]]
+os = "ubuntu-latest"
+target = "x86_64-unknown-linux-musl"
+release-name = "x86_64-linux-musl"
+tool = "cross"
+extra-args = "--features jemallocator"
+
+# 32-bit Linux (MUSL - statically linked)
+[[target]]
+os = "ubuntu-latest"
+target = "i686-unknown-linux-musl"
+release-name = "i686-linux-musl"
+tool = "cross"
+extra-args = "--no-default-features --features ring"
+
+# ==================== ARM Linux Targets (GNU) ====================
+
+# ARM64 Linux (GNU)
+[[target]]
+os = "ubuntu-latest"
+target = "aarch64-unknown-linux-gnu"
+release-name = "aarch64-linux"
+tool = "cross"
+extra-args = "--features jemallocator"
+
+# ARMv7 Linux (GNU - soft float ABI)
+[[target]]
+os = "ubuntu-latest"
+target = "armv7-unknown-linux-gnueabi"
+release-name = "armv7-linux"
+tool = "cross"
+extra-args = "--no-default-features --features ring,jemallocator"
+
+# ARMv7 Linux (GNU - hard float ABI)
+[[target]]
+os = "ubuntu-latest"
+target = "armv7-unknown-linux-gnueabihf"
+release-name = "armv7-linux-hf"
+tool = "cross"
+extra-args = "--no-default-features --features ring,jemallocator"
+
+# ==================== ARM Linux Targets (MUSL) ====================
+
+# ARM64 Linux (MUSL - statically linked)
+[[target]]
+os = "ubuntu-latest"
+target = "aarch64-unknown-linux-musl"
+release-name = "aarch64-linux-musl"
+tool = "cross"
+extra-args = "--features jemallocator"
+
+# ARMv7 Linux (MUSL - soft float ABI, statically linked)
+[[target]]
+os = "ubuntu-latest"
+target = "armv7-unknown-linux-musleabi"
+release-name = "armv7-linux-musl"
+tool = "cross"
+extra-args = "--no-default-features --features ring"
+
+# ARMv7 Linux (MUSL - hard float ABI, statically linked)
+[[target]]
+os = "ubuntu-latest"
+target = "armv7-unknown-linux-musleabihf"
+release-name = "armv7-linux-muslhf"
+tool = "cross"
+extra-args = "--no-default-features --features ring"
+
+# ==================== Windows Targets ====================
+
+# 64-bit Windows
+[[target]]
+os = "windows-latest"
+target = "x86_64-pc-windows-msvc"
+release-name = "x86_64-windows"
+postfix = ".exe"
+
+# 32-bit Windows
+[[target]]
+os = "windows-latest"
+target = "i686-pc-windows-msvc"
+release-name = "i686-windows"
+postfix = ".exe"
+extra-args = "--no-default-features --features ring"
+
+# ARM64 Windows
+[[target]]
+os = "windows-latest"
+target = "aarch64-pc-windows-msvc"
+release-name = "aarch64-windows"
+postfix = ".exe"
+skip-test = true
+
+# ==================== macOS Targets ====================
+
+# Intel macOS (x86_64)
+[[target]]
+os = "macos-13"
+target = "x86_64-apple-darwin"
+release-name = "x86_64-darwin"
+extra-args = "--features jemallocator"
+
+# Apple Silicon macOS (ARM64)
+[[target]]
+os = "macos-14"
+target = "aarch64-apple-darwin"
+release-name = "aarch64-darwin"
+extra-args = "--features jemallocator"
+
+# ==================== Other Targets ====================
+
+# FreeBSD
+[[target]]
+os = "ubuntu-latest"
+target = "x86_64-unknown-freebsd"
+release-name = "x86_64-freebsd"
+tool = "cross"
+skip-test = true
+extra-args = "--no-default-features --features ring"
+
+# RISC-V 64-bit Linux
+[[target]]
+os = "ubuntu-latest"
+target = "riscv64gc-unknown-linux-gnu"
+release-name = "riscv64gc-linux"
+tool = "cross"
+extra-args = "--no-default-features --features ring,jemallocator"
+
+# LoongArch 64-bit Linux
+[[target]]
+os = "ubuntu-latest"
+target = "loongarch64-unknown-linux-gnu"
+release-name = "loongarch64-linux"
+tool = "cross"
+skip-test = true
+extra-args = "--no-default-features --features ring"
