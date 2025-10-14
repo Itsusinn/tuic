@@ -1,16 +1,25 @@
 name: CI
 
+#--------------------------------------------------
+# Workflow Triggers
+#--------------------------------------------------
 on:
   push:
-    tags: [ "v*" ]
-    branches: [ "dev" ]
+    tags: ["v*"]
+    branches: ["dev"]
   pull_request:
-    branches: [ "dev" ]
+    branches: ["main"]
 
+#--------------------------------------------------
+# Concurrency Control
+#--------------------------------------------------
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
+#--------------------------------------------------
+# Global Environment Variables
+#--------------------------------------------------
 env:
   PACKAGE: "tuic-server"
   PACKAGE2: "tuic-client"
@@ -18,6 +27,9 @@ env:
   CARGO_TERM_COLOR: always
   CARGO_INCREMENTAL: 0
 
+#--------------------------------------------------
+# Jobs
+#--------------------------------------------------
 jobs:
   compile:
     name: ${{ matrix.release-name || matrix.target || 'Unknown' }}
@@ -28,19 +40,24 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # Example
-          # when not set, default will be used (except target, cross)
+          #--------------------------------------------------
+          # Matrix Configuration Format
+          #--------------------------------------------------
+          # Available parameters (default values shown when applicable):
           # - os: ubuntu-latest
-          #   target: x86_64-unknown-linux-gnu
-          #   release-name: x86_64-linux
-          #   toolchain: stable
-          #   tool: cross
-          #   postfix: ""
-          #   extra-args: ""
-          #   components: ""
-          #   rustflags: ""
+          # - target: (required, no default)
+          # - release-name: (used for artifact naming)
+          # - toolchain: nightly-2025-10-05 (from env.RUST_TOOLCHAIN)
+          # - tool: (cargo or cross)
+          # - postfix: "" (file extension, e.g. ".exe")
+          # - extra-args: "" (additional cargo flags)
+          # - components: "rustfmt, clippy"
+          # - rustflags: "" (additional rustc flags)
+          # - skip-test: false (set to true to skip testing)
 
-          # Linux x86
+          #--------------------------------------------------
+          # Linux x86_64 / i686
+          #--------------------------------------------------
           - os: ubuntu-latest
             target: x86_64-unknown-linux-gnu
             release-name: x86_64-linux
@@ -51,7 +68,10 @@ jobs:
             release-name: i686-linux
             tool: cross
             extra-args: "--features jemallocator"
-          # Linux x86 musl
+            
+          #--------------------------------------------------
+          # Linux x86_64 / i686 (musl)
+          #--------------------------------------------------
           - os: ubuntu-latest
             target: x86_64-unknown-linux-musl
             release-name: x86_64-linux-musl
@@ -62,7 +82,10 @@ jobs:
             release-name: i686-linux-musl
             tool: cross
             extra-args: "--no-default-features --features ring"
-          # Linux arm
+            
+          #--------------------------------------------------
+          # Linux ARM (gnu)
+          #--------------------------------------------------
           - os: ubuntu-latest
             target: aarch64-unknown-linux-gnu
             release-name: aarch64-linux
@@ -78,7 +101,10 @@ jobs:
             release-name: armv7-linux-hf
             tool: cross
             extra-args: "--no-default-features --features ring,jemallocator"
-          # Linux arm musl
+            
+          #--------------------------------------------------
+          # Linux ARM (musl)
+          #--------------------------------------------------
           - os: ubuntu-latest
             target: aarch64-unknown-linux-musl
             release-name: aarch64-linux-musl
@@ -94,7 +120,10 @@ jobs:
             release-name: armv7-linux-muslhf
             tool: cross
             extra-args: "--no-default-features --features ring"
+            
+          #--------------------------------------------------
           # Windows
+          #--------------------------------------------------
           - os: windows-latest
             target: x86_64-pc-windows-msvc
             release-name: x86_64-windows
@@ -104,13 +133,15 @@ jobs:
             release-name: i686-windows
             postfix: ".exe"
             extra-args: "--no-default-features --features ring"
-          # Windows Arm
           - os: windows-latest
             target: aarch64-pc-windows-msvc
             release-name: aarch64-windows
             postfix: ".exe"
             skip-test: true
-          # MacOSX
+            
+          #--------------------------------------------------
+          # MacOS
+          #--------------------------------------------------
           - os: macos-13
             target: x86_64-apple-darwin
             release-name: x86_64-darwin
@@ -119,6 +150,10 @@ jobs:
             target: aarch64-apple-darwin
             release-name: aarch64-darwin
             extra-args: "--features jemallocator"
+            
+          #--------------------------------------------------
+          # Other Platforms
+          #--------------------------------------------------
           # FreeBSD
           - os: ubuntu-latest
             target: x86_64-unknown-freebsd
@@ -132,24 +167,30 @@ jobs:
             release-name: riscv64gc-linux
             tool: cross
             extra-args: "--no-default-features --features ring,jemallocator"
-          # Loongarch64 ring problem
+          # LoongArch64
           - os: ubuntu-latest
             target: loongarch64-unknown-linux-gnu
             release-name: loongarch64-linux
             tool: cross
             extra-args: "--no-default-features --features ring"
 
-          # Linux mips: tier-3, pity
-          # Windows gnu: tokio dont work
-          # Windows aarch: todo
+          # Notes on unsupported platforms:
+          # - Linux MIPS: tier-3 support only
+          # - Windows GNU: tokio compatibility issues
+          # - Windows ARM: to be implemented
 
     steps:
-      - uses: actions/checkout@v5
+      #--------------------------------------------------
+      # Setup Steps
+      #--------------------------------------------------
+      - name: Checkout code
+        uses: actions/checkout@v5
         with:
           submodules: true
           fetch-depth: 1
 
-      - uses: Swatinem/rust-cache@v2
+      - name: Setup Rust cache
+        uses: Swatinem/rust-cache@v2
         with:
           shared-key: ${{ matrix.release-name || matrix.target }}-${{ hashFiles('**/Cargo.lock') }}
           cache-directories: |
@@ -158,13 +199,14 @@ jobs:
             ~/.cargo/git/db/
             target/
 
-      - uses: dtolnay/rust-toolchain@master
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@master
         with:
           toolchain: ${{ matrix.toolchain || env.RUST_TOOLCHAIN }}
           target: ${{ matrix.target }}
           components: ${{ matrix.components || 'rustfmt, clippy' }}
 
-      - name: Install rust targets & cross
+      - name: Install cross-compilation tools
         if: matrix.tool == 'cross'
         run: |
           rustup target add ${TARGET}
@@ -172,13 +214,16 @@ jobs:
         env:
           TARGET: ${{ matrix.target }}
 
-      - name: Cargo fmt
+      #--------------------------------------------------
+      # Code Quality Steps
+      #--------------------------------------------------
+      - name: Check code formatting
         uses: clechasseur/rs-cargo@v4
         with:
           command: fmt
           args: --all -- --check
 
-      - name: Cargo clippy
+      - name: Run linter
         uses: clechasseur/rs-cargo@v4
         with:
           tool: ${{ matrix.tool }}
@@ -187,7 +232,10 @@ jobs:
         env:
           RUSTFLAGS: ${{ matrix.rustflags }}
 
-      - name: Cargo test
+      #--------------------------------------------------
+      # Build & Test Steps
+      #--------------------------------------------------
+      - name: Run tests
         uses: clechasseur/rs-cargo@v4
         if: ${{ !matrix.skip-test }}
         with:
@@ -199,7 +247,7 @@ jobs:
           RUSTFLAGS: ${{ matrix.rustflags }}
           RUST_TEST_THREADS: 8
 
-      - name: Cargo build
+      - name: Build release binaries
         uses: clechasseur/rs-cargo@v4
         with:
           tool: ${{ matrix.tool }}
@@ -210,14 +258,17 @@ jobs:
           CARGO_PROFILE_RELEASE_LTO: true
           CARGO_PROFILE_RELEASE_CODEGEN_UNITS: 1
 
-      - name: Prepare binaries
+      #--------------------------------------------------
+      # Artifact Steps
+      #--------------------------------------------------
+      - name: Prepare binary artifacts
         shell: bash
         run: |
           mkdir -p artifacts
           cp target/${{ matrix.target }}/release/${{ env.PACKAGE }}${{ matrix.postfix }} artifacts/${{ env.PACKAGE }}-${{ matrix.release-name || matrix.target }}${{ matrix.postfix }}
           cp target/${{ matrix.target }}/release/${{ env.PACKAGE2 }}${{ matrix.postfix }} artifacts/${{ env.PACKAGE2 }}-${{ matrix.release-name || matrix.target }}${{ matrix.postfix }}
 
-      - name: Upload binaries
+      - name: Upload binary artifacts
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.release-name || matrix.target }}-binaries
@@ -233,19 +284,26 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v5
+      #--------------------------------------------------
+      # Setup Steps
+      #--------------------------------------------------
+      - name: Checkout code
+        uses: actions/checkout@v5
         with:
           fetch-depth: 0
           fetch-tags: true
 
-      - name: Download binaries
+      - name: Download binary artifacts
         uses: actions/download-artifact@v5
         with:
           pattern: "*-binaries"
           path: ./packages
           merge-multiple: true
 
-      - name: Clean git tag & release
+      #--------------------------------------------------
+      # Git Tag Management
+      #--------------------------------------------------
+      - name: Manage dev branch tags
         if: startsWith(github.ref, 'refs/heads/dev')
         run: |
           gh release delete latest --cleanup-tag --yes --repo $GITHUB_REPOSITORY || true
@@ -256,13 +314,16 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Clean git tag
+      - name: Prepare versioned release tags
         if: startsWith(github.ref, 'refs/tags/v')
         run: |
           # Delete latest tag locally (for git-cliff)
           git tag -d latest || true
 
-      - name: Generate a changelog
+      #--------------------------------------------------
+      # Changelog Generation
+      #--------------------------------------------------
+      - name: Generate changelog
         uses: orhun/git-cliff-action@main
         id: git-cliff
         with:
@@ -271,7 +332,10 @@ jobs:
         env:
           GITHUB_REPO: ${{ github.repository }}
 
-      - name: Github stable release
+      #--------------------------------------------------
+      # Release Publishing
+      #--------------------------------------------------
+      - name: Publish stable release
         uses: softprops/action-gh-release@v2
         if: startsWith(github.ref, 'refs/tags/v')
         with:
@@ -283,7 +347,7 @@ jobs:
             packages/*
             LICENSE
 
-      - name: Github nightly release
+      - name: Publish nightly release
         uses: softprops/action-gh-release@v2
         if: startsWith(github.ref, 'refs/heads/dev')
         with:
@@ -301,9 +365,13 @@ jobs:
     runs-on: ubuntu-latest
     needs: [compile]
     steps:
-      - uses: actions/checkout@v5
+      #--------------------------------------------------
+      # Setup Steps
+      #--------------------------------------------------
+      - name: Checkout code
+        uses: actions/checkout@v5
 
-      - name: Set up QEMU
+      - name: Set up QEMU for multi-architecture builds
         uses: docker/setup-qemu-action@v3
 
       - name: Set up Docker Buildx
@@ -311,20 +379,26 @@ jobs:
         with:
           buildkitd-flags: --debug
 
-      - name: Download binaries
+      #--------------------------------------------------
+      # Binary Preparation
+      #--------------------------------------------------
+      - name: Download compiled binaries
         uses: actions/download-artifact@v5
         with:
           pattern: "*-binaries"
           path: ./packages
           merge-multiple: true
 
-      - name: Prepare binaries for Docker
+      - name: Prepare binaries for multi-arch Docker image
         run: |
           mkdir -p ./docker-bins
           cp ./packages/tuic-server-x86_64-linux-musl ./docker-bins/tuic-server-amd64
           cp ./packages/tuic-server-aarch64-linux-musl ./docker-bins/tuic-server-arm64
           chmod +x ./docker-bins/tuic-server-*
 
+      #--------------------------------------------------
+      # Docker Registry Authentication
+      #--------------------------------------------------
       - name: Login to GitHub Container Registry
         uses: docker/login-action@v3
         with:
@@ -332,23 +406,33 @@ jobs:
           username: ${{ github.repository_owner }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Set version tag
+      #--------------------------------------------------
+      # Docker Tag Management
+      #--------------------------------------------------
+      - name: Configure Docker image tags
+        id: docker_tags
         run: |
           if [[ $GITHUB_REF == refs/heads/dev ]] || [[ $GITHUB_REF == refs/pull/*/merge ]]; then
-            echo "TAG_VERSION=ghcr.io/${GITHUB_REPOSITORY_OWNER@L}/tuic-server:0.0.0" >> $GITHUB_ENV
+            # Development build
+            echo "VERSION_TAG=ghcr.io/${GITHUB_REPOSITORY_OWNER@L}/tuic-server:0.0.0" >> $GITHUB_OUTPUT
+            echo "LATEST_TAG=ghcr.io/${GITHUB_REPOSITORY_OWNER@L}/tuic-server:latest" >> $GITHUB_OUTPUT
           else
-            echo "TAG_VERSION=ghcr.io/${GITHUB_REPOSITORY_OWNER@L}/tuic-server:${GITHUB_REF#refs/tags/v}" >> $GITHUB_ENV
+            # Release build
+            echo "VERSION_TAG=ghcr.io/${GITHUB_REPOSITORY_OWNER@L}/tuic-server:${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
+            echo "LATEST_TAG=ghcr.io/${GITHUB_REPOSITORY_OWNER@L}/tuic-server:latest" >> $GITHUB_OUTPUT
           fi
-          echo "TAG_LATEST=ghcr.io/${GITHUB_REPOSITORY_OWNER@L}/tuic-server:latest" >> $GITHUB_ENV
 
-      - name: Build and push
+      #--------------------------------------------------
+      # Docker Build & Push
+      #--------------------------------------------------
+      - name: Build and push Docker image
         uses: docker/build-push-action@v6
         with:
           context: .
           file: .github/Dockerfile
           platforms: linux/amd64,linux/arm64
           push: ${{ startsWith(github.ref, 'refs/tags/v') }}
-          tags: ${{ env.TAG_VERSION }},${{ env.TAG_LATEST }}
+          tags: ${{ steps.docker_tags.outputs.VERSION_TAG }},${{ steps.docker_tags.outputs.LATEST_TAG }}
           provenance: false
           cache-from: type=gha
           cache-to: type=gha,mode=max
