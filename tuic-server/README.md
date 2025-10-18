@@ -97,7 +97,8 @@ services:
     container_name: tuic
     network_mode: host
     volumes:
-      - ./config.toml:/etc/tuic/config.json:ro # Must be /path/to/toml:/etc/tuic/*config.json*:ro, this will be fixed in 2.0.0.
+      - ./config.toml:/etc/tuic/config.json:ro 
+      # Must be /path/to/toml:/etc/tuic/*config.json*:ro, this will be fixed in 2.0.0.
       - ./cert.crt:/PATH/TO/CERT:ro
       - ./key.crt:/PATH/TO/KEY:ro
     environment:
@@ -109,7 +110,7 @@ services:
 ## Configuration
 
 
-# Example configuration
+### Example configuration
 
 ```toml
 # Logging level: trace, debug, info, warn, error, off
@@ -202,7 +203,8 @@ initial_window = 1048576
 
 # Initial UDP payload size before MTU discovery
 initial_mtu = 1200
-# Minimum UDP payload size
+# The maximum UDP payload size guaranteed to be supported by the network.
+# Must be at least 1200, which is the default, and lower than or equal to initial_mtu
 min_mtu = 1200
 # Enable Generic Segmentation Offload
 gso = true
