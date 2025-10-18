@@ -1,11 +1,13 @@
 use std::{
     fmt::{Display, Formatter, Result as FmtResult},
-    ops::Deref,
-    sync::Arc,
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    },
 };
 
 use arc_swap::ArcSwap;
-use tokio::sync::{RwLock as AsyncRwLock, broadcast::Sender};
+use tokio::sync::Notify;
 use uuid::Uuid;
 
 #[derive(Clone)]
@@ -14,31 +16,27 @@ pub struct Authenticated(Arc<AuthenticatedInner>);
 struct AuthenticatedInner {
     /// uuid that waiting for auth
     uuid: ArcSwap<Option<Uuid>>,
-    tx: AsyncRwLock<Option<Sender<()>>>,
+    notify: Notify,
+    is_authenticated: AtomicBool,
 }
 
 // The whole thing below is just an observable boolean
 impl Authenticated {
     pub fn new() -> Self {
-        let (tx, _) = tokio::sync::broadcast::channel(1);
-
         Self(Arc::new(AuthenticatedInner {
             uuid: ArcSwap::new(None.into()),
-            tx: AsyncRwLock::new(Some(tx)),
+            notify: Notify::new(),
+            is_authenticated: AtomicBool::new(false),
         }))
     }
 
     /// invoking 'set' means auth success
     pub async fn set(&self, uuid: Uuid) {
         self.0.uuid.store(Some(uuid).into());
-        if let Some(tx) = self.0.tx.read().await.deref() {
-            // It will fail if there is no active receiver
-            _ = tx.send(());
-        } else {
-            // TODO LOGGIING multi auth packet
-        }
-        // Drop broadcast sender
-        self.0.tx.write().await.take();
+
+        // Mark as authenticated and notify all waiters
+        self.0.is_authenticated.store(true, Ordering::SeqCst);
+        self.0.notify.notify_waiters();
     }
 
     pub fn get(&self) -> Option<Uuid> {
@@ -47,24 +45,79 @@ impl Authenticated {
 
     /// waiting for auth success
     pub async fn wait(&self) {
-        let guard = self.0.tx.read().await;
-        if let Some(tx) = guard.deref() {
-            let mut rx = tx.subscribe();
-            drop(guard);
-            // It will fail when 1. sender been dropped 2. channel buffer overflow(multi
-            // auth packet)
-            _ = rx.recv().await;
+        // If already authenticated, return immediately
+        if self.0.is_authenticated.load(Ordering::SeqCst) {
+            return;
         }
-        // If the `tx` already `None`, that's meaning `set` had been invoked
+
+        // Otherwise, wait for notification
+        self.0.notify.notified().await;
     }
 }
 
 impl Display for Authenticated {
     fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
-        if let Some(uuid) = self.get() {
-            write!(f, "{uuid}")
-        } else {
-            write!(f, "unauthenticated")
+        match self.get() {
+            Some(uuid) => write!(f, "{uuid}"),
+            None => write!(f, "unauthenticated"),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use uuid::Uuid;
+
+    use super::*;
+
+    #[tokio::test]
+    async fn test_authenticated_get_set() {
+        let auth = Authenticated::new();
+        assert!(auth.get().is_none());
+        let uuid = Uuid::new_v4();
+        auth.set(uuid).await;
+        assert_eq!(auth.get(), Some(uuid));
+    }
+
+    #[tokio::test]
+    async fn test_authenticated_wait() {
+        let auth = Authenticated::new();
+        let uuid = Uuid::new_v4();
+        let auth_clone = auth.clone();
+        let wait_fut = tokio::spawn(async move {
+            auth_clone.wait().await;
+            assert_eq!(auth_clone.get(), Some(uuid));
+        });
+        auth.set(uuid).await;
+        wait_fut.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_authenticated_wait_race() {
+        let auth = Authenticated::new();
+        let uuid = Uuid::new_v4();
+
+        // Create multiple waiters to simulate a race condition
+        let mut wait_tasks = Vec::new();
+        for _ in 0..5 {
+            let auth_clone = auth.clone();
+            let uuid_clone = uuid;
+            let task = tokio::spawn(async move {
+                auth_clone.wait().await;
+                assert_eq!(auth_clone.get(), Some(uuid_clone));
+            });
+            wait_tasks.push(task);
+        }
+
+        // Small delay to ensure all tasks are waiting
+        tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
+
+        // Authenticate
+        auth.set(uuid).await;
+
+        // Ensure all tasks complete successfully
+        for task in wait_tasks {
+            task.await.unwrap();
         }
     }
 }
