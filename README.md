@@ -2,20 +2,46 @@
 
 Delicately-TUICed 0-RTT proxy protocol
 
-A fork of original TUIC repo https://github.com/EAimTY/tuic
-
-> **Future plans**: 
-> *In order not to reinvent the wheel，I decide migrate `tuic-client` to [Watfaq/clash-rs](https://github.com/Watfaq/clash-rs).*
-> *And for `tuic-server` [We](https://github.com/Watfaq) are about to create a rust equivalent implementation of singbox*
+A fork of original TUIC repo https://github.com/tuic-protocol/tuic
 
 Compared to origin, this fork's new features:
-- In-tree [docker image builds](https://github.com/Itsusinn/tuic/pkgs/container/tuic-server)
+
+**Infrastructure & CI/CD:**
+- In-tree [Docker image builds](https://github.com/Itsusinn/tuic/pkgs/container/tuic-server) with multi-platform support (linux/amd64, linux/arm64)
+- Reusable CI/CD workflows with extensive cross-compilation support via [cross-rs](https://github.com/cross-rs/cross)
+- Support for multiple platforms: Linux (GNU/musl), Windows (MSVC), macOS, FreeBSD, and more
+
+**TLS & Security:**
+
+- Automatic SSL/TLS certificate provisioning via ACME (Let's Encrypt)
+- Self-signed certificate support with automatic fallback
+- Certificate auto hot-reload for zero-downtime updates
+- `skip_cert_verify` option for client connections
+
+**Performance & Stability:**
+- JEMalloc allocator integration for better memory management
+- AWS-LC-RS crypto provider for improved performance
+- More active `max_concurrent_streams` strategy
+- Rust edition 2024
+
+**Server Features:**
+- ACL (Access Control List) support with configurable outbound rules
+- SOCKS5 outbound proxy support
+- RESTful API with traffic statistics
+- Configurable IP stack preference (IPv4/IPv6)
+- Network interface binding support
+- Default localhost access protection
+
+**Client Features:**
+- TCP/UDP port forwarding support
+- Local socket rebinding for better reliability
+- IP stack preference configuration
+
+**Development:**
+
 - Up-to-date dependencies
-- More relaxed locks
-- More CI targets via [cross-rs](https://github.com/cross-rs/cross)
-- Self-signed cert and `skip_cert_verify` support
-- ServerCert auto hot-reload
-- And [more...](https://github.com/EAimTY/tuic/compare/dev...Itsusinn:tuic:dev)
+- Comprehensive unit tests
+- And [more...](https://github.com/Itsusinn/tuic/compare/v1.0.0...main)
 
 ## Introduction
 
@@ -51,6 +77,10 @@ There are 4 crates provided in this repository:
 ## Contribute TUIC
 
 [Search TODO in code base](https://github.com/search?q=repo%3AItsusinn%2Ftuic%20todo&type=code) or [Assist with Open Issues](https://github.com/Itsusinn/tuic/issues?q=label%3A%22help+wanted%22+is%3Aissue+is%3Aopen)
+
+### Contributing Guidelines
+
+Contributors should fork from the `main` branch and submit pull requests to the `main` branch. Please note that the `dev` branch may be force-pushed from time to time, so avoid basing your work on it.
 
 ## License
 
