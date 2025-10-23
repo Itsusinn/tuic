@@ -15,3 +15,6 @@ pub use self::unmarshal::UnmarshalError;
 
 #[cfg(feature = "model")]
 pub mod model;
+
+#[cfg(test)]
+mod tests;

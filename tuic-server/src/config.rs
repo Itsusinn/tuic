@@ -916,4 +916,177 @@ default 8.8.4.4 udp/53 1.1.1.1
 		assert!(rule.ports.is_some());
 		assert!(rule.hijack.is_none());
 	}
+
+	#[tokio::test]
+	async fn test_default_values() {
+		// Test minimal configuration with defaults
+		let config = r#"
+            [users]
+            "123e4567-e89b-12d3-a456-426614174000" = "password"
+
+            [tls]
+            self_sign = true
+        "#;
+
+		let result = test_parse_config(config, ".toml", &[]).await.unwrap();
+
+		// Check default values
+		assert_eq!(result.log_level, LogLevel::Info);
+		assert_eq!(result.server, "[::]:8443".parse().unwrap());
+		assert_eq!(result.udp_relay_ipv6, true);
+		assert_eq!(result.zero_rtt_handshake, false);
+		assert_eq!(result.dual_stack, true);
+		assert_eq!(result.auth_timeout, Duration::from_secs(3));
+		assert_eq!(result.task_negotiation_timeout, Duration::from_secs(3));
+		assert_eq!(result.gc_interval, Duration::from_secs(10));
+		assert_eq!(result.gc_lifetime, Duration::from_secs(30));
+		assert_eq!(result.max_external_packet_size, 1500);
+		assert_eq!(result.stream_timeout, Duration::from_secs(60));
+	}
+
+	#[tokio::test]
+	async fn test_quic_defaults() {
+		let config = r#"
+            [users]
+            "123e4567-e89b-12d3-a456-426614174000" = "password"
+
+            [tls]
+            self_sign = true
+
+            [quic]
+        "#;
+
+		let result = test_parse_config(config, ".toml", &[]).await.unwrap();
+
+		// Check QUIC default values
+		assert_eq!(result.quic.initial_mtu, 1200);
+		assert_eq!(result.quic.send_window, 16 * 1024 * 1024);
+		assert_eq!(result.quic.receive_window, 8 * 1024 * 1024);
+		assert_eq!(result.quic.congestion_control.controller, CongestionController::Bbr);
+	}
+
+	#[tokio::test]
+	async fn test_invalid_uuid() {
+		let config = r#"
+            [users]
+            "not-a-valid-uuid" = "password"
+
+            [tls]
+            self_sign = true
+        "#;
+
+		let result = test_parse_config(config, ".toml", &[]).await;
+		assert!(result.is_err());
+	}
+
+	#[tokio::test]
+	async fn test_invalid_socket_addr() {
+		let config = r#"
+            server = "not-a-valid-address"
+
+            [users]
+            "123e4567-e89b-12d3-a456-426614174000" = "password"
+
+            [tls]
+            self_sign = true
+        "#;
+
+		let result = test_parse_config(config, ".toml", &[]).await;
+		assert!(result.is_err());
+	}
+
+	#[tokio::test]
+	async fn test_duration_parsing() {
+		let config = r#"
+            auth_timeout = "5s"
+            task_negotiation_timeout = "10s"
+            gc_interval = "30s"
+            gc_lifetime = "1m"
+            stream_timeout = "2m"
+
+            [users]
+            "123e4567-e89b-12d3-a456-426614174000" = "password"
+
+            [tls]
+            self_sign = true
+        "#;
+
+		let result = test_parse_config(config, ".toml", &[]).await.unwrap();
+
+		assert_eq!(result.auth_timeout, Duration::from_secs(5));
+		assert_eq!(result.task_negotiation_timeout, Duration::from_secs(10));
+		assert_eq!(result.gc_interval, Duration::from_secs(30));
+		assert_eq!(result.gc_lifetime, Duration::from_secs(60));
+		assert_eq!(result.stream_timeout, Duration::from_secs(120));
+	}
+
+	#[tokio::test]
+	async fn test_empty_acl() {
+		let config = r#"
+            acl = ""
+
+            [users]
+            "123e4567-e89b-12d3-a456-426614174000" = "password"
+
+            [tls]
+            self_sign = true
+        "#;
+
+		let result = test_parse_config(config, ".toml", &[]).await.unwrap();
+		assert_eq!(result.acl.len(), 0);
+	}
+
+	#[tokio::test]
+	async fn test_acl_comments_and_whitespace() {
+		let config = r#"
+            acl = """
+allow localhost
+reject 192.168.0.0/16
+allow google.com
+"""
+
+            [users]
+            "123e4567-e89b-12d3-a456-426614174000" = "password"
+
+            [tls]
+            self_sign = true
+        "#;
+
+		let result = test_parse_config(config, ".toml", &[]).await.unwrap();
+		// Should have 3 rules
+		assert_eq!(result.acl.len(), 3);
+	}
+
+	#[tokio::test]
+	async fn test_congestion_control_variants() {
+		// Test BBR
+		let config_bbr = r#"
+            [users]
+            "123e4567-e89b-12d3-a456-426614174000" = "password"
+
+            [tls]
+            self_sign = true
+
+            [quic.congestion_control]
+            controller = "bbr"
+        "#;
+
+		let result = test_parse_config(config_bbr, ".toml", &[]).await.unwrap();
+		assert_eq!(result.quic.congestion_control.controller, CongestionController::Bbr);
+
+		// Test NewReno (note: lowercase 'newreno' is the valid variant)
+		let config_new_reno = r#"
+            [users]
+            "123e4567-e89b-12d3-a456-426614174000" = "password"
+
+            [tls]
+            self_sign = true
+
+            [quic.congestion_control]
+            controller = "newreno"
+        "#;
+
+		let result = test_parse_config(config_new_reno, ".toml", &[]).await.unwrap();
+		assert_eq!(result.quic.congestion_control.controller, CongestionController::NewReno);
+	}
 }

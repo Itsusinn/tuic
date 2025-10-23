@@ -102,7 +102,7 @@ impl ServerAddr {
 	}
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum UdpRelayMode {
 	Native,
 	Quic,
@@ -122,6 +122,7 @@ impl FromStr for UdpRelayMode {
 	}
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum CongestionControl {
 	Cubic,
 	NewReno,

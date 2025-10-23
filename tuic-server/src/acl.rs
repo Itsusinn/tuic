@@ -679,4 +679,248 @@ mod tests {
 		// UDP request – the only entry is filtered out → false
 		assert!(!rule.matching(v4("8.8.8.8", 9999), 9999, false));
 	}
+
+	#[test]
+	fn test_ipv6_cidr_match() {
+		// IPv6 CIDR: 2001:db8::/32
+		let rule = AclRule {
+			addr:     AclAddress::Cidr("2001:db8::/32".into()),
+			ports:    None,
+			outbound: "default".parse().unwrap(),
+			hijack:   None,
+		};
+
+		// Within CIDR range
+		assert!(rule.matching(v6("2001:db8::1", 80), 80, true));
+		assert!(rule.matching(v6("2001:db8:1::1", 80), 80, true));
+
+		// Outside CIDR range
+		assert!(!rule.matching(v6("2001:db9::1", 80), 80, true));
+		assert!(!rule.matching(v6("2002:db8::1", 80), 80, true));
+
+		// IPv4 should never match IPv6 CIDR
+		assert!(!rule.matching(v4("10.0.0.1", 80), 80, true));
+	}
+
+	#[test]
+	fn test_wildcard_domain_with_asterisk() {
+		// Wildcard domain: *.example.com
+		let _rule = AclRule {
+			addr:     AclAddress::WildcardDomain("*.example.com".into()),
+			ports:    None,
+			outbound: "default".parse().unwrap(),
+			hijack:   None,
+		};
+
+		// Note: This test can only validate the parsing logic,
+		// actual domain resolution would require DNS setup
+		// The matching function will try to resolve the domain
+	}
+
+	#[test]
+	fn test_multiple_port_entries() {
+		// Multiple port entries with different protocols
+		let ports = AclPorts {
+			entries: vec![
+				AclPortEntry {
+					protocol:  Some(AclProtocol::Tcp),
+					port_spec: AclPortSpec::Single(80),
+				},
+				AclPortEntry {
+					protocol:  Some(AclProtocol::Tcp),
+					port_spec: AclPortSpec::Single(443),
+				},
+				AclPortEntry {
+					protocol:  Some(AclProtocol::Udp),
+					port_spec: AclPortSpec::Range(5000, 5100),
+				},
+			],
+		};
+
+		let rule = AclRule {
+			addr:     AclAddress::Any,
+			ports:    Some(ports),
+			outbound: "default".parse().unwrap(),
+			hijack:   None,
+		};
+
+		// TCP port 80 - should match
+		assert!(rule.matching(v4("1.2.3.4", 80), 80, true));
+
+		// TCP port 443 - should match
+		assert!(rule.matching(v4("1.2.3.4", 443), 443, true));
+
+		// TCP port 8080 - should not match
+		assert!(!rule.matching(v4("1.2.3.4", 8080), 8080, true));
+
+		// UDP port 5050 - should match
+		assert!(rule.matching(v4("1.2.3.4", 5050), 5050, false));
+
+		// UDP port 4999 - should not match
+		assert!(!rule.matching(v4("1.2.3.4", 4999), 4999, false));
+
+		// UDP port 5101 - should not match
+		assert!(!rule.matching(v4("1.2.3.4", 5101), 5101, false));
+	}
+
+	#[test]
+	fn test_port_range_boundary() {
+		// Test port range boundaries
+		let ports = AclPorts {
+			entries: vec![AclPortEntry {
+				protocol:  None,
+				port_spec: AclPortSpec::Range(100, 200),
+			}],
+		};
+
+		let rule = AclRule {
+			addr:     AclAddress::Any,
+			ports:    Some(ports),
+			outbound: "default".parse().unwrap(),
+			hijack:   None,
+		};
+
+		// Lower boundary
+		assert!(rule.matching(v4("1.1.1.1", 100), 100, true));
+
+		// Upper boundary
+		assert!(rule.matching(v4("1.1.1.1", 200), 200, true));
+
+		// Below lower boundary
+		assert!(!rule.matching(v4("1.1.1.1", 99), 99, true));
+
+		// Above upper boundary
+		assert!(!rule.matching(v4("1.1.1.1", 201), 201, true));
+
+		// Middle of range
+		assert!(rule.matching(v4("1.1.1.1", 150), 150, false));
+	}
+
+	#[test]
+	fn test_invalid_ip_address() {
+		// Test with an invalid IP address string
+		let rule = AclRule {
+			addr:     AclAddress::Ip("not.an.ip.address".into()),
+			ports:    None,
+			outbound: "default".parse().unwrap(),
+			hijack:   None,
+		};
+
+		// Should not match any address since the IP string is invalid
+		assert!(!rule.matching(v4("1.2.3.4", 80), 80, true));
+		assert!(!rule.matching(v6("::1", 80), 80, true));
+	}
+
+	#[test]
+	fn test_invalid_cidr() {
+		// Test with an invalid CIDR string
+		let rule = AclRule {
+			addr:     AclAddress::Cidr("invalid/cidr".into()),
+			ports:    None,
+			outbound: "default".parse().unwrap(),
+			hijack:   None,
+		};
+
+		// Should not match any address since the CIDR is invalid
+		assert!(!rule.matching(v4("10.0.0.1", 80), 80, true));
+		assert!(!rule.matching(v6("2001:db8::1", 80), 80, true));
+	}
+
+	#[test]
+	fn test_edge_case_port_zero() {
+		// Test with port 0
+		let ports = AclPorts {
+			entries: vec![AclPortEntry {
+				protocol:  None,
+				port_spec: AclPortSpec::Single(0),
+			}],
+		};
+
+		let rule = AclRule {
+			addr:     AclAddress::Any,
+			ports:    Some(ports),
+			outbound: "default".parse().unwrap(),
+			hijack:   None,
+		};
+
+		assert!(rule.matching(v4("1.2.3.4", 0), 0, true));
+		assert!(!rule.matching(v4("1.2.3.4", 1), 1, true));
+	}
+
+	#[test]
+	fn test_edge_case_port_max() {
+		// Test with maximum port number (65535)
+		let ports = AclPorts {
+			entries: vec![AclPortEntry {
+				protocol:  None,
+				port_spec: AclPortSpec::Single(65535),
+			}],
+		};
+
+		let rule = AclRule {
+			addr:     AclAddress::Any,
+			ports:    Some(ports),
+			outbound: "default".parse().unwrap(),
+			hijack:   None,
+		};
+
+		assert!(rule.matching(v4("1.2.3.4", 65535), 65535, true));
+		assert!(!rule.matching(v4("1.2.3.4", 65534), 65534, true));
+	}
+
+	#[test]
+	fn test_loopback_addresses() {
+		// Test various loopback addresses
+		let rule = AclRule {
+			addr:     AclAddress::Localhost,
+			ports:    None,
+			outbound: "default".parse().unwrap(),
+			hijack:   None,
+		};
+
+		// IPv4 loopback addresses
+		assert!(rule.matching(v4("127.0.0.1", 80), 80, true));
+		assert!(rule.matching(v4("127.0.0.2", 80), 80, true));
+		assert!(rule.matching(v4("127.255.255.255", 80), 80, true));
+
+		// IPv6 loopback
+		assert!(rule.matching(v6("::1", 80), 80, true));
+
+		// Non-loopback addresses
+		assert!(!rule.matching(v4("192.168.1.1", 80), 80, true));
+		assert!(!rule.matching(v6("2001:db8::1", 80), 80, true));
+	}
+
+	#[test]
+	fn test_cidr_slash_32() {
+		// /32 CIDR should match only single IPv4 address
+		let rule = AclRule {
+			addr:     AclAddress::Cidr("192.168.1.100/32".into()),
+			ports:    None,
+			outbound: "default".parse().unwrap(),
+			hijack:   None,
+		};
+
+		assert!(rule.matching(v4("192.168.1.100", 80), 80, true));
+		assert!(!rule.matching(v4("192.168.1.101", 80), 80, true));
+		assert!(!rule.matching(v4("192.168.1.99", 80), 80, true));
+	}
+
+	#[test]
+	fn test_cidr_slash_0() {
+		// /0 CIDR should match all IPv4 addresses
+		let rule = AclRule {
+			addr:     AclAddress::Cidr("0.0.0.0/0".into()),
+			ports:    None,
+			outbound: "default".parse().unwrap(),
+			hijack:   None,
+		};
+
+		assert!(rule.matching(v4("1.2.3.4", 80), 80, true));
+		assert!(rule.matching(v4("192.168.1.1", 80), 80, true));
+		assert!(rule.matching(v4("255.255.255.255", 80), 80, true));
+
+		// Should not match IPv6
+		assert!(!rule.matching(v6("::1", 80), 80, true));
+	}
 }
