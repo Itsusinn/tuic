@@ -26,7 +26,7 @@ use tokio::{
 };
 use tracing::{debug, info, warn};
 // Importing custom QUIC connection model and side marker
-use tuic_quinn::{Connection as Model, side};
+use tuic_core::quinn::{Connection as Model, side};
 use uuid::Uuid;
 
 use crate::{

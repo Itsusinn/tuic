@@ -18,3 +18,6 @@ pub mod model;
 
 #[cfg(test)]
 mod tests;
+
+// Quinn integration module
+pub mod quinn;

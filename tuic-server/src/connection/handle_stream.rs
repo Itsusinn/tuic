@@ -5,7 +5,7 @@ use quinn::{RecvStream, SendStream, VarInt};
 use register_count::Register;
 use tokio::time;
 use tracing::{debug, warn};
-use tuic_quinn::Task;
+use tuic_core::quinn::Task;
 
 use super::Connection;
 use crate::{error::Error, utils::UdpRelayMode};

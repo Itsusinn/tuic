@@ -1,4 +1,4 @@
-# tuic
+# tuic-core
 
 Delicately-TUICed 0-RTT proxy protocol
 

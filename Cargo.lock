@@ -2621,19 +2621,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e421abadd41a4225275504ea4d6566923418b7f05506fbc9c0fe86ba7396114b"
 
 [[package]]
-name = "tuic"
-version = "1.5.2"
-dependencies = [
- "bytes",
- "futures-util",
- "parking_lot",
- "register-count",
- "thiserror 2.0.17",
- "tuic",
- "uuid",
-]
-
-[[package]]
 name = "tuic-client"
 version = "1.5.2"
 dependencies = [
@@ -2662,22 +2649,24 @@ dependencies = [
  "tokio-util",
  "tracing",
  "tracing-subscriber",
- "tuic",
- "tuic-quinn",
+ "tuic-core",
  "uuid",
 ]
 
 [[package]]
-name = "tuic-quinn"
+name = "tuic-core"
 version = "1.5.2"
 dependencies = [
  "bytes",
  "eyre",
+ "futures-util",
+ "parking_lot",
  "quinn",
+ "register-count",
  "thiserror 2.0.17",
  "tokio",
  "tracing",
- "tuic",
+ "tuic-core",
  "uuid",
 ]
 
@@ -2719,8 +2708,7 @@ dependencies = [
  "toml 0.9.8",
  "tracing",
  "tracing-subscriber",
- "tuic",
- "tuic-quinn",
+ "tuic-core",
  "uuid",
  "x509-parser",
 ]
