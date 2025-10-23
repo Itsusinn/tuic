@@ -3,25 +3,11 @@
 use std::{env, process, str::FromStr};
 
 use chrono::{Offset, TimeZone};
-use tracing::level_filters::LevelFilter;
-use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
-
-use crate::{
-	config::{Config, ConfigError},
-	connection::Connection,
-	socks5::Server as Socks5Server,
-};
-
-mod config;
-mod connection;
-mod error;
-mod forward;
-mod socks5;
-mod utils;
-
 #[cfg(feature = "jemallocator")]
 use tikv_jemallocator::Jemalloc;
-
+use tracing::level_filters::LevelFilter;
+use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
+use tuic_client::config::{Config, ConfigError};
 #[cfg(feature = "jemallocator")]
 #[global_allocator]
 static GLOBAL: Jemalloc = Jemalloc;
@@ -58,27 +44,5 @@ async fn main() -> eyre::Result<()> {
 				)),
 		)
 		.try_init()?;
-
-	match Connection::set_config(cfg.relay).await {
-		Ok(()) => {
-			Connection::get_conn().await?;
-		}
-		Err(err) => {
-			eprintln!("{err}");
-			process::exit(1);
-		}
-	}
-
-	forward::start(cfg.local.tcp_forward.clone(), cfg.local.udp_forward.clone()).await;
-
-	match Socks5Server::set_config(cfg.local) {
-		Ok(()) => {}
-		Err(err) => {
-			eprintln!("{err}");
-			process::exit(1);
-		}
-	}
-
-	Socks5Server::start().await;
-	Ok(())
+	tuic_client::run(cfg).await
 }

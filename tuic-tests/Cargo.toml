@@ -1,0 +1,32 @@
+[package]
+name = "tuic-tests"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[features]
+default = ["aws-lc-rs", "deplog"]
+ring = ["rustls/ring", "tuic-client/ring", "tuic-server/ring"]
+aws-lc-rs = ["rustls/aws-lc-rs", "tuic-client/aws-lc-rs", "tuic-server/aws-lc-rs"]
+deplog = ["tracing-test/no-env-filter"]
+
+[dependencies]
+# Core dependencies for integration tests
+tuic-core = { path = "../tuic-core", features = ["async_marshal", "marshal", "model"] }
+tuic-client = { path = "../tuic-client" }
+tuic-server = { path = "../tuic-server" }
+
+# Required dependencies
+uuid = { version = "1", features = ["v4", "serde", "std"] }
+tokio = { version = "1", features = ["full"] }
+json5 = { version = "0.4" }
+lexopt = { version = "0.3" }
+eyre = { version = "0.6" }
+fast-socks5 = { version = "1.0.0-rc.0" }
+rustls = { version = "0.23", default-features = false }
+tracing-test = { version = "0.2" }
+tracing = "0.1"

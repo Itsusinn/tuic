@@ -1,42 +1,13 @@
-use std::{
-	collections::{HashMap, HashSet},
-	process,
-	sync::{Arc, atomic::AtomicUsize},
-};
-
-use chashmap::CHashMap;
-use config::{Config, parse_config};
-use tracing::level_filters::LevelFilter;
-use tracing_subscriber::{fmt::time::LocalTime, layer::SubscriberExt, util::SubscriberInitExt};
-use uuid::Uuid;
-
-use crate::{compat::QuicClient, old_config::ConfigError, server::Server};
-
-mod acl;
-mod compat;
-mod config;
-mod connection;
-mod error;
-mod io;
-mod old_config;
-mod restful;
-mod server;
-mod tls;
-mod utils;
+use std::process;
 
 #[cfg(feature = "jemallocator")]
 use tikv_jemallocator::Jemalloc;
-
+use tracing::level_filters::LevelFilter;
+use tracing_subscriber::{fmt::time::LocalTime, layer::SubscriberExt, util::SubscriberInitExt};
+use tuic_server::{config::parse_config, old_config::ConfigError};
 #[cfg(feature = "jemallocator")]
 #[global_allocator]
 static GLOBAL: Jemalloc = Jemalloc;
-
-struct AppContext {
-	pub cfg:            Config,
-	pub online_counter: HashMap<Uuid, AtomicUsize>,
-	pub online_clients: CHashMap<Uuid, HashSet<QuicClient>>,
-	pub traffic_stats:  HashMap<Uuid, (AtomicUsize, AtomicUsize)>,
-}
 
 #[tokio::main]
 async fn main() -> eyre::Result<()> {
@@ -51,32 +22,11 @@ async fn main() -> eyre::Result<()> {
 			process::exit(1);
 		}
 	};
-	run(cfg).await
-}
-
-pub async fn run(cfg: Config) -> eyre::Result<()> {
-	let mut online_counter = HashMap::new();
-	for (user, _) in cfg.users.iter() {
-		online_counter.insert(user.to_owned(), AtomicUsize::new(0));
-	}
-
-	let mut traffic_stats = HashMap::new();
-	for (user, _) in cfg.users.iter() {
-		traffic_stats.insert(user.to_owned(), (AtomicUsize::new(0), AtomicUsize::new(0)));
-	}
-
-	let ctx = Arc::new(AppContext {
-		cfg,
-		online_counter,
-		online_clients: CHashMap::new(),
-		traffic_stats,
-	});
-
 	let filter = tracing_subscriber::filter::Targets::new()
 		.with_targets(vec![
-			("tuic", ctx.cfg.log_level),
-			("tuic_quinn", ctx.cfg.log_level),
-			("tuic_server", ctx.cfg.log_level),
+			("tuic", cfg.log_level),
+			("tuic_quinn", cfg.log_level),
+			("tuic_server", cfg.log_level),
 		])
 		.with_default(LevelFilter::INFO);
 	let registry = tracing_subscriber::registry();
@@ -91,12 +41,9 @@ pub async fn run(cfg: Config) -> eyre::Result<()> {
 		)
 		.try_init()?;
 	tokio::spawn(async move {
-		match Server::init(ctx.clone()).await {
-			Ok(server) => server.start().await,
-			Err(err) => {
-				eprintln!("{err}");
-				process::exit(1);
-			}
+		if let Err(err) = tuic_server::run(cfg).await {
+			eprintln!("{err}");
+			process::exit(1);
 		}
 	});
 	tokio::signal::ctrl_c().await.expect("failed to listen for event");
