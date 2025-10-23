@@ -14,7 +14,7 @@ repository.workspace = true
 [features]
 default = ["aws-lc-rs"]
 ring = ["rustls/ring", "rcgen/ring", "quinn/rustls-ring", "instant-acme/ring"]
-aws-lc-rs = ["rustls/aws-lc-rs", "rcgen/aws_lc_rs", "quinn/rustls-aws-lc-rs", "instant-acme/aws-lc-rs"]
+aws-lc-rs = ["dep:aws-lc-rs", "rustls/aws-lc-rs", "rcgen/aws_lc_rs", "quinn/rustls-aws-lc-rs", "instant-acme/aws-lc-rs"]
 jemallocator = ["tikv-jemallocator"]
 
 [dependencies]
@@ -43,6 +43,7 @@ rustls-pemfile = { version = "2", default-features = false, features = ["std"]}
 rcgen = { version = "0.14", default-features = false, features = ["crypto", "pem"] }
 instant-acme = { version = "0.8", default-features = false, features = ["hyper-rustls"] }
 x509-parser = "0.18"
+aws-lc-rs = { version = "1", default-features = false, optional = true, features = ["bindgen"] }
 
 # Serde
 bytes = { version = "1", default-features = false, features = ["std"] }
