@@ -570,58 +570,6 @@ async fn test_server_client_integration() {
 	let _ = timeout(Duration::from_secs(6), tcp_test).await;
 
 	// ============================================================================
-	// Test 0.5: Direct connection test (without SOCKS5) to verify echo server works
-	// ============================================================================
-	let direct_test = async {
-		use tokio::{
-			io::{AsyncReadExt, AsyncWriteExt},
-			net::{TcpListener, TcpStream},
-		};
-
-		println!("[Direct Test] Testing echo server without SOCKS5...");
-
-		// Start echo server
-		let echo_server = TcpListener::bind("127.0.0.1:0").await.unwrap();
-		let echo_addr = echo_server.local_addr().unwrap();
-		println!("[Direct Test] Echo server at: {}", echo_addr);
-
-		let echo_task = tokio::spawn(async move {
-			if let Ok((mut socket, addr)) = echo_server.accept().await {
-				println!("[Direct Test Server] Accepted from: {}", addr);
-				let mut buf = vec![0u8; 1024];
-				if let Ok(n) = socket.read(&mut buf).await {
-					println!("[Direct Test Server] Received {} bytes", n);
-					let _ = socket.write_all(&buf[..n]).await;
-					println!("[Direct Test Server] Echoed {} bytes", n);
-				}
-			}
-		});
-
-		tokio::time::sleep(Duration::from_millis(100)).await;
-
-		// Direct connection
-		if let Ok(mut stream) = TcpStream::connect(echo_addr).await {
-			println!("[Direct Test] Connected directly");
-			let test_data = b"Direct test!";
-			if stream.write_all(test_data).await.is_ok() {
-				let _ = stream.flush().await;
-				let mut buf = vec![0u8; 1024];
-				if let Ok(n) = stream.read(&mut buf).await {
-					if &buf[..n] == test_data {
-						println!("[Direct Test] ✓ Direct echo works!");
-					} else {
-						eprintln!("[Direct Test] ✗ Echo mismatch");
-					}
-				}
-			}
-		}
-
-		echo_task.abort();
-	};
-
-	let _ = timeout(Duration::from_secs(2), direct_test).await;
-
-	// ============================================================================
 	// Test 2: Create a local UDP echo server and test UDP relay through SOCKS5
 	// ============================================================================
 	let udp_test = async {

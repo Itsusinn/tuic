@@ -9,9 +9,9 @@ repository.workspace = true
 publish = false
 
 [features]
-default = ["aws-lc-rs", "deplog"]
+default = ["aws-lc-rs"]
 ring = ["rustls/ring", "tuic-client/ring", "tuic-server/ring"]
-aws-lc-rs = ["rustls/aws-lc-rs", "tuic-client/aws-lc-rs", "tuic-server/aws-lc-rs"]
+aws-lc-rs = ["dep:aws-lc-rs", "rustls/aws-lc-rs", "tuic-client/aws-lc-rs", "tuic-server/aws-lc-rs"]
 deplog = ["tracing-test/no-env-filter"]
 
 [dependencies]
@@ -30,3 +30,4 @@ fast-socks5 = { version = "1.0.0-rc.0" }
 rustls = { version = "0.23", default-features = false }
 tracing-test = { version = "0.2" }
 tracing = "0.1"
+aws-lc-rs = { version = "1", default-features = false, optional = true, features = ["bindgen"] }
