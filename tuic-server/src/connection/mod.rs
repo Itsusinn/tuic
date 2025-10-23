@@ -9,7 +9,7 @@ use quinn::{Connecting, Connection as QuinnConnection, VarInt};
 use register_count::Counter;
 use tokio::{sync::RwLock as AsyncRwLock, time};
 use tracing::{debug, info, warn};
-use tuic_quinn::{Authenticate, Connection as Model, side};
+use tuic_core::quinn::{Authenticate, Connection as Model, side};
 
 use self::{authenticated::Authenticated, udp_session::UdpSession};
 use crate::{AppContext, error::Error, restful, utils::UdpRelayMode};

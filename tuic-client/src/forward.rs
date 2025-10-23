@@ -18,7 +18,7 @@ use tokio::{
 	sync::RwLock as AsyncRwLock,
 };
 use tracing::{debug, info, warn};
-use tuic::Address as TuicAddress;
+use tuic_core::Address as TuicAddress;
 
 use crate::{
 	config::{TcpForward, UdpForward},

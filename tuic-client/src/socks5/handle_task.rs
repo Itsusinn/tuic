@@ -5,7 +5,7 @@ use socks5_server::{
 };
 use tokio::io::{self, AsyncWriteExt};
 use tracing::{debug, warn};
-use tuic::Address as TuicAddress;
+use tuic_core::Address as TuicAddress;
 
 use super::{Server, UDP_SESSIONS, udp_session::UdpSession};
 use crate::connection::{Connection as TuicConnection, ERROR_CODE};

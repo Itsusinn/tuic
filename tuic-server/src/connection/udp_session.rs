@@ -11,7 +11,7 @@ use tokio::{
 	sync::{RwLock as AsyncRwLock, oneshot},
 };
 use tracing::warn;
-use tuic::Address;
+use tuic_core::Address;
 
 use super::Connection;
 use crate::{AppContext, error::Error, utils::FutResultExt};

@@ -31,8 +31,7 @@ sha2 = "0.10"
 quinn = { version = "0.11", default-features = false, features = ["runtime-tokio", "log"] }
 
 # TUIC
-tuic = { path = "../tuic", default-features = false }
-tuic-quinn = { path = "../tuic-quinn", default-features = false }
+tuic-core = { path = "../tuic-core", default-features = false, features = ["async_marshal", "marshal", "model"] }
 register-count = { version = "0.1.0", default-features = false, features = ["std"] }
 
 # Tokio/Async

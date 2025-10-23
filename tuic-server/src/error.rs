@@ -3,7 +3,7 @@ use std::{io::Error as IoError, net::SocketAddr};
 use quinn::ConnectionError;
 use rustls::Error as RustlsError;
 use thiserror::Error;
-use tuic_quinn::Error as ModelError;
+use tuic_core::quinn::Error as ModelError;
 use uuid::Uuid;
 
 #[derive(Debug, Error)]
