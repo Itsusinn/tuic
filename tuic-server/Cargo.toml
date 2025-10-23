@@ -48,6 +48,7 @@ x509-parser = "0.18"
 # Serde
 bytes = { version = "1", default-features = false, features = ["std"] }
 serde = { version = "1", default-features = false, features = ["derive", "std"] }
+json5 = { version = "0.4", default-features = false }
 serde_json = { version = "1", default-features = false, features = ["std"] }
 figment = { version = "0.10", features = ["toml"] }
 educe = { version = "0.6", default-features = false, features = ["Default"] }
