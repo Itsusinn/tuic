@@ -2,9 +2,7 @@
 
 mod protocol;
 
-pub use self::protocol::{
-    Address, Authenticate, Connect, Dissociate, Header, Heartbeat, Packet, VERSION,
-};
+pub use self::protocol::{Address, Authenticate, Connect, Dissociate, Header, Heartbeat, Packet, VERSION};
 
 #[cfg(any(feature = "async_marshal", feature = "marshal"))]
 mod marshal;

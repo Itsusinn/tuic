@@ -1,20 +1,46 @@
-unstable_features = true
-style_edition = "2024"
-tab_spaces = 4
+unstable_features = true                # Enable unstable features (requires nightly)
+edition = "2024"                        # Rust edition
+style_edition = "2024"                  # Style edition for formatting
+hard_tabs = true                        # Use tabs for indentation
+max_width = 128                         # Maximum width of each line
 
-# imports
-group_imports = "StdExternalCrate"
-imports_granularity = "Crate"
-reorder_imports = true
+# Imports
+group_imports = "StdExternalCrate"      # Group imports: Std, External, then Crate
+imports_granularity = "Crate"           # Import granularity: group by crate
+reorder_imports = true                  # Reorder imports alphabetically
+reorder_modules = true                  # Reorder module declarations
 
-# comments
-wrap_comments = true
-normalize_comments = true
-format_code_in_doc_comments = true
+# Comments
+wrap_comments = true                    # Wrap comments to max_width
+normalize_comments = true               # Normalize comment style
+format_code_in_doc_comments = true      # Format code blocks in doc comments
 
-reorder_impl_items = true
-condense_wildcard_suffixes = true
-enum_discrim_align_threshold = 20
-use_field_init_shorthand = true
-format_strings = true
-format_macro_matchers = true
+# Shorthand
+use_field_init_shorthand = true         # Use field init shorthand where possible
+use_try_shorthand = true                # Use ? instead of try! macro
+
+# Alignment thresholds
+enum_discrim_align_threshold = 20       # Align enum discriminants if <= threshold
+struct_field_align_threshold = 20       # Align struct fields if <= threshold
+
+# Formatting options
+reorder_impl_items = true               # Reorder items in impl blocks
+condense_wildcard_suffixes = true       # Condense wildcard suffixes in patterns
+format_strings = true                   # Format string literals
+format_macro_matchers = true            # Format macro matchers
+format_macro_bodies = true              # Format macro bodies
+newline_style = "Unix"                  # Use Unix-style newlines
+blank_lines_upper_bound = 2             # Max blank lines between items
+blank_lines_lower_bound = 0             # Min blank lines between items
+
+# Macros
+skip_macro_invocations = ["ensure"]     # Skip formatting for these macros
+
+# Misc
+force_explicit_abi = true               # Always require explicit ABI in extern blocks
+merge_derives = true                    # Merge multiple derives into a single attribute
+normalize_doc_attributes = true         # Normalize doc attributes
+
+# Advanced (optional, comment out if not needed)
+# error_on_line_overflow = true         # Error if line exceeds max_width
+# error_on_unformatted = true           # Error if file cannot be formatted
