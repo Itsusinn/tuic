@@ -562,4 +562,203 @@ password"
 		assert_eq!(config.log_level, "debug");
 		assert_eq!(config.relay.zero_rtt_handshake, true);
 	}
+
+	#[test]
+	fn test_default_values() {
+		let json5_config = r#"
+        {
+            relay: {
+                server: 'example.com:443',
+                uuid: '00000000-0000-0000-0000-000000000000',
+                password: 'password'
+            },
+            local: {
+                server: '127.0.0.1:1080'
+            }
+        }
+        "#;
+
+		let config: Config = json5::from_str(json5_config).unwrap();
+
+		// Check default values
+		assert_eq!(config.log_level, "info");
+		assert_eq!(config.relay.ipstack_prefer, StackPrefer::V4first);
+		assert_eq!(config.relay.udp_relay_mode, UdpRelayMode::Native);
+		assert_eq!(config.relay.congestion_control, CongestionControl::Cubic);
+		assert_eq!(config.relay.zero_rtt_handshake, false);
+		assert_eq!(config.relay.disable_sni, false);
+		assert_eq!(config.relay.timeout, Duration::from_secs(8));
+		assert_eq!(config.relay.heartbeat, Duration::from_secs(3));
+		assert_eq!(config.relay.disable_native_certs, false);
+		assert_eq!(config.relay.send_window, 16 * 1024 * 1024);
+		assert_eq!(config.relay.receive_window, 8 * 1024 * 1024);
+		assert_eq!(config.relay.initial_mtu, 1200);
+		assert_eq!(config.relay.min_mtu, 1200);
+		assert_eq!(config.relay.gso, true);
+		assert_eq!(config.relay.pmtu, true);
+		assert_eq!(config.relay.gc_interval, Duration::from_secs(3));
+		assert_eq!(config.relay.gc_lifetime, Duration::from_secs(15));
+		assert_eq!(config.relay.skip_cert_verify, false);
+		assert_eq!(config.local.max_packet_size, 1500);
+	}
+
+	#[test]
+	fn test_tcp_udp_forward() {
+		let json5_config = r#"
+        {
+            relay: {
+                server: 'example.com:443',
+                uuid: '00000000-0000-0000-0000-000000000000',
+                password: 'password'
+            },
+            local: {
+                server: '127.0.0.1:1080',
+                tcp_forward: [
+                    { listen: '127.0.0.1:8080', remote: 'google.com:80' },
+                    { listen: '127.0.0.1:8443', remote: 'example.com:443' }
+                ],
+                udp_forward: [
+                    { listen: '127.0.0.1:5353', remote: '8.8.8.8:53', timeout: '10s' }
+                ]
+            }
+        }
+        "#;
+
+		let config: Config = json5::from_str(json5_config).unwrap();
+
+		assert_eq!(config.local.tcp_forward.len(), 2);
+		assert_eq!(config.local.tcp_forward[0].listen.to_string(), "127.0.0.1:8080");
+		assert_eq!(config.local.tcp_forward[0].remote.0, "google.com");
+		assert_eq!(config.local.tcp_forward[0].remote.1, 80);
+
+		assert_eq!(config.local.udp_forward.len(), 1);
+		assert_eq!(config.local.udp_forward[0].listen.to_string(), "127.0.0.1:5353");
+		assert_eq!(config.local.udp_forward[0].remote.0, "8.8.8.8");
+		assert_eq!(config.local.udp_forward[0].remote.1, 53);
+		assert_eq!(config.local.udp_forward[0].timeout, Duration::from_secs(10));
+	}
+
+	#[test]
+	fn test_invalid_uuid() {
+		let json5_config = r#"
+        {
+            relay: {
+                server: 'example.com:443',
+                uuid: 'not-a-valid-uuid',
+                password: 'password'
+            },
+            local: {
+                server: '127.0.0.1:1080'
+            }
+        }
+        "#;
+
+		let config: Result<Config, _> = json5::from_str(json5_config);
+		assert!(config.is_err());
+	}
+
+	#[test]
+	fn test_invalid_socket_addr() {
+		let json5_config = r#"
+        {
+            relay: {
+                server: 'example.com:443',
+                uuid: '00000000-0000-0000-0000-000000000000',
+                password: 'password'
+            },
+            local: {
+                server: 'not-a-valid-address'
+            }
+        }
+        "#;
+
+		let config: Result<Config, _> = json5::from_str(json5_config);
+		assert!(config.is_err());
+	}
+
+	#[test]
+	fn test_missing_required_fields() {
+		// Missing relay.password
+		let json5_config = r#"
+        {
+            relay: {
+                server: 'example.com:443',
+                uuid: '00000000-0000-0000-0000-000000000000'
+            },
+            local: {
+                server: '127.0.0.1:1080'
+            }
+        }
+        "#;
+
+		let config: Result<Config, _> = json5::from_str(json5_config);
+		assert!(config.is_err());
+	}
+
+	#[test]
+	fn test_alpn_configuration() {
+		let json5_config = r#"
+        {
+            relay: {
+                server: 'example.com:443',
+                uuid: '00000000-0000-0000-0000-000000000000',
+                password: 'password',
+                alpn: ['h3', 'h2', 'http/1.1']
+            },
+            local: {
+                server: '127.0.0.1:1080'
+            }
+        }
+        "#;
+
+		let config: Config = json5::from_str(json5_config).unwrap();
+		assert_eq!(config.relay.alpn.len(), 3);
+		assert_eq!(config.relay.alpn[0], b"h3");
+		assert_eq!(config.relay.alpn[1], b"h2");
+		assert_eq!(config.relay.alpn[2], b"http/1.1");
+	}
+
+	#[test]
+	fn test_ipv6_server_address() {
+		let json5_config = r#"
+        {
+            relay: {
+                server: 'example.com:443',
+                uuid: '00000000-0000-0000-0000-000000000000',
+                password: 'password'
+            },
+            local: {
+                server: '[::1]:1080'
+            }
+        }
+        "#;
+
+		let config: Config = json5::from_str(json5_config).unwrap();
+		assert!(config.local.server.is_ipv6());
+		assert_eq!(config.local.server.to_string(), "[::1]:1080");
+	}
+
+	#[test]
+	fn test_socks5_authentication() {
+		let json5_config = r#"
+        {
+            relay: {
+                server: 'example.com:443',
+                uuid: '00000000-0000-0000-0000-000000000000',
+                password: 'relay_password'
+            },
+            local: {
+                server: '127.0.0.1:1080',
+                username: 'socks_user',
+                password: 'socks_pass'
+            }
+        }
+        "#;
+
+		let config: Config = json5::from_str(json5_config).unwrap();
+		assert!(config.local.username.is_some());
+		assert!(config.local.password.is_some());
+		assert_eq!(config.local.username.as_ref().unwrap(), b"socks_user");
+		assert_eq!(config.local.password.as_ref().unwrap(), b"socks_pass");
+	}
 }

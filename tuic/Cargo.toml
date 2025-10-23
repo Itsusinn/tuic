@@ -26,6 +26,7 @@ uuid = { version = "1", default-features = false, features = ["std"] }
 
 [dev-dependencies]
 tuic = { path = ".", features = ["async_marshal", "marshal", "model"] }
+uuid = { version = "1", features = ["v4"] }
 
 [package.metadata.docs.rs]
 all-features = true

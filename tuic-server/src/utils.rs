@@ -29,6 +29,7 @@ pub enum CongestionController {
 	#[educe(Default)]
 	Bbr,
 	Cubic,
+	#[serde(alias = "new_reno")]
 	NewReno,
 }
 
@@ -77,4 +78,100 @@ pub enum IpMode {
 	OnlyV4,
 	OnlyV6,
 	Auto,
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+
+	#[test]
+	fn test_udp_relay_mode_display() {
+		assert_eq!(UdpRelayMode::Native.to_string(), "native");
+		assert_eq!(UdpRelayMode::Quic.to_string(), "quic");
+	}
+
+	#[test]
+	fn test_congestion_controller_from_str() {
+		assert_eq!(CongestionController::from_str("bbr").unwrap(), CongestionController::Bbr);
+		assert_eq!(CongestionController::from_str("BBR").unwrap(), CongestionController::Bbr);
+		assert_eq!(CongestionController::from_str("cubic").unwrap(), CongestionController::Cubic);
+		assert_eq!(CongestionController::from_str("CUBIC").unwrap(), CongestionController::Cubic);
+		assert_eq!(
+			CongestionController::from_str("new_reno").unwrap(),
+			CongestionController::NewReno
+		);
+		assert_eq!(
+			CongestionController::from_str("newreno").unwrap(),
+			CongestionController::NewReno
+		);
+		assert_eq!(
+			CongestionController::from_str("NEWRENO").unwrap(),
+			CongestionController::NewReno
+		);
+
+		assert!(CongestionController::from_str("invalid").is_err());
+		assert!(CongestionController::from_str("").is_err());
+	}
+
+	#[test]
+	fn test_congestion_controller_serde() {
+		// Test serialization
+		let bbr = CongestionController::Bbr;
+		let json = serde_json::to_string(&bbr).unwrap();
+		assert_eq!(json, "\"bbr\"");
+
+		let cubic = CongestionController::Cubic;
+		let json = serde_json::to_string(&cubic).unwrap();
+		assert_eq!(json, "\"cubic\"");
+
+		// Test deserialization
+		let bbr: CongestionController = serde_json::from_str("\"bbr\"").unwrap();
+		assert_eq!(bbr, CongestionController::Bbr);
+
+		let newreno: CongestionController = serde_json::from_str("\"newreno\"").unwrap();
+		assert_eq!(newreno, CongestionController::NewReno);
+	}
+
+	#[test]
+	fn test_congestion_controller_default() {
+		let default = CongestionController::default();
+		assert_eq!(default, CongestionController::Bbr);
+	}
+
+	#[test]
+	fn test_ip_mode_serde() {
+		// Test serialization
+		let prefer_v4 = IpMode::PreferV4;
+		let json = serde_json::to_string(&prefer_v4).unwrap();
+		assert_eq!(json, "\"prefer_v4\"");
+
+		let only_v6 = IpMode::OnlyV6;
+		let json = serde_json::to_string(&only_v6).unwrap();
+		assert_eq!(json, "\"only_v6\"");
+
+		// Test deserialization
+		let auto: IpMode = serde_json::from_str("\"auto\"").unwrap();
+		assert_eq!(auto, IpMode::Auto);
+
+		let prefer_v6: IpMode = serde_json::from_str("\"prefer_v6\"").unwrap();
+		assert_eq!(prefer_v6, IpMode::PreferV6);
+	}
+
+	#[test]
+	fn test_ip_mode_variants() {
+		// Test all variants exist and are distinct
+		let modes = vec![
+			IpMode::PreferV4,
+			IpMode::PreferV6,
+			IpMode::OnlyV4,
+			IpMode::OnlyV6,
+			IpMode::Auto,
+		];
+
+		assert_eq!(modes.len(), 5);
+
+		// Test equality
+		assert_eq!(IpMode::PreferV4, IpMode::PreferV4);
+		assert_ne!(IpMode::PreferV4, IpMode::PreferV6);
+	}
 }
