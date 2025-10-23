@@ -5,8 +5,10 @@ use quinn::ZeroRttAccepted;
 use socks5_proto::Address as Socks5Address;
 use tokio::time;
 use tracing::{debug, info, warn};
-use tuic_core::Address;
-use tuic_core::quinn::{Connect, Packet};
+use tuic_core::{
+	Address,
+	quinn::{Connect, Packet},
+};
 
 use super::Connection;
 use crate::{

@@ -6,12 +6,17 @@ use std::{
 	time::Duration,
 };
 
-use bytes::{BufMut, Bytes, BytesMut};
 pub use ::quinn;
-use ::quinn::{ClosedStream, Connection as QuinnConnection, ConnectionError, RecvStream, SendDatagramError, SendStream, VarInt};
+use ::quinn::{
+	ClosedStream, Connection as QuinnConnection, ConnectionError, RecvStream, SendDatagramError, SendStream, VarInt,
+};
+use bytes::{BufMut, Bytes, BytesMut};
 use thiserror::Error;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, ReadBuf};
 use tracing::warn;
+use uuid::Uuid;
+
+use self::side::Side;
 use crate::{
 	Address, Header, UnmarshalError,
 	model::{
@@ -20,9 +25,6 @@ use crate::{
 		side::{Rx, Tx},
 	},
 };
-use uuid::Uuid;
-
-use self::side::Side;
 
 pub mod side {
 	//! Side marker types for a connection.

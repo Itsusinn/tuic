@@ -149,7 +149,11 @@ pub fn is_port_80_available() -> bool {
 pub struct ChallengeServer {
 	challenges: Arc<TokioRwLock<HashMap<String, String>>>,
 }
-
+impl Default for ChallengeServer {
+	fn default() -> Self {
+		Self::new()
+	}
+}
 impl ChallengeServer {
 	pub fn new() -> Self {
 		Self {
