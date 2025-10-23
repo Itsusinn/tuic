@@ -144,21 +144,22 @@ async fn reset_traffic(
 }
 
 pub async fn client_connect(ctx: &AppContext, uuid: &Uuid, conn: QuinnConnection) {
-	let cfg = ctx.cfg.restful.as_ref().unwrap();
-	let current = ctx
-		.online_counter
-		.get(uuid)
-		.expect("Authorized UUID not present in users table")
-		.fetch_add(1, Ordering::Release);
-	if cfg.maximum_clients_per_user != 0 && current > cfg.maximum_clients_per_user {
-		conn.close(VarInt::from_u32(6001), b"Reached maximum clients limitation");
-		return;
+	if let Some(cfg) = ctx.cfg.restful.as_ref() {
+		let current = ctx
+			.online_counter
+			.get(uuid)
+			.expect("Authorized UUID not present in users table")
+			.fetch_add(1, Ordering::Release);
+		if cfg.maximum_clients_per_user != 0 && current > cfg.maximum_clients_per_user {
+			conn.close(VarInt::from_u32(6001), b"Reached maximum clients limitation");
+			return;
+		}
+		ctx.online_clients
+			.upsert(*uuid, HashSet::new, |v| {
+				v.insert(conn.into());
+			})
+			.await;
 	}
-	ctx.online_clients
-		.upsert(*uuid, HashSet::new, |v| {
-			v.insert(conn.into());
-		})
-		.await;
 }
 pub async fn client_disconnect(ctx: &AppContext, uuid: &Uuid, conn: QuinnConnection) {
 	ctx.online_counter
