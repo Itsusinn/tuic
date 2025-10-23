@@ -51,11 +51,12 @@ impl FromStr for CongestionController {
 }
 
 pub trait FutResultExt<T, E, Fut> {
-	async fn log_err(self) -> Option<T>;
+	fn log_err(self) -> impl std::future::Future<Output = Option<T>>;
 }
 impl<T, Fut> FutResultExt<T, eyre::Report, Fut> for Fut
 where
-	Fut: std::future::Future<Output = Result<T, eyre::Report>>,
+	Fut: std::future::Future<Output = Result<T, eyre::Report>> + Send,
+	T: Send,
 {
 	#[inline(always)]
 	async fn log_err(self) -> Option<T> {

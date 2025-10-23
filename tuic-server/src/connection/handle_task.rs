@@ -11,8 +11,10 @@ use tokio::{
 	net::{self, TcpSocket, TcpStream},
 };
 use tracing::{info, warn};
-use tuic_core::Address;
-use tuic_core::quinn::{Authenticate, Connect, Packet};
+use tuic_core::{
+	Address,
+	quinn::{Authenticate, Connect, Packet},
+};
 
 use super::{Connection, ERROR_CODE, UdpSession};
 use crate::{
