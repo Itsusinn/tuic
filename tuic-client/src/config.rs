@@ -13,7 +13,7 @@ use std::{
 use humantime::Duration as HumanDuration;
 use lexopt::{Arg, Error as ArgumentError, Parser};
 use serde::{Deserialize, Deserializer, de::Error as DeError};
-use serde_json::Error as SerdeError;
+use json5::Error as Json5Error;
 use thiserror::Error;
 use uuid::Uuid;
 
@@ -206,7 +206,8 @@ impl Config {
 
         let file = File::open(path.unwrap())?;
         let reader = BufReader::new(file);
-        Ok(serde_json::from_reader(reader)?)
+        let content = std::io::read_to_string(reader)?;
+        Ok(json5::from_str(&content)?)
     }
 }
 
@@ -391,5 +392,205 @@ pub enum ConfigError {
     #[error(transparent)]
     Io(#[from] IoError),
     #[error(transparent)]
-    Serde(#[from] SerdeError),
+    Json5(#[from] Json5Error),
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_backward_compatibility_standard_json() {
+        // Test backward compatibility with standard JSON format
+        let json_config = r#"
+        {
+            "relay": {
+                "server": "example.com:8443",
+                "uuid": "00000000-0000-0000-0000-000000000000",
+                "password": "test_password"
+            },
+            "local": {
+                "server": "127.0.0.1:1080"
+            },
+            "log_level": "info"
+        }
+        "#;
+
+        let config: Result<Config, _> = json5::from_str(json_config);
+        assert!(config.is_ok(), "Standard JSON should be parseable by JSON5");
+        
+        let config = config.unwrap();
+        assert_eq!(config.log_level, "info");
+        assert_eq!(config.relay.server.0, "example.com");
+        assert_eq!(config.relay.server.1, 8443);
+    }
+
+    #[test]
+    fn test_json5_comments() {
+        // Test JSON5 comment support (single-line and multi-line)
+        let json5_config = r#"
+        {
+            // This is a single-line comment
+            "relay": {
+                "server": "example.com:8443",
+                "uuid": "00000000-0000-0000-0000-000000000000",
+                /* This is a multi-line comment
+                   spanning multiple lines */
+                "password": "test_password"
+            },
+            "local": {
+                "server": "127.0.0.1:1080"
+            },
+            "log_level": "info" // End-of-line comment
+        }
+        "#;
+
+        let config: Result<Config, _> = json5::from_str(json5_config);
+        assert!(config.is_ok(), "JSON5 with comments should be parseable");
+    }
+
+    #[test]
+    fn test_json5_trailing_commas() {
+        // Test JSON5 trailing comma support
+        let json5_config = r#"
+        {
+            "relay": {
+                "server": "example.com:8443",
+                "uuid": "00000000-0000-0000-0000-000000000000",
+                "password": "test_password",
+            },
+            "local": {
+                "server": "127.0.0.1:1080",
+            },
+            "log_level": "info",
+        }
+        "#;
+
+        let config: Result<Config, _> = json5::from_str(json5_config);
+        assert!(config.is_ok(), "JSON5 with trailing commas should be parseable");
+    }
+
+    #[test]
+    fn test_json5_unquoted_keys() {
+        // Test JSON5 unquoted object keys
+        let json5_config = r#"
+        {
+            relay: {
+                server: "example.com:8443",
+                uuid: "00000000-0000-0000-0000-000000000000",
+                password: "test_password"
+            },
+            local: {
+                server: "127.0.0.1:1080"
+            },
+            log_level: "info"
+        }
+        "#;
+
+        let config: Result<Config, _> = json5::from_str(json5_config);
+        assert!(config.is_ok(), "JSON5 with unquoted keys should be parseable");
+    }
+
+    #[test]
+    fn test_json5_single_quotes() {
+        // Test JSON5 single-quoted strings
+        let json5_config = r#"
+        {
+            'relay': {
+                'server': 'example.com:8443',
+                'uuid': '00000000-0000-0000-0000-000000000000',
+                'password': 'test_password'
+            },
+            'local': {
+                'server': '127.0.0.1:1080'
+            },
+            'log_level': 'info'
+        }
+        "#;
+
+        let config: Result<Config, _> = json5::from_str(json5_config);
+        assert!(config.is_ok(), "JSON5 with single quotes should be parseable");
+    }
+
+    #[test]
+    fn test_json5_multiline_strings() {
+        // Test JSON5 multiline strings with escaped newlines
+        let json5_config = r#"
+        {
+            "relay": {
+                "server": "example.com:8443",
+                "uuid": "00000000-0000-0000-0000-000000000000",
+                "password": "test_\
+password"
+            },
+            "local": {
+                "server": "127.0.0.1:1080"
+            },
+            "log_level": "info"
+        }
+        "#;
+
+        let config: Result<Config, _> = json5::from_str(json5_config);
+        assert!(config.is_ok(), "JSON5 with multiline strings should be parseable");
+    }
+
+    #[test]
+    fn test_json5_mixed_features() {
+        // Test multiple JSON5 features combined
+        let json5_config = r#"
+        {
+            // Client relay configuration
+            relay: {
+                server: 'example.com:8443',
+                uuid: '00000000-0000-0000-0000-000000000000',
+                password: 'test_password',
+                /* Optional settings */
+                udp_relay_mode: 'native',
+                congestion_control: 'cubic',
+            },
+            // Local server configuration
+            local: {
+                server: '127.0.0.1:1080',
+            },
+            log_level: 'info', // Set logging level
+        }
+        "#;
+
+        let config: Result<Config, _> = json5::from_str(json5_config);
+        assert!(config.is_ok(), "JSON5 with mixed features should be parseable");
+        
+        let config = config.unwrap();
+        assert_eq!(config.log_level, "info");
+    }
+
+    #[test]
+    fn test_complex_config_with_all_fields() {
+        // Test a more complete configuration with various optional fields
+        let json5_config = r#"
+        {
+            relay: {
+                server: 'test.example.com:8443',
+                uuid: '12345678-1234-5678-1234-567812345678',
+                password: 'secure_password_123',
+                udp_relay_mode: 'quic',
+                congestion_control: 'bbr',
+                zero_rtt_handshake: true,
+                alpn: ['h3', 'h2'],
+                ipstack_prefer: 'v6',
+            },
+            local: {
+                server: '[::1]:9090',
+                dual_stack: false,
+            },
+            log_level: 'debug',
+        }
+        "#;
+
+        let config: Result<Config, _> = json5::from_str(json5_config);
+        assert!(config.is_ok(), "Complex JSON5 config should be parseable");
+        
+        let config = config.unwrap();
+        assert_eq!(config.log_level, "debug");
+        assert_eq!(config.relay.zero_rtt_handshake, true);
+    }
 }

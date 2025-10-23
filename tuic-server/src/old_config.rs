@@ -6,7 +6,7 @@ use std::{
 use humantime::Duration as HumanDuration;
 use lexopt::Error as ArgumentError;
 use serde::{Deserialize, Deserializer, de::Error as DeError};
-use serde_json::Error as SerdeError;
+use json5::Error as Json5Error;
 use thiserror::Error;
 use uuid::Uuid;
 
@@ -259,5 +259,155 @@ pub enum ConfigError {
     #[error("{0}")]
     Io(#[from] IoError),
     #[error("{0}")]
-    Serde(#[from] SerdeError),
+    Json5(#[from] Json5Error),
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_backward_compatibility_standard_json() {
+        // Test backward compatibility with standard JSON format
+        let json_config = r#"
+        {
+            "server": "[::]:8443",
+            "users": {
+                "00000000-0000-0000-0000-000000000000": "password123"
+            },
+            "certificate": "/path/to/cert.pem",
+            "private_key": "/path/to/key.pem"
+        }
+        "#;
+
+        let config: Result<OldConfig, _> = json5::from_str(json_config);
+        assert!(config.is_ok(), "Standard JSON should be parseable by JSON5");
+    }
+
+    #[test]
+    fn test_json5_comments() {
+        // Test JSON5 comment support
+        let json5_config = r#"
+        {
+            // Server bind address
+            "server": "[::]:8443",
+            /* User authentication */
+            "users": {
+                "00000000-0000-0000-0000-000000000000": "password123"
+            },
+            "certificate": "/path/to/cert.pem", // TLS certificate
+            "private_key": "/path/to/key.pem"
+        }
+        "#;
+
+        let config: Result<OldConfig, _> = json5::from_str(json5_config);
+        assert!(config.is_ok(), "JSON5 with comments should be parseable");
+    }
+
+    #[test]
+    fn test_json5_trailing_commas() {
+        // Test JSON5 trailing comma support
+        let json5_config = r#"
+        {
+            "server": "[::]:8443",
+            "users": {
+                "00000000-0000-0000-0000-000000000000": "password123",
+            },
+            "certificate": "/path/to/cert.pem",
+            "private_key": "/path/to/key.pem",
+        }
+        "#;
+
+        let config: Result<OldConfig, _> = json5::from_str(json5_config);
+        assert!(config.is_ok(), "JSON5 with trailing commas should be parseable");
+    }
+
+    #[test]
+    fn test_json5_unquoted_keys() {
+        // Test JSON5 unquoted object keys
+        let json5_config = r#"
+        {
+            server: "[::]:8443",
+            users: {
+                "00000000-0000-0000-0000-000000000000": "password123"
+            },
+            certificate: "/path/to/cert.pem",
+            private_key: "/path/to/key.pem"
+        }
+        "#;
+
+        let config: Result<OldConfig, _> = json5::from_str(json5_config);
+        assert!(config.is_ok(), "JSON5 with unquoted keys should be parseable");
+    }
+
+    #[test]
+    fn test_json5_single_quotes() {
+        // Test JSON5 single-quoted strings
+        let json5_config = r#"
+        {
+            'server': '[::]:8443',
+            'users': {
+                '00000000-0000-0000-0000-000000000000': 'password123'
+            },
+            'certificate': '/path/to/cert.pem',
+            'private_key': '/path/to/key.pem'
+        }
+        "#;
+
+        let config: Result<OldConfig, _> = json5::from_str(json5_config);
+        assert!(config.is_ok(), "JSON5 with single quotes should be parseable");
+    }
+
+    #[test]
+    fn test_json5_mixed_features() {
+        // Test multiple JSON5 features combined
+        let json5_config = r#"
+        {
+            // Server configuration
+            server: '[::]:8443',
+            users: {
+                '00000000-0000-0000-0000-000000000000': 'password123',
+                '11111111-1111-1111-1111-111111111111': 'password456', // Second user
+            },
+            certificate: '/path/to/cert.pem',
+            private_key: '/path/to/key.pem',
+            /* Optional settings */
+            log_level: 'info',
+            udp_relay_ipv6: true,
+        }
+        "#;
+
+        let config: Result<OldConfig, _> = json5::from_str(json5_config);
+        assert!(config.is_ok(), "JSON5 with mixed features should be parseable");
+    }
+
+    #[test]
+    fn test_json5_complex_config() {
+        // Test a more complex configuration with various fields
+        let json5_config = r#"
+        {
+            server: '0.0.0.0:8443',
+            users: {
+                '12345678-1234-5678-1234-567812345678': 'secure_pass_1',
+                '87654321-4321-8765-4321-876543218765': 'secure_pass_2',
+            },
+            certificate: './certs/server.crt',
+            private_key: './certs/server.key',
+            congestion_control: 'bbr',
+            alpn: ['h3'],
+            log_level: 'debug',
+            zero_rtt_handshake: true,
+            dual_stack: true,
+            max_idle_time: '15s',
+        }
+        "#;
+
+        let config: Result<OldConfig, _> = json5::from_str(json5_config);
+        assert!(config.is_ok(), "Complex JSON5 config should be parseable");
+        
+        if let Ok(cfg) = config {
+            assert_eq!(cfg.users.len(), 2);
+            assert!(cfg.zero_rtt_handshake);
+        }
+    }
 }

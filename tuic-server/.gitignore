@@ -1,2 +1,3 @@
 __test__*
 config.toml
+config.json5

@@ -6,3 +6,4 @@ target/
 tuic-server/dbg.toml
 
 client.json
+client.json5

@@ -357,8 +357,8 @@ pub async fn parse_config(mut parser: Parser) -> Result<Config, ConfigError> {
             .extract()
             .map_err(std::io::Error::other)?
     } else {
-        let config_text = tokio::fs::read(&cfg_path).await?;
-        let config: OldConfig = serde_json::from_slice(&config_text)?;
+        let config_text = tokio::fs::read_to_string(&cfg_path).await?;
+        let config: OldConfig = json5::from_str(&config_text)?;
         config.into()
     };
 
