@@ -6,7 +6,7 @@
 # target = ""                   # Rust target triple (e.g., x86_64-unknown-linux-gnu)
 # release-name = ""             # Name for release artifacts (e.g., x86_64-linux)
 # tool = ""                     # Optional: Build tool (e.g., "cross" for cross-compilation)
-# postfix = ""                  # Optional: Filename suffix (e.g., ".exe" for Windows)
+# postfix = ""                  # Optional: Filename suffix (e.g., ".exe" for Windows, or ".dylib/.so" for libraries)
 # skip-test = false             # Optional: Skip testing phase (true/false)
 # extra-args = ""               # Optional: Additional cargo flags (e.g., features)
 # toolchain = ""                # Optional: Custom Rust toolchain (defaults to inputs.rust-toolchain)
@@ -20,6 +20,7 @@
 # codegen-units = 1             # Optional: Number of codegen units for release builds
 # strip = true                  # Optional: Strip debug symbols from binaries
 # retention-days = 3            # Optional: Number of days to retain artifacts
+# nasm = false                  # Optional: Whether to install NASM for assembly compilation
 
 # ==================== Linux Targets (GNU) ====================
 
@@ -117,6 +118,8 @@ os = "windows-latest"
 target = "x86_64-pc-windows-msvc"
 release-name = "x86_64-windows"
 postfix = ".exe"
+nasm = true
+
 
 # 32-bit Windows
 [[target]]
@@ -124,7 +127,6 @@ os = "windows-latest"
 target = "i686-pc-windows-msvc"
 release-name = "i686-windows"
 postfix = ".exe"
-extra-args = "--no-default-features --features ring"
 
 # ARM64 Windows
 [[target]]
