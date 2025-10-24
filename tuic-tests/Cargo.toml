@@ -17,8 +17,8 @@ deplog = ["tracing-test/no-env-filter"]
 [dependencies]
 # Core dependencies for integration tests
 tuic-core = { path = "../tuic-core", features = ["async_marshal", "marshal", "model"] }
-tuic-client = { path = "../tuic-client" }
-tuic-server = { path = "../tuic-server" }
+tuic-client = { path = "../tuic-client", default-features = false }
+tuic-server = { path = "../tuic-server", default-features = false }
 
 # Required dependencies
 uuid = { version = "1", features = ["v4", "serde", "std"] }
