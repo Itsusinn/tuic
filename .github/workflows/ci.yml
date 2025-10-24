@@ -28,6 +28,7 @@ jobs:
       rust-toolchain: "nightly-2025-10-05"
       packages: "tuic-server,tuic-client"
       target-config-file: ".github/target.toml"
+      rustflags: "-Zthreads=8"
 
   release:
     name: Release

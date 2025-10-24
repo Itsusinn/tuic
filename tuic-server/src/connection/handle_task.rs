@@ -22,7 +22,7 @@ use crate::{
 	error::Error,
 	io::copy_io,
 	restful,
-	utils::{IpMode, UdpRelayMode},
+	utils::{StackPrefer, UdpRelayMode},
 };
 
 impl Connection {
@@ -261,20 +261,19 @@ impl Connection {
 
 		let mut addrs: Vec<SocketAddr> = resolve_dns(addr).await?.collect();
 
-		match outbound.ip_mode.unwrap_or(IpMode::Auto) {
-			IpMode::PreferV4 => {
+		match outbound.ip_mode.unwrap_or(StackPrefer::V4first) {
+			StackPrefer::V4first => {
 				addrs.sort_by_key(|a| !a.is_ipv4());
 			}
-			IpMode::PreferV6 => {
+			StackPrefer::V6first => {
 				addrs.sort_by_key(|a| !a.is_ipv6());
 			}
-			IpMode::OnlyV4 => {
+			StackPrefer::V4only => {
 				addrs.retain(|a| a.is_ipv4());
 			}
-			IpMode::OnlyV6 => {
+			StackPrefer::V6only => {
 				addrs.retain(|a| a.is_ipv6());
 			}
-			_ => {}
 		}
 
 		if addrs.is_empty() {

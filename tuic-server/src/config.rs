@@ -22,7 +22,7 @@ use uuid::Uuid;
 use crate::{
 	acl::{AclAddress, AclPorts, AclRule},
 	old_config::{ConfigError, OldConfig},
-	utils::{CongestionController, IpMode},
+	utils::{CongestionController, StackPrefer},
 };
 
 #[derive(Deserialize, Serialize, Educe)]
@@ -152,10 +152,10 @@ pub struct OutboundRule {
 	#[serde(rename = "type")]
 	pub kind: String,
 
-	/// Mode for direct connections: "prefer_v4", "prefer_v6", "only_v4",
-	/// "only_v6", "auto". (only used when kind == "direct")
-	#[educe(Default(expression = Some(IpMode::Auto)))]
-	pub ip_mode: Option<IpMode>,
+	/// Mode for direct connections: "v4first" (prefer IPv4), "v6first" (prefer
+	/// IPv6), "v4only" (IPv4 only), "v6only" (IPv6 only).
+	#[educe(Default(expression = Some(StackPrefer::V4first)))]
+	pub ip_mode: Option<StackPrefer>,
 
 	/// Optional IPv4 address to bind to for direct connections (only used when
 	/// kind == "direct").
@@ -227,7 +227,7 @@ impl Config {
 			outbound: OutboundConfig {
 				default: OutboundRule {
 					kind: "direct".into(),
-					ip_mode: Some(IpMode::Auto),
+					ip_mode: Some(StackPrefer::V4first),
 					..Default::default()
 				},
 				..Default::default()
@@ -774,11 +774,11 @@ mod tests {
 
             [outbound.default]
             type = "direct"
-            ip_mode = "auto"
+            ip_mode = "v4first"
 
             [outbound.prefer_v4]
             type = "direct"
-            ip_mode = "prefer_v4"
+            ip_mode = "v4first"
             bind_ipv4 = "2.4.6.8"
             bind_ipv6 = "0:0:0:0:0:ffff:0204:0608"
             bind_device = "eth233"
@@ -798,7 +798,7 @@ mod tests {
 
 		let prefer_v4 = result.outbound.named.get("prefer_v4").unwrap();
 		assert_eq!(prefer_v4.kind, "direct");
-		assert_eq!(prefer_v4.ip_mode, Some(IpMode::PreferV4));
+		assert_eq!(prefer_v4.ip_mode, Some(StackPrefer::V4first));
 		assert_eq!(prefer_v4.bind_ipv4, Some("2.4.6.8".parse().unwrap()));
 		assert_eq!(prefer_v4.bind_device, Some("eth233".to_string()));
 
@@ -807,6 +807,50 @@ mod tests {
 		assert_eq!(socks5.addr, Some("127.0.0.1:1080".to_string()));
 		assert_eq!(socks5.username, Some("optional".to_string()));
 		assert_eq!(socks5.password, Some("optional".to_string()));
+	}
+
+	#[tokio::test]
+	async fn test_outbound_with_legacy_ip_mode_aliases() {
+		// Test backward compatibility with old ip_mode values like "prefer_v4",
+		// "only_v4" etc.
+		let config = r#"
+            [users]
+            "123e4567-e89b-12d3-a456-426614174000" = "password1"
+
+            [tls]
+            self_sign = true
+
+            [outbound.default]
+            type = "direct"
+            ip_mode = "prefer_v4"
+
+            [outbound.prefer_v6_rule]
+            type = "direct"
+            ip_mode = "prefer_v6"
+
+            [outbound.only_v4_rule]
+            type = "direct"
+            ip_mode = "only_v4"
+
+            [outbound.only_v6_rule]
+            type = "direct"
+            ip_mode = "only_v6"
+        "#;
+
+		let result = test_parse_config(config, ".toml", &[]).await.unwrap();
+
+		// Verify default uses prefer_v4 (which maps to V4first)
+		assert_eq!(result.outbound.default.ip_mode, Some(StackPrefer::V4first));
+
+		// Verify named rules with legacy aliases
+		let prefer_v6 = result.outbound.named.get("prefer_v6_rule").unwrap();
+		assert_eq!(prefer_v6.ip_mode, Some(StackPrefer::V6first));
+
+		let only_v4 = result.outbound.named.get("only_v4_rule").unwrap();
+		assert_eq!(only_v4.ip_mode, Some(StackPrefer::V4only));
+
+		let only_v6 = result.outbound.named.get("only_v6_rule").unwrap();
+		assert_eq!(only_v6.ip_mode, Some(StackPrefer::V6only));
 	}
 
 	#[tokio::test]

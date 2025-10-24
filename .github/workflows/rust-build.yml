@@ -27,6 +27,11 @@ on:
         required: false
         type: string
         default: 'rust-build'
+      rustflags:
+        description: 'Additional RUSTFLAGS to pass to the compiler'
+        required: false
+        type: string
+        default: ''
 
 jobs:
   prepare:
@@ -117,7 +122,6 @@ jobs:
         with:
           command: fmt
           args: --all -- --check
-        continue-on-error: ${{ matrix.ignore-fmt-errors == true }}
 
       - name: Run linter
         uses: clechasseur/rs-cargo@v4
@@ -126,8 +130,7 @@ jobs:
           command: clippy
           args: --all --target ${{ matrix.target }} ${{ matrix.extra-args }} -- -D warnings
         env:
-          RUSTFLAGS: ${{ matrix.rustflags }}
-        continue-on-error: ${{ matrix.ignore-clippy-errors == true }}
+          RUSTFLAGS: ${{ matrix.rustflags }} ${{ inputs.rustflags }}
 
       #--------------------------------------------------
       # Build & Test Steps
@@ -141,9 +144,7 @@ jobs:
           args: --all --target ${{ matrix.target }} ${{ matrix.extra-args }} -- --nocapture
         env:
           CROSS_CONTAINER_OPTS: "--network host"
-          RUSTFLAGS: ${{ matrix.rustflags }}
-          RUST_TEST_THREADS: ${{ matrix.test-threads || 8 }}
-        timeout-minutes: ${{ matrix.test-timeout || 15 }}
+          RUSTFLAGS: ${{ matrix.rustflags }} ${{ inputs.rustflags }}
 
       - name: Build release binaries
         id: build
@@ -153,10 +154,7 @@ jobs:
           command: build
           args: --workspace --release --target ${{ matrix.target }} ${{ matrix.extra-args }}
         env:
-          RUSTFLAGS: ${{ matrix.rustflags }}
-          CARGO_PROFILE_RELEASE_LTO: ${{ matrix.lto || true }}
-          CARGO_PROFILE_RELEASE_CODEGEN_UNITS: ${{ matrix.codegen-units || 1 }}
-          CARGO_PROFILE_RELEASE_STRIP: ${{ matrix.strip || true }}
+          RUSTFLAGS: ${{ matrix.rustflags }} ${{ inputs.rustflags }}
 
       #--------------------------------------------------
       # Artifact Steps

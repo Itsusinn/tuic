@@ -12,13 +12,6 @@
 # toolchain = ""                # Optional: Custom Rust toolchain (defaults to inputs.rust-toolchain)
 # components = ""               # Optional: Rust components to install (defaults to 'rustfmt, clippy')
 # rustflags = ""                # Optional: Custom Rust compiler flags
-# ignore-fmt-errors = false     # Optional: Whether to ignore formatting errors
-# ignore-clippy-errors = false  # Optional: Whether to ignore clippy errors
-# test-threads = 8              # Optional: Number of test threads to use
-# test-timeout = 15             # Optional: Test timeout in minutes
-# lto = true                    # Optional: Enable Link Time Optimization
-# codegen-units = 1             # Optional: Number of codegen units for release builds
-# strip = true                  # Optional: Strip debug symbols from binaries
 # retention-days = 3            # Optional: Number of days to retain artifacts
 # nasm = false                  # Optional: Whether to install NASM for assembly compilation
 

@@ -21,3 +21,7 @@ mod tests;
 
 // Quinn integration module
 pub mod quinn;
+
+// Utility types
+mod utils;
+pub use self::utils::{CongestionControl, StackPrefer, UdpRelayMode};

@@ -1,0 +1,11 @@
+[build]
+
+[build.env]
+volumes = ["/var/run/docker.sock=/var/run/docker.sock", "/tmp=/tmp"] # Docker in docker
+passthrough = ["RUSTFLAGS", "RUST_LOG", "CARGO_DOCKER_TEST"]
+
+[target.mips-unknown-linux-musl]
+image = "ghcr.io/cross-rs/mips-unknown-linux-musl:edge"
+
+[target.mipsel-unknown-linux-musl]
+image = "ghcr.io/cross-rs/mipsel-unknown-linux-musl:edge"
