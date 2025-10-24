@@ -98,7 +98,11 @@ jobs:
           cargo install cross --git https://github.com/cross-rs/cross --force
         env:
           TARGET: ${{ matrix.target }}
-          
+
+      - name: Install NASM
+        if: matrix.nasm == true
+        uses: ilammy/setup-nasm@v1
+
       - name: Print build information
         run: |
           echo "Building for target: ${{ matrix.target }}"
