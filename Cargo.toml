@@ -4,7 +4,7 @@ resolver = "2"
 
 [workspace.package]
 authors = ["EAimTY <ea.imty@gmail.com>", "Itsusinn <sun@ihsin.dev>"]
-version = "1.5.2"
+version = "1.5.3"
 rust-version = "1.85.0"
 edition = "2024"
 readme = "README.md"
