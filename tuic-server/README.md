@@ -223,14 +223,15 @@ max_idle_time = "30s"
 [outbound.default]
 # Outbound type: direct or socks5
 type = "direct"
-# IP mode: auto, prefer_v4, prefer_v6, only_v4, only_v6
-ip_mode = "auto"
+# IP mode: v4first (prefer IPv4), v6first (prefer IPv6), v4only (IPv4 only), v6only (IPv6 only)
+# Legacy aliases: prefer_v4, prefer_v6, only_v4, only_v6
+ip_mode = "v4first"
 
 # Named outbound rules - these are referenced from ACL rules
 # The named outbound rules get merged into [outbound.named] map in the config
 [outbound.prefer_v4]
 type = "direct"
-ip_mode = "prefer_v4"
+ip_mode = "v4first"
 # Local addresses to bind for direct connections
 bind_ipv4 = "1.2.3.4"
 bind_ipv6 = "0:0:0:0:0:ffff:0102:0304"

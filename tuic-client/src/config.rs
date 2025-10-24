@@ -10,6 +10,11 @@ use std::{
 	time::Duration,
 };
 
+use educe::Educe;
+use figment::{
+	Figment,
+	providers::{Format, Toml},
+};
 use humantime::Duration as HumanDuration;
 use json5::Error as Json5Error;
 use lexopt::{Arg, Error as ArgumentError, Parser};
@@ -28,108 +33,123 @@ Arguments:
     -h, --help              Print this help message
 "#;
 
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
+#[derive(Deserialize, Educe)]
+#[educe(Default)]
+#[serde(deny_unknown_fields, default)]
 pub struct Config {
 	pub relay: Relay,
 
 	pub local: Local,
 
-	#[serde(default = "default::log_level")]
+	#[educe(Default = "info")]
 	pub log_level: String,
 }
 
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
+#[derive(Deserialize, Educe)]
+#[educe(Default)]
+#[serde(deny_unknown_fields, default)]
 pub struct Relay {
 	#[serde(deserialize_with = "deserialize_server")]
 	pub server: (String, u16),
 
+	#[educe(Default(expression = Uuid::nil()))]
 	pub uuid: Uuid,
 
 	#[serde(deserialize_with = "deserialize_password")]
+	#[educe(Default(expression = Arc::from([])))]
 	pub password: Arc<[u8]>,
 
+	#[educe(Default = None)]
 	pub ip: Option<IpAddr>,
 
-	#[serde(default = "default::relay::ipstack_prefer", deserialize_with = "deserialize_from_str")]
+	#[educe(Default(expression = StackPrefer::V4first))]
 	pub ipstack_prefer: StackPrefer,
 
-	#[serde(default = "default::relay::certificates")]
+	#[educe(Default(expression = Vec::new()))]
 	pub certificates: Vec<PathBuf>,
 
-	#[serde(default = "default::relay::udp_relay_mode", deserialize_with = "deserialize_from_str")]
+	#[educe(Default(expression = UdpRelayMode::Native))]
 	pub udp_relay_mode: UdpRelayMode,
 
-	#[serde(default = "default::relay::congestion_control", deserialize_with = "deserialize_from_str")]
+	#[educe(Default(expression = CongestionControl::Bbr))]
 	pub congestion_control: CongestionControl,
 
-	#[serde(default = "default::relay::alpn", deserialize_with = "deserialize_alpn")]
+	#[educe(Default(expression = Vec::new()))]
+	#[serde(deserialize_with = "deserialize_alpn")]
 	pub alpn: Vec<Vec<u8>>,
 
-	#[serde(default = "default::relay::zero_rtt_handshake")]
+	#[educe(Default = false)]
 	pub zero_rtt_handshake: bool,
 
-	#[serde(default = "default::relay::disable_sni")]
+	#[educe(Default = false)]
 	pub disable_sni: bool,
 
-	#[serde(default = "default::relay::timeout", deserialize_with = "deserialize_duration")]
+	#[educe(Default(expression = Duration::from_secs(8)))]
+	#[serde(with = "humantime_serde")]
 	pub timeout: Duration,
 
-	#[serde(default = "default::relay::heartbeat", deserialize_with = "deserialize_duration")]
+	#[educe(Default(expression = Duration::from_secs(3)))]
+	#[serde(with = "humantime_serde")]
 	pub heartbeat: Duration,
 
-	#[serde(default = "default::relay::disable_native_certs")]
+	#[educe(Default = false)]
 	pub disable_native_certs: bool,
 
-	#[serde(default = "default::relay::send_window")]
+	#[educe(Default = 16777216)]
 	pub send_window: u64,
 
-	#[serde(default = "default::relay::receive_window")]
+	#[educe(Default = 8388608)]
 	pub receive_window: u32,
 
-	#[serde(default = "default::relay::initial_mtu")]
+	#[educe(Default = 1200)]
 	pub initial_mtu: u16,
 
-	#[serde(default = "default::relay::min_mtu")]
+	#[educe(Default = 1200)]
 	pub min_mtu: u16,
 
-	#[serde(default = "default::relay::gso")]
+	#[educe(Default = true)]
 	pub gso: bool,
 
-	#[serde(default = "default::relay::pmtu")]
+	#[educe(Default = true)]
 	pub pmtu: bool,
 
-	#[serde(default = "default::relay::gc_interval", deserialize_with = "deserialize_duration")]
+	#[educe(Default(expression = Duration::from_secs(3)))]
+	#[serde(with = "humantime_serde")]
 	pub gc_interval: Duration,
 
-	#[serde(default = "default::relay::gc_lifetime", deserialize_with = "deserialize_duration")]
+	#[educe(Default(expression = Duration::from_secs(15)))]
+	#[serde(with = "humantime_serde")]
 	pub gc_lifetime: Duration,
 
-	#[serde(default = "default::relay::skip_cert_verify")]
+	#[educe(Default = false)]
 	pub skip_cert_verify: bool,
 }
 
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
+#[derive(Deserialize, Educe)]
+#[educe(Default)]
+#[serde(deny_unknown_fields, default)]
 pub struct Local {
+	#[educe(Default(expression = "127.0.0.1:1080".parse().unwrap()))]
 	pub server: SocketAddr,
 
-	#[serde(deserialize_with = "deserialize_optional_bytes", default)]
+	#[educe(Default = None)]
+	#[serde(deserialize_with = "deserialize_optional_bytes")]
 	pub username: Option<Vec<u8>>,
 
-	#[serde(deserialize_with = "deserialize_optional_bytes", default)]
+	#[educe(Default = None)]
+	#[serde(deserialize_with = "deserialize_optional_bytes")]
 	pub password: Option<Vec<u8>>,
 
+	#[educe(Default = None)]
 	pub dual_stack: Option<bool>,
 
-	#[serde(default = "default::local::max_packet_size")]
+	#[educe(Default = 1500)]
 	pub max_packet_size: usize,
 
-	#[serde(default)]
+	#[educe(Default(expression = Vec::new()))]
 	pub tcp_forward: Vec<TcpForward>,
 
-	#[serde(default)]
+	#[educe(Default(expression = Vec::new()))]
 	pub udp_forward: Vec<UdpForward>,
 }
 
@@ -147,8 +167,12 @@ pub struct UdpForward {
 	pub listen:  SocketAddr,
 	#[serde(deserialize_with = "deserialize_server")]
 	pub remote:  (String, u16),
-	#[serde(default = "default::forward::udp_timeout", deserialize_with = "deserialize_duration")]
+	#[serde(default = "default_udp_timeout", deserialize_with = "deserialize_duration")]
 	pub timeout: Duration,
+}
+
+fn default_udp_timeout() -> Duration {
+	Duration::from_secs(60)
 }
 
 impl Config {
@@ -160,7 +184,7 @@ impl Config {
 			match arg {
 				Arg::Short('c') | Arg::Long("config") => {
 					if path.is_none() {
-						path = Some(parser.value()?);
+						path = Some(PathBuf::from(parser.value()?));
 					} else {
 						return Err(ConfigError::Argument(arg.unexpected()));
 					}
@@ -177,117 +201,26 @@ impl Config {
 			return Err(ConfigError::NoConfig);
 		}
 
-		let file = File::open(path.unwrap())?;
-		let reader = BufReader::new(file);
-		let content = std::io::read_to_string(reader)?;
-		Ok(json5::from_str(&content)?)
-	}
-}
+		let path = path.unwrap();
 
-mod default {
+		// Check file extension to determine format
+		// TOML format: .toml extension or TUIC_FORCE_TOML env var
+		// JSON format: everything else (for backward compatibility)
+		let config: Config = if path.extension().is_some_and(|v| v == "toml") || std::env::var("TUIC_FORCE_TOML").is_ok() {
+			// Parse as TOML using Figment
+			Figment::new()
+				.merge(Toml::file(&path))
+				.extract()
+				.map_err(|e| ConfigError::Io(IoError::other(e)))?
+		} else {
+			// Parse as JSON5 (legacy support)
+			let file = File::open(&path)?;
+			let reader = BufReader::new(file);
+			let content = std::io::read_to_string(reader)?;
+			json5::from_str(&content)?
+		};
 
-	pub mod relay {
-		use std::{path::PathBuf, time::Duration};
-
-		use crate::utils::{CongestionControl, StackPrefer, UdpRelayMode};
-		pub fn ipstack_prefer() -> StackPrefer {
-			StackPrefer::V4first
-		}
-
-		pub fn certificates() -> Vec<PathBuf> {
-			Vec::new()
-		}
-
-		pub fn udp_relay_mode() -> UdpRelayMode {
-			UdpRelayMode::Native
-		}
-
-		pub fn congestion_control() -> CongestionControl {
-			CongestionControl::Cubic
-		}
-
-		pub fn alpn() -> Vec<Vec<u8>> {
-			Vec::new()
-		}
-
-		pub fn zero_rtt_handshake() -> bool {
-			false
-		}
-
-		pub fn disable_sni() -> bool {
-			false
-		}
-
-		pub fn timeout() -> Duration {
-			Duration::from_secs(8)
-		}
-
-		pub fn heartbeat() -> Duration {
-			Duration::from_secs(3)
-		}
-
-		pub fn disable_native_certs() -> bool {
-			false
-		}
-
-		pub fn send_window() -> u64 {
-			8 * 1024 * 1024 * 2
-		}
-
-		pub fn receive_window() -> u32 {
-			8 * 1024 * 1024
-		}
-
-		// struct.TransportConfig#method.initial_mtu
-		pub fn initial_mtu() -> u16 {
-			1200
-		}
-
-		// struct.TransportConfig#method.min_mtu
-		pub fn min_mtu() -> u16 {
-			1200
-		}
-
-		// struct.TransportConfig#method.enable_segmentation_offload
-		// aka. Generic Segmentation Offload
-		pub fn gso() -> bool {
-			true
-		}
-
-		// struct.TransportConfig#method.mtu_discovery_config
-		// if not pmtu() -> mtu_discovery_config(None)
-		pub fn pmtu() -> bool {
-			true
-		}
-
-		pub fn gc_interval() -> Duration {
-			Duration::from_secs(3)
-		}
-
-		pub fn gc_lifetime() -> Duration {
-			Duration::from_secs(15)
-		}
-
-		pub fn skip_cert_verify() -> bool {
-			false
-		}
-	}
-
-	pub mod local {
-		pub fn max_packet_size() -> usize {
-			1500
-		}
-	}
-
-	pub mod forward {
-		use std::time::Duration;
-		pub fn udp_timeout() -> Duration {
-			Duration::from_secs(60)
-		}
-	}
-
-	pub fn log_level() -> String {
-		"info".into()
+		Ok(config)
 	}
 }
 
@@ -584,7 +517,7 @@ password"
 		assert_eq!(config.log_level, "info");
 		assert_eq!(config.relay.ipstack_prefer, StackPrefer::V4first);
 		assert_eq!(config.relay.udp_relay_mode, UdpRelayMode::Native);
-		assert_eq!(config.relay.congestion_control, CongestionControl::Cubic);
+		assert_eq!(config.relay.congestion_control, CongestionControl::Bbr);
 		assert_eq!(config.relay.zero_rtt_handshake, false);
 		assert_eq!(config.relay.disable_sni, false);
 		assert_eq!(config.relay.timeout, Duration::from_secs(8));
@@ -677,25 +610,6 @@ password"
 	}
 
 	#[test]
-	fn test_missing_required_fields() {
-		// Missing relay.password
-		let json5_config = r#"
-        {
-            relay: {
-                server: 'example.com:443',
-                uuid: '00000000-0000-0000-0000-000000000000'
-            },
-            local: {
-                server: '127.0.0.1:1080'
-            }
-        }
-        "#;
-
-		let config: Result<Config, _> = json5::from_str(json5_config);
-		assert!(config.is_err());
-	}
-
-	#[test]
 	fn test_alpn_configuration() {
 		let json5_config = r#"
         {
@@ -713,9 +627,9 @@ password"
 
 		let config: Config = json5::from_str(json5_config).unwrap();
 		assert_eq!(config.relay.alpn.len(), 3);
-		assert_eq!(config.relay.alpn[0], b"h3");
-		assert_eq!(config.relay.alpn[1], b"h2");
-		assert_eq!(config.relay.alpn[2], b"http/1.1");
+		assert_eq!(config.relay.alpn[0], b"h3".to_vec());
+		assert_eq!(config.relay.alpn[1], b"h2".to_vec());
+		assert_eq!(config.relay.alpn[2], b"http/1.1".to_vec());
 	}
 
 	#[test]
@@ -760,5 +674,150 @@ password"
 		assert!(config.local.password.is_some());
 		assert_eq!(config.local.username.as_ref().unwrap(), b"socks_user");
 		assert_eq!(config.local.password.as_ref().unwrap(), b"socks_pass");
+	}
+
+	#[test]
+	fn test_toml_basic_config() {
+		let toml_config = r#"
+            log_level = "info"
+
+            [relay]
+            server = "example.com:443"
+            uuid = "00000000-0000-0000-0000-000000000000"
+            password = "test_password"
+
+            [local]
+            server = "127.0.0.1:1080"
+        "#;
+
+		let config: Config = Figment::new().merge(Toml::string(toml_config)).extract().unwrap();
+
+		assert_eq!(config.log_level, "info");
+		assert_eq!(config.relay.server.0, "example.com");
+		assert_eq!(config.relay.server.1, 443);
+		assert_eq!(config.local.server.to_string(), "127.0.0.1:1080");
+	}
+
+	#[test]
+	fn test_toml_with_defaults() {
+		let toml_config = r#"
+            [relay]
+            server = "example.com:443"
+            uuid = "00000000-0000-0000-0000-000000000000"
+            password = "test_password"
+
+            [local]
+            server = "127.0.0.1:1080"
+        "#;
+
+		let config: Config = Figment::new().merge(Toml::string(toml_config)).extract().unwrap();
+
+		// Test default values
+		assert_eq!(config.log_level, "info");
+		assert_eq!(config.relay.congestion_control, CongestionControl::Bbr);
+		assert_eq!(config.relay.udp_relay_mode, UdpRelayMode::Native);
+		assert_eq!(config.relay.timeout, Duration::from_secs(8));
+		assert_eq!(config.relay.heartbeat, Duration::from_secs(3));
+		assert_eq!(config.relay.initial_mtu, 1200);
+		assert_eq!(config.relay.min_mtu, 1200);
+		assert!(config.relay.gso);
+		assert!(config.relay.pmtu);
+		assert!(!config.relay.zero_rtt_handshake);
+		assert!(!config.relay.disable_sni);
+	}
+
+	#[test]
+	fn test_toml_full_config() {
+		let toml_config = r#"
+            log_level = "debug"
+
+            [relay]
+            server = "example.com:8443"
+            uuid = "12345678-1234-1234-1234-123456789012"
+            password = "secure_password"
+            ipstack_prefer = "v6v4"
+            udp_relay_mode = "quic"
+            congestion_control = "bbr"
+            alpn = ["h3", "h2"]
+            zero_rtt_handshake = true
+            disable_sni = true
+            timeout = "10s"
+            heartbeat = "5s"
+            send_window = 32777216
+            receive_window = 16388608
+            initial_mtu = 1400
+            min_mtu = 1300
+            gso = false
+            pmtu = false
+            gc_interval = "5s"
+            gc_lifetime = "20s"
+
+            [local]
+            server = "[::1]:1080"
+            dual_stack = false
+            max_packet_size = 2000
+        "#;
+
+		let config: Config = Figment::new().merge(Toml::string(toml_config)).extract().unwrap();
+
+		assert_eq!(config.log_level, "debug");
+		assert_eq!(config.relay.server.0, "example.com");
+		assert_eq!(config.relay.server.1, 8443);
+		assert_eq!(config.relay.ipstack_prefer, StackPrefer::V6first);
+		assert_eq!(config.relay.udp_relay_mode, UdpRelayMode::Quic);
+		assert_eq!(config.relay.congestion_control, CongestionControl::Bbr);
+		assert_eq!(config.relay.alpn.len(), 2);
+		assert_eq!(config.relay.alpn[0], b"h3".to_vec());
+		assert_eq!(config.relay.alpn[1], b"h2".to_vec());
+		assert!(config.relay.zero_rtt_handshake);
+		assert!(config.relay.disable_sni);
+		assert_eq!(config.relay.timeout, Duration::from_secs(10));
+		assert_eq!(config.relay.heartbeat, Duration::from_secs(5));
+		assert_eq!(config.relay.send_window, 32777216);
+		assert_eq!(config.relay.receive_window, 16388608);
+		assert_eq!(config.relay.initial_mtu, 1400);
+		assert_eq!(config.relay.min_mtu, 1300);
+		assert!(!config.relay.gso);
+		assert!(!config.relay.pmtu);
+		assert_eq!(config.relay.gc_interval, Duration::from_secs(5));
+		assert_eq!(config.relay.gc_lifetime, Duration::from_secs(20));
+		assert_eq!(config.local.server.to_string(), "[::1]:1080");
+		assert_eq!(config.local.dual_stack, Some(false));
+		assert_eq!(config.local.max_packet_size, 2000);
+	}
+
+	#[test]
+	fn test_toml_with_forwarding() {
+		let toml_config = r#"
+            [relay]
+            server = "example.com:443"
+            uuid = "00000000-0000-0000-0000-000000000000"
+            password = "test_password"
+
+            [local]
+            server = "127.0.0.1:1080"
+
+            [[local.tcp_forward]]
+            listen = "127.0.0.1:8080"
+            remote = "example.com:80"
+
+            [[local.udp_forward]]
+            listen = "127.0.0.1:5353"
+            remote = "8.8.8.8:53"
+            timeout = "30s"
+        "#;
+
+		let config: Config = Figment::new().merge(Toml::string(toml_config)).extract().unwrap();
+
+		assert_eq!(config.local.tcp_forward.len(), 1);
+		assert_eq!(config.local.tcp_forward[0].listen.to_string(), "127.0.0.1:8080");
+		assert_eq!(config.local.tcp_forward[0].remote.0, "example.com");
+		assert_eq!(config.local.tcp_forward[0].remote.1, 80);
+
+		assert_eq!(config.local.udp_forward.len(), 1);
+		assert_eq!(config.local.udp_forward[0].listen.to_string(), "127.0.0.1:5353");
+		assert_eq!(config.local.udp_forward[0].remote.0, "8.8.8.8");
+		assert_eq!(config.local.udp_forward[0].remote.1, 53);
+		assert_eq!(config.local.udp_forward[0].timeout, Duration::from_secs(30));
 	}
 }

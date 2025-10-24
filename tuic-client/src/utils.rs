@@ -2,33 +2,13 @@ use std::{
 	fs,
 	net::{IpAddr, SocketAddr},
 	path::PathBuf,
-	str::FromStr,
 };
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum StackPrefer {
-	V4only,
-	V6only,
-	V4first,
-	V6first,
-}
-
-impl FromStr for StackPrefer {
-	type Err = &'static str;
-
-	fn from_str(s: &str) -> Result<Self, Self::Err> {
-		match s.to_ascii_lowercase().as_str() {
-			"v4" => Ok(StackPrefer::V4only),
-			"v6" => Ok(StackPrefer::V6only),
-			"v4v6" => Ok(StackPrefer::V4first),
-			"v6v4" => Ok(StackPrefer::V6first),
-			_ => Err("invalid stack preference"),
-		}
-	}
-}
 
 use anyhow::Context;
 use rustls::{RootCertStore, pki_types::CertificateDer};
 use tokio::net;
+// Re-export common types from tuic-core
+pub use tuic_core::{CongestionControl, StackPrefer, UdpRelayMode};
 
 use crate::error::Error;
 
@@ -78,7 +58,6 @@ impl ServerAddr {
 	}
 
 	pub async fn resolve(&self) -> Result<impl Iterator<Item = SocketAddr>, Error> {
-		// no extra imports needed
 		if let Some(ip) = self.ip {
 			Ok(vec![SocketAddr::from((ip, self.port))].into_iter())
 		} else {
@@ -98,49 +77,6 @@ impl ServerAddr {
 				}
 			}
 			Ok(addrs.into_iter())
-		}
-	}
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum UdpRelayMode {
-	Native,
-	Quic,
-}
-
-impl FromStr for UdpRelayMode {
-	type Err = &'static str;
-
-	fn from_str(s: &str) -> Result<Self, Self::Err> {
-		if s.eq_ignore_ascii_case("native") {
-			Ok(Self::Native)
-		} else if s.eq_ignore_ascii_case("quic") {
-			Ok(Self::Quic)
-		} else {
-			Err("invalid UDP relay mode")
-		}
-	}
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum CongestionControl {
-	Cubic,
-	NewReno,
-	Bbr,
-}
-
-impl FromStr for CongestionControl {
-	type Err = &'static str;
-
-	fn from_str(s: &str) -> Result<Self, Self::Err> {
-		if s.eq_ignore_ascii_case("cubic") {
-			Ok(Self::Cubic)
-		} else if s.eq_ignore_ascii_case("new_reno") || s.eq_ignore_ascii_case("newreno") {
-			Ok(Self::NewReno)
-		} else if s.eq_ignore_ascii_case("bbr") {
-			Ok(Self::Bbr)
-		} else {
-			Err("invalid congestion control")
 		}
 	}
 }

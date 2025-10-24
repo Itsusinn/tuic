@@ -24,6 +24,7 @@ parking_lot = { version = "0.12", default-features = false, optional = true }
 register-count = { version = "0.1", default-features = false, features = ["std"], optional = true }
 thiserror = { version = "2", default-features = false }
 uuid = { version = "1", default-features = false, features = ["std"] }
+serde = { version = "1", default-features = false, features = ["derive", "std"] }
 
 # From tuic-quinn
 tracing = { version = "0.1", default-features = false}
@@ -34,6 +35,7 @@ eyre = { version = "0.6" }
 [dev-dependencies]
 tuic-core = { path = ".", features = ["async_marshal", "marshal", "model"] }
 uuid = { version = "1", features = ["v4"] }
+serde_json = { version = "1" }
 
 [package.metadata.docs.rs]
 all-features = true

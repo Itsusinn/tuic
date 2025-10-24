@@ -15,12 +15,6 @@ This implementation only contains the most basic requirements of a functional TU
 
 Download the latest binary from [releases](https://github.com/Itsusinn/tuic/releases).
 
-Or install from [crates.io](https://crates.io/crates/tuic-client):
-
-```bash
-cargo install tuic-client
-```
-
 Run the TUIC client with configuration file:
 
 ```bash
@@ -28,6 +22,123 @@ tuic-client -c PATH/TO/CONFIG
 ```
 
 ## Configuration
+
+The client supports both JSON5 and TOML configuration formats:
+- **TOML format**: Use `.toml` file extension (recommended for new configurations)
+- **JSON5 format**: Use `.json` or `.json5` file extension (legacy format, still supported)
+
+The format is automatically detected based on the file extension. You can also force TOML parsing by setting the `TUIC_FORCE_TOML` environment variable.
+
+```
+
+### TOML Configuration Example
+
+```toml
+# TUIC Client Configuration (TOML format)
+
+log_level = "info"
+
+[relay]
+# Server address (hostname:port or IP:port)
+server = "example.com:443"
+
+# User UUID
+uuid = "00000000-0000-0000-0000-000000000000"
+
+# User password
+password = "your_password_here"
+
+# Optional: Bind IP address for outgoing connections
+# ip = "192.168.1.100"
+
+# IP stack preference: "v4first" (prefer IPv4), "v6first" (prefer IPv6), 
+# "v4only" (IPv4 only), "v6only" (IPv6 only)
+# Legacy aliases: "v4", "v6", "v4v6", "v6v4", "prefer_v4", "prefer_v6", "only_v4", "only_v6"
+ipstack_prefer = "v4first"
+
+# Optional: Custom certificate paths for server verification
+# certificates = ["/path/to/cert.pem"]
+
+# UDP relay mode: "native" or "quic"
+udp_relay_mode = "native"
+
+# Congestion control algorithm: "cubic", "new_reno", or "bbr"
+congestion_control = "cubic"
+
+# ALPN protocols (e.g., ["h3", "h2"])
+alpn = []
+
+# Enable 0-RTT handshake
+zero_rtt_handshake = false
+
+# Disable SNI (Server Name Indication)
+disable_sni = false
+
+# Connection timeout
+timeout = "8s"
+
+# Heartbeat interval
+heartbeat = "3s"
+
+# Disable native certificate store
+disable_native_certs = false
+
+# QUIC send window size (bytes)
+send_window = 16777216
+
+# QUIC receive window size (bytes)
+receive_window = 8388608
+
+# Initial MTU
+initial_mtu = 1200
+
+# Minimum MTU
+min_mtu = 1200
+
+# Enable Generic Segmentation Offload (GSO)
+gso = true
+
+# Enable Path MTU Discovery
+pmtu = true
+
+# Garbage collection interval
+gc_interval = "3s"
+
+# Garbage collection lifetime
+gc_lifetime = "15s"
+
+# Skip certificate verification (insecure, use only for testing)
+skip_cert_verify = false
+
+[local]
+# Local SOCKS5 server address
+server = "127.0.0.1:1080"
+
+# Optional: SOCKS5 authentication username
+# username = "socks_user"
+
+# Optional: SOCKS5 authentication password
+# password = "socks_pass"
+
+# Enable dual stack (IPv4 and IPv6)
+dual_stack = true
+
+# Maximum UDP packet size
+max_packet_size = 1500
+
+# TCP port forwarding rules
+# [[local.tcp_forward]]
+# listen = "127.0.0.1:8080"
+# remote = "example.com:80"
+
+# UDP port forwarding rules
+# [[local.udp_forward]]
+# listen = "127.0.0.1:5353"
+# remote = "8.8.8.8:53"
+# timeout = "60s"
+```
+
+### JSON5 Configuration Example
 
 ```json5
 {
@@ -53,12 +164,13 @@ tuic-client -c PATH/TO/CONFIG
         // Optional. Preferred IP stack for connecting to the server.
         // Affects Server dns priority adjustment, therefore this option is invalid when `ip` is set.
         // Can be:
-        // - "v4": Only use IPv4 addresses
-        // - "v6": Only use IPv6 addresses
-        // - "v4v6": Prefer IPv4 addresses, fallback to IPv6
-        // - "v6v4": Prefer IPv6 addresses, fallback to IPv4
-        // Default: "v4v6"
-        "ipstack_prefer": "v4v6",
+        // - "v4first": Prefer IPv4 addresses, fallback to IPv6
+        // - "v6first": Prefer IPv6 addresses, fallback to IPv4
+        // - "v4only": Only use IPv4 addresses
+        // - "v6only": Only use IPv6 addresses
+        // Legacy aliases: "v4", "v6", "v4v6", "v6v4", "prefer_v4", "prefer_v6", "only_v4", "only_v6"
+        // Default: "v4first"
+        "ipstack_prefer": "v4first",
 
         // Optional. A list of certificates for TLS handshake
         // System native certificates are also loaded by default
@@ -193,7 +305,7 @@ tuic-client -c PATH/TO/CONFIG
     // Default: "warn"
     "log_level": "warn"
 }
-```
+
 
 ## License
 
