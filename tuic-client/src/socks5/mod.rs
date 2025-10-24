@@ -69,11 +69,14 @@ impl Server {
 			let socket = Socket::new(domain, Type::STREAM, Some(Protocol::TCP))
 				.map_err(|err| Error::Socket("failed to create socks5 server socket", err))?;
 
-			if let Some(dual_stack) = dual_stack {
+			if addr.is_ipv6()
+				&& let Some(dual_stack) = dual_stack
+			{
 				socket
 					.set_only_v6(!dual_stack)
 					.map_err(|err| Error::Socket("socks5 server dual-stack socket setting error", err))?;
 			}
+
 
 			socket
 				.set_reuse_address(true)

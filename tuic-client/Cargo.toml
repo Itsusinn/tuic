@@ -15,6 +15,7 @@ repository.workspace = true
 default = ["aws-lc-rs"]
 ring = ["rustls/ring", "quinn/rustls-ring"]
 aws-lc-rs = ["dep:aws-lc-rs", "rustls/aws-lc-rs", "quinn/rustls-aws-lc-rs"]
+bindgen = ["aws-lc-rs/bindgen"]
 jemallocator = ["tikv-jemallocator"]
 
 [dependencies]
@@ -47,7 +48,7 @@ tokio-util = { version = "0.7", default-features = false, features = ["compat"] 
 rustls = { version = "0.23", default-features = false }
 rustls-native-certs = { version = "0.8", default-features = false }
 rustls-pemfile = { version = "2", default-features = false, features = ["std"] }
-aws-lc-rs = { version = "1", default-features = false, optional = true, features = ["bindgen"] }
+aws-lc-rs = { version = "1", default-features = false, optional = true }
 
 # Error-handling
 thiserror = { version = "2", default-features = false }
