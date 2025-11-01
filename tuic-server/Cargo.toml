@@ -68,7 +68,7 @@ eyre = { version = "0.6" }
 
 # Web
 axum = { version = "0.8", features = ["json", "tokio"] }
-axum-extra = { version = "0.10", features = ["typed-header"] }
+axum-extra = { version = "0.12", features = ["typed-header"] }
 
 tikv-jemallocator = { version = "0.6", optional = true }
 

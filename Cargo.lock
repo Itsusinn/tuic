@@ -264,13 +264,14 @@ dependencies = [
 
 [[package]]
 name = "axum-extra"
-version = "0.10.3"
+version = "0.12.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9963ff19f40c6102c76756ef0a46004c0d58957d87259fc9208ff8441c12ab96"
+checksum = "460c45604cb25834835e3b4d3468510322852783dac36261d642424d75562ff3"
 dependencies = [
  "axum",
  "axum-core",
  "bytes",
+ "futures-core",
  "futures-util",
  "headers",
  "http",
@@ -278,8 +279,6 @@ dependencies = [
  "http-body-util",
  "mime",
  "pin-project-lite",
- "rustversion",
- "serde_core",
  "tower-layer",
  "tower-service",
  "tracing",
@@ -2795,7 +2794,7 @@ checksum = "e421abadd41a4225275504ea4d6566923418b7f05506fbc9c0fe86ba7396114b"
 
 [[package]]
 name = "tuic-client"
-version = "1.6.0"
+version = "1.6.1"
 dependencies = [
  "anyhow",
  "aws-lc-rs",
@@ -2836,7 +2835,7 @@ dependencies = [
 
 [[package]]
 name = "tuic-core"
-version = "1.6.0"
+version = "1.6.1"
 dependencies = [
  "bytes",
  "eyre",
@@ -2855,7 +2854,7 @@ dependencies = [
 
 [[package]]
 name = "tuic-server"
-version = "1.6.0"
+version = "1.6.1"
 dependencies = [
  "arc-swap",
  "aws-lc-rs",
@@ -2900,7 +2899,7 @@ dependencies = [
 
 [[package]]
 name = "tuic-tests"
-version = "1.6.0"
+version = "1.6.1"
 dependencies = [
  "aws-lc-rs",
  "eyre",
