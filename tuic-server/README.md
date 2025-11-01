@@ -57,8 +57,17 @@ cargo install --git https://github.com/Itsusinn/tuic.git tuic-server
 Run the TUIC server with a configuration file:
 
 ```bash
+# Specify config file directly
 tuic-server -c PATH/TO/CONFIG
+
+# Specify config directory (automatically finds first config file)
+tuic-server -d PATH/TO/CONFIG_DIR
+
+# Generate example configuration file
+tuic-server --init
 ```
+
+The `-d/--dir` option searches for the first recognizable configuration file (`.toml`, `.json`, `.json5`, `.yaml`, `.yml`) in the specified directory, sorted alphabetically. This provides flexibility in Docker deployments and multi-environment setups.
 
 ### Docker
 
@@ -66,11 +75,13 @@ tuic-server -c PATH/TO/CONFIG
 docker run --name tuic-server \
   --restart always \
   --network host \
-  -v /PATH/TO/CONFIG:/etc/tuic/config.json \
+  -v /PATH/TO/CONFIG_DIR:/etc/tuic \
   -v /PATH/TO/CERTIFICATE:/PATH/TO/CERTIFICATE \
   -v /PATH/TO/PRIVATE_KEY:/PATH/TO/PRIVATE_KEY \
   -dit ghcr.io/itsusinn/tuic-server:latest
 ```
+
+**Note:** The Docker image now uses `-d /etc/tuic` by default, allowing you to mount your config directory.
 
 ### Docker Compose
 
@@ -82,28 +93,13 @@ services:
     container_name: tuic
     network_mode: host
     volumes:
-      - ./config.json:/etc/tuic/config.json:ro
+      - ./config.toml:/etc/tuic/config.toml:ro  # Mount config file
+      #- ./config:/etc/tuic:ro # Mount config directory
       - ./cert.crt:/PATH/TO/CERT:ro
       - ./key.crt:/PATH/TO/KEY:ro
 ```
 
-#### TOML Configuration with Docker Compose
-
-```yaml
-services:
-  tuic:
-    image: ghcr.io/itsusinn/tuic-server:latest
-    restart: always
-    container_name: tuic
-    network_mode: host
-    volumes:
-      - ./config.toml:/etc/tuic/config.json:ro 
-      # Must be /path/to/toml:/etc/tuic/*config.json*:ro, this will be fixed in 2.0.0.
-      - ./cert.crt:/PATH/TO/CERT:ro
-      - ./key.crt:/PATH/TO/KEY:ro
-    environment:
-      - TUIC_FORCE_TOML=1
-```
+The server will automatically detect and use the first config file found in `/etc/tuic`.
 
 ---
 
