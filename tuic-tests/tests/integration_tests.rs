@@ -331,6 +331,7 @@ async fn test_server_client_integration() {
 			ports:    None,
 			hijack:   None,
 		}],
+		..Default::default()
 	};
 
 	// Spawn server in background

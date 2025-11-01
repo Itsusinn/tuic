@@ -9,5 +9,7 @@ WORKDIR /root
 # Ensure directories exist
 RUN mkdir -p /etc/tuic
 
+ENV IN_DOCKER=true
+
 ENTRYPOINT [ "/usr/bin/tuic-server" ]
-CMD [ "-c", "/etc/tuic/config.json" ]
+CMD [ "-d", "/etc/tuic" ]

@@ -14,7 +14,7 @@ Compared to origin, this fork's new features:
 **TLS & Security:**
 
 - Automatic SSL/TLS certificate provisioning via ACME (Let's Encrypt)
-- Self-signed certificate support with automatic fallback
+- Self-signed certificate support
 - Certificate auto hot-reload for zero-downtime updates
 - `skip_cert_verify` option for client connections
 
@@ -28,20 +28,12 @@ Compared to origin, this fork's new features:
 - ACL (Access Control List) support with configurable outbound rules
 - SOCKS5 outbound proxy support
 - RESTful API with traffic statistics
-- Configurable IP stack preference (IPv4/IPv6)
 - Network interface binding support
 - Default localhost access protection
 
 **Client Features:**
 - TCP/UDP port forwarding support
 - Local socket rebinding for better reliability
-- IP stack preference configuration
-
-**Development:**
-
-- Up-to-date dependencies
-- Comprehensive unit tests
-- And [more...](https://github.com/Itsusinn/tuic/compare/v1.0.0...main)
 
 ## Introduction
 
@@ -74,6 +66,8 @@ There are 4 crates provided in this repository:
 - **[tuic-server](https://github.com/Itsusinn/tuic/tree/dev/tuic-server)** - Binary. Minimalistic TUIC server implementation as a reference
 - **[tuic-client](https://github.com/Itsusinn/tuic/tree/dev/tuic-client)** - Binary. Minimalistic TUIC client implementation as a reference
 
+
+
 ## Contribute TUIC
 
 [Search TODO in code base](https://github.com/search?q=repo%3AItsusinn%2Ftuic%20todo&type=code) or [Assist with Open Issues](https://github.com/Itsusinn/tuic/issues?q=label%3A%22help+wanted%22+is%3Aissue+is%3Aopen)
@@ -81,6 +75,14 @@ There are 4 crates provided in this repository:
 ### Contributing Guidelines
 
 Contributors should fork from the `main` branch and submit pull requests to the `main` branch. Please note that the `dev` branch may be force-pushed from time to time, so avoid basing your work on it.
+
+## Contributors
+
+Thanks to all the contributors who have helped improve TUIC!
+
+<a href="https://github.com/Itsusinn/tuic/graphs/contributors">
+  <img src="https://contrib.rocks/image?repo=Itsusinn/tuic" />
+</a>
 
 ## License
 
