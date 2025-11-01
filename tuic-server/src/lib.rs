@@ -15,13 +15,12 @@ pub mod config;
 pub mod connection;
 pub mod error;
 pub mod io;
-pub mod old_config;
 pub mod restful;
 pub mod server;
 pub mod tls;
 pub mod utils;
 
-pub use config::Config;
+pub use config::{Cli, Config, Control};
 
 pub struct AppContext {
 	pub cfg:            Config,

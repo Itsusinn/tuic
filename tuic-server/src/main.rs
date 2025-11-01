@@ -1,24 +1,29 @@
 use std::process;
 
+use clap::Parser;
 #[cfg(feature = "jemallocator")]
 use tikv_jemallocator::Jemalloc;
 use tracing::level_filters::LevelFilter;
 use tracing_subscriber::{fmt::time::LocalTime, layer::SubscriberExt, util::SubscriberInitExt};
-use tuic_server::{config::parse_config, old_config::ConfigError};
+use tuic_server::config::{Cli, Control, EnvState, parse_config};
+
 #[cfg(feature = "jemallocator")]
 #[global_allocator]
 static GLOBAL: Jemalloc = Jemalloc;
 
 #[tokio::main]
 async fn main() -> eyre::Result<()> {
-	let cfg = match parse_config(lexopt::Parser::from_env()).await {
+	let cli = Cli::parse();
+	let env_state = EnvState::from_system();
+	let cfg = match parse_config(cli, env_state).await {
 		Ok(cfg) => cfg,
-		Err(ConfigError::Version(msg) | ConfigError::Help(msg)) => {
-			println!("{msg}");
-			process::exit(0);
-		}
 		Err(err) => {
-			eprintln!("{err}");
+			// Check if it's a Control error (Help or Version)
+			if let Some(control) = err.downcast_ref::<Control>() {
+				println!("{}", control);
+				process::exit(0);
+			}
+			eprintln!("{}", err);
 			process::exit(1);
 		}
 	};

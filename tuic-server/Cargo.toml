@@ -20,7 +20,7 @@ jemallocator = ["tikv-jemallocator"]
 [dependencies]
 
 toml = "0.9"
-lexopt = { version = "0.3", default-features = false }
+clap = { version = "4", features = ["derive"] }
 socket2 = { version = "0.6", default-features = false }
 arc-swap = "1"
 uuid = { version = "1", default-features = false, features = ["serde", "std", "v4"] }
@@ -50,7 +50,8 @@ bytes = { version = "1", default-features = false, features = ["std"] }
 serde = { version = "1", default-features = false, features = ["derive", "std"] }
 json5 = { version = "0.4", default-features = false }
 serde_json = { version = "1", default-features = false, features = ["std"] }
-figment = { version = "0.10", features = ["toml"] }
+figment = { version = "0.10", features = ["toml", "yaml"] }
+figment-json5 = "0.1.1"
 educe = { version = "0.6", default-features = false, features = ["Default"] }
 humantime-serde = "1"
 ip_network = "0.4"
