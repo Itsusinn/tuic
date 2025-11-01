@@ -75,7 +75,7 @@ The `-d/--dir` option searches for the first recognizable configuration file (`.
 docker run --name tuic-server \
   --restart always \
   --network host \
-  -v /PATH/TO/CONFIG_DIR:/etc/tuic \
+  -v /PATH/TO/CONFIG_FILE:/etc/tuic/config.toml \
   -v /PATH/TO/CERTIFICATE:/PATH/TO/CERTIFICATE \
   -v /PATH/TO/PRIVATE_KEY:/PATH/TO/PRIVATE_KEY \
   -dit ghcr.io/itsusinn/tuic-server:latest
@@ -105,6 +105,11 @@ The server will automatically detect and use the first config file found in `/et
 
 ## Configuration
 
+- **TOML format**: Use `.toml` file extension (recommended for new configurations)
+- **JSON5 format**: Use `.json` or `.json5` file extension (legacy format, still supported)
+- **Yaml format**: Use `.yaml` or `.yml` file extension
+
+The format is automatically detected based on the file extension. You can also force TOML parsing by setting the `TUIC_FORCE_TOML` environment variable. Or use `TUIC_CONFIG_FORMAT` environment variable to explicitly specify the format (`toml` or `json5`).
 
 ### Example configuration
 
