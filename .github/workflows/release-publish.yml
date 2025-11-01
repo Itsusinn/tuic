@@ -36,7 +36,7 @@ jobs:
       # Changelog Generation
       #--------------------------------------------------
       - name: Generate changelog
-        uses: orhun/git-cliff-action@main
+        uses: orhun/git-cliff-action@v4
         id: git-cliff
         with:
           config: ${{ inputs.cliff-config }}
