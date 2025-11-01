@@ -1,0 +1,12 @@
+{
+    relay: {
+        server: 'example.com:443',
+        uuid: '00000000-0000-0000-0000-000000000000',
+        password: 'relay_password'
+    },
+    local: {
+        server: '127.0.0.1:1080',
+        username: 'socks_user',
+        password: 'socks_pass'
+    }
+}

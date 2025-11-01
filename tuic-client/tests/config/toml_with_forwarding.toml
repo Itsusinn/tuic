@@ -1,0 +1,16 @@
+[relay]
+server = "example.com:443"
+uuid = "00000000-0000-0000-0000-000000000000"
+password = "test_password"
+
+[local]
+server = "127.0.0.1:1080"
+
+[[local.tcp_forward]]
+listen = "127.0.0.1:8080"
+remote = "example.com:80"
+
+[[local.udp_forward]]
+listen = "127.0.0.1:5353"
+remote = "8.8.8.8:53"
+timeout = "30s"

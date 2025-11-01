@@ -1,0 +1,17 @@
+{
+    relay: {
+        server: 'example.com:443',
+        uuid: '00000000-0000-0000-0000-000000000000',
+        password: 'password'
+    },
+    local: {
+        server: '127.0.0.1:1080',
+        tcp_forward: [
+            { listen: '127.0.0.1:8080', remote: 'google.com:80' },
+            { listen: '127.0.0.1:8443', remote: 'example.com:443' }
+        ],
+        udp_forward: [
+            { listen: '127.0.0.1:5353', remote: '8.8.8.8:53', timeout: '10s' }
+        ]
+    }
+}
