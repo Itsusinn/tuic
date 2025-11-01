@@ -1,0 +1,17 @@
+{
+    relay: {
+        server: 'test.example.com:8443',
+        uuid: '12345678-1234-5678-1234-567812345678',
+        password: 'secure_password_123',
+        udp_relay_mode: 'quic',
+        congestion_control: 'bbr',
+        zero_rtt_handshake: true,
+        alpn: ['h3', 'h2'],
+        ipstack_prefer: 'v6',
+    },
+    local: {
+        server: '[::1]:9090',
+        dual_stack: false,
+    },
+    log_level: 'debug',
+}

@@ -1,0 +1,27 @@
+log_level = "debug"
+
+[relay]
+server = "example.com:8443"
+uuid = "12345678-1234-1234-1234-123456789012"
+password = "secure_password"
+ipstack_prefer = "v6v4"
+udp_relay_mode = "quic"
+congestion_control = "bbr"
+alpn = ["h3", "h2"]
+zero_rtt_handshake = true
+disable_sni = true
+timeout = "10s"
+heartbeat = "5s"
+send_window = 32777216
+receive_window = 16388608
+initial_mtu = 1400
+min_mtu = 1300
+gso = false
+pmtu = false
+gc_interval = "5s"
+gc_lifetime = "20s"
+
+[local]
+server = "[::1]:1080"
+dual_stack = false
+max_packet_size = 2000

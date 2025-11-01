@@ -1,0 +1,13 @@
+relay:
+  server: forward.example.com:8443
+  uuid: 00000000-0000-0000-0000-000000000000
+  password: forward_pass
+local:
+  server: 127.0.0.1:1080
+  tcp_forward:
+    - listen: 127.0.0.1:8080
+      remote: example.com:80
+  udp_forward:
+    - listen: 127.0.0.1:5353
+      remote: 8.8.8.8:53
+      timeout: 30s

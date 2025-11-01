@@ -1,0 +1,33 @@
+log_level = "trace"
+
+[relay]
+server = "full.example.com:8443"
+uuid = "11111111-2222-3333-4444-555555555555"
+password = "full_password"
+ip = "192.168.1.100"
+ipstack_prefer = "v4"
+certificates = ["/path/to/cert1.pem", "/path/to/cert2.pem"]
+udp_relay_mode = "quic"
+congestion_control = "cubic"
+alpn = ["h3"]
+zero_rtt_handshake = true
+disable_sni = true
+timeout = "20s"
+heartbeat = "10s"
+disable_native_certs = true
+send_window = 20000000
+receive_window = 10000000
+initial_mtu = 1500
+min_mtu = 1280
+gso = false
+pmtu = false
+gc_interval = "10s"
+gc_lifetime = "60s"
+skip_cert_verify = true
+
+[local]
+server = "[::1]:9999"
+username = "user123"
+password = "pass456"
+dual_stack = true
+max_packet_size = 2000
