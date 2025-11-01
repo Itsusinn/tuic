@@ -1,0 +1,28 @@
+log_level = "warn"
+server = "127.0.0.1:8080"
+data_dir = "__test__custom_data"
+udp_relay_ipv6 = false
+zero_rtt_handshake = true
+
+[tls]
+self_sign = true
+auto_ssl = true
+hostname = "testhost"
+
+[quic]
+initial_mtu = 1400
+min_mtu = 1300
+send_window = 10000000
+
+[quic.congestion_control]
+controller = "bbr"
+initial_window = 2000000
+
+[restful]
+addr = "192.168.1.100:8081"
+secret = "test_secret"
+maximum_clients_per_user = 5
+
+[users]
+"123e4567-e89b-12d3-a456-426614174000" = "password1"
+"123e4567-e89b-12d3-a456-426614174001" = "password2"

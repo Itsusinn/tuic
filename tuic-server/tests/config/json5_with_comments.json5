@@ -1,0 +1,14 @@
+{
+    // Single line comment
+    "log_level": "info",
+    /* Multi-line
+       comment */
+    "server": "127.0.0.1:8080",
+    "users": {
+        "123e4567-e89b-12d3-a456-426614174000": "password1" // inline comment
+    },
+    "tls": {
+        "self_sign": true,
+        "hostname": "test.json5.com"
+    }
+}

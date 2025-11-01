@@ -1,0 +1,11 @@
+{
+    "server": "[::]:8443",
+    "users": {
+        "00000000-0000-0000-0000-000000000000": "password123"
+    },
+
+    "self_sign": true,
+    "certificate": "/path/to/cert.pem",
+    "private_key": "/path/to/key.pem"
+
+}

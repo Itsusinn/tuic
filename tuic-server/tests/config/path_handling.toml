@@ -1,0 +1,5 @@
+data_dir = "__test__relative_path"
+
+[tls]
+certificate = "certs/server.crt"
+private_key = "certs/server.key"
