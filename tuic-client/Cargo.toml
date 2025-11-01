@@ -20,13 +20,15 @@ jemallocator = ["tikv-jemallocator"]
 [dependencies]
 bytes = { version = "1", default-features = false, features = ["std"] }
 
-lexopt = { version = "0.3", default-features = false }
+clap = { version = "4", features = ["derive"] }
 once_cell = { version = "1", default-features = false, features = ["parking_lot", "std"] }
 
 serde = { version = "1", default-features = false, features = ["derive", "std"] }
 json5 = { version = "0.4", default-features = false }
 toml = "0.9"
-figment = { version = "0.10", features = ["toml"] }
+serde_yaml = "0.9"
+figment = { version = "0.10", features = ["toml", "yaml"] }
+figment-json5 = "0.1.1"
 educe = { version = "0.6", default-features = false, features = ["Default"] }
 humantime-serde = "1"
 socket2 = { version = "0.6", default-features = false }
@@ -66,3 +68,6 @@ chrono = "0.4"
 tracing = "0.1"
 
 tikv-jemallocator = { version = "0.6", optional = true }
+
+[dev-dependencies]
+tempfile = "3"

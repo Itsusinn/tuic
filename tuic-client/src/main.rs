@@ -1,27 +1,27 @@
 #![feature(ip)]
 
-use std::{env, process, str::FromStr};
+use std::{process, str::FromStr};
 
 use chrono::{Offset, TimeZone};
+use clap::Parser;
 #[cfg(feature = "jemallocator")]
 use tikv_jemallocator::Jemalloc;
 use tracing::level_filters::LevelFilter;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
-use tuic_client::config::{Config, ConfigError};
+use tuic_client::config::{Cli, Config, EnvState};
 #[cfg(feature = "jemallocator")]
 #[global_allocator]
 static GLOBAL: Jemalloc = Jemalloc;
 
 #[tokio::main]
 async fn main() -> eyre::Result<()> {
-	let cfg = match Config::parse(env::args_os()) {
+	let cli = Cli::parse();
+	let env_state = EnvState::from_system();
+
+	let cfg = match Config::parse(cli, env_state) {
 		Ok(cfg) => cfg,
-		Err(ConfigError::Version(msg) | ConfigError::Help(msg)) => {
-			println!("{msg}");
-			process::exit(0);
-		}
 		Err(err) => {
-			eprintln!("{err}");
+			eprintln!("Error: {err}");
 			process::exit(1);
 		}
 	};
