@@ -97,7 +97,7 @@ pub enum StackPrefer {
 	#[serde(alias = "v6", alias = "only_v6")]
 	V6only,
 	/// Prefer IPv4, fallback to IPv6
-	#[serde(alias = "v4v6", alias = "prefer_v4")]
+	#[serde(alias = "v4v6", alias = "prefer_v4", alias = "auto")]
 	V4first,
 	/// Prefer IPv6, fallback to IPv4
 	#[serde(alias = "v6v4", alias = "prefer_v6")]
@@ -111,7 +111,7 @@ impl FromStr for StackPrefer {
 		match s.to_ascii_lowercase().as_str() {
 			"v4" | "v4only" | "only_v4" => Ok(StackPrefer::V4only),
 			"v6" | "v6only" | "only_v6" => Ok(StackPrefer::V6only),
-			"v4v6" | "v4first" | "prefer_v4" => Ok(StackPrefer::V4first),
+			"v4v6" | "v4first" | "prefer_v4" | "auto" => Ok(StackPrefer::V4first),
 			"v6v4" | "v6first" | "prefer_v6" => Ok(StackPrefer::V6first),
 			_ => Err("invalid stack preference"),
 		}
