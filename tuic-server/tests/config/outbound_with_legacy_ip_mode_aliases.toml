@@ -1,0 +1,21 @@
+[users]
+"123e4567-e89b-12d3-a456-426614174000" = "password1"
+
+[tls]
+self_sign = true
+
+[outbound.default]
+type = "direct"
+ip_mode = "prefer_v4"
+
+[outbound.prefer_v6_rule]
+type = "direct"
+ip_mode = "prefer_v6"
+
+[outbound.only_v4_rule]
+type = "direct"
+ip_mode = "only_v4"
+
+[outbound.only_v6_rule]
+type = "direct"
+ip_mode = "only_v6"

@@ -1,0 +1,38 @@
+{
+    // Server configuration
+    log_level: "info",
+    server: "127.0.0.1:9443",
+    udp_relay_ipv6: false,
+    zero_rtt_handshake: true,
+    
+    /* User authentication */
+    users: {
+        "123e4567-e89b-12d3-a456-426614174000": "pass1",
+        "123e4567-e89b-12d3-a456-426614174001": "pass2", // trailing comma
+    },
+    
+    // TLS settings
+    tls: {
+        self_sign: true,
+        auto_ssl: true,
+        hostname: "json5.example.com",
+    },
+    
+    // QUIC configuration
+    quic: {
+        initial_mtu: 1400,
+        min_mtu: 1300,
+        send_window: 8000000,
+        congestion_control: {
+            controller: "bbr",
+            initial_window: 1500000, // trailing comma in nested object
+        },
+    },
+    
+    // RESTful API
+    restful: {
+        addr: "127.0.0.1:8888",
+        secret: "json5_secret",
+        maximum_clients_per_user: 10,
+    }, // trailing comma
+}

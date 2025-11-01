@@ -1,0 +1,13 @@
+{
+    "log_level": "error",
+    "server": "[::1]:8443",
+    "users": {
+        "123e4567-e89b-12d3-a456-426614174002": "old_password"
+    },
+    "tls": {
+        "self_sign": false,
+        "certificate": "old_cert.pem",
+        "private_key": "old_key.pem"
+    },
+    "data_dir": "__test__legacy_data"
+}

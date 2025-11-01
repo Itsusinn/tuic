@@ -1,0 +1,5 @@
+log_level: warn
+server: "127.0.0.1:9000"
+tls:
+  self_sign: true
+  hostname: yaml.test.com

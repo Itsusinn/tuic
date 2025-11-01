@@ -1,0 +1,5 @@
+log_level = "info"
+server = "127.0.0.1:8443"
+
+[users]
+"123e4567-e89b-12d3-a456-426614174000" = "test_password"

@@ -1,0 +1,25 @@
+acl = """
+allow localhost udp/53
+allow localhost udp/53,tcp/80,tcp/443,udp/443
+# which is equivalent to:
+# allow localhost udp/53,tcp/80,443
+# if udp/tcp is omited, match both
+allow localhost 443
+reject 10.6.0.0/16
+allow google.com
+allow *.google.com
+reject *.cn
+# localhost means both 127.0.0.1 and [::1], regardless of whether you've configured it in /etc/hosts
+reject localhost
+# which is equivalent to:
+# reject localhost *
+custom_outbound_name example.com 80,443
+# Hijack 8.8.4.4:53/udp to 1.1.1.1:53/udp using default outbound
+default 8.8.4.4 udp/53 1.1.1.1
+"""
+
+[users]
+"123e4567-e89b-12d3-a456-426614174000" = "password1"
+
+[tls]
+self_sign = true

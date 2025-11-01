@@ -1,0 +1,11 @@
+{
+    "log_level": "debug",
+    "server": "0.0.0.0:8443",
+    "users": {
+        "123e4567-e89b-12d3-a456-426614174000": "testpass"
+    },
+    "tls": {
+        "self_sign": true,
+        "hostname": "example.com"
+    }
+}
