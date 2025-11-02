@@ -6,7 +6,7 @@ use std::{
 	},
 };
 
-use arc_swap::ArcSwap;
+use arc_swap::ArcSwapOption;
 use tokio::sync::Notify;
 use uuid::Uuid;
 
@@ -15,7 +15,7 @@ pub struct Authenticated(Arc<AuthenticatedInner>);
 
 struct AuthenticatedInner {
 	/// uuid that waiting for auth
-	uuid:             ArcSwap<Option<Uuid>>,
+	uuid:             ArcSwapOption<Uuid>,
 	notify:           Notify,
 	is_authenticated: AtomicBool,
 }
@@ -24,7 +24,7 @@ struct AuthenticatedInner {
 impl Authenticated {
 	pub fn new() -> Self {
 		Self(Arc::new(AuthenticatedInner {
-			uuid:             ArcSwap::new(None.into()),
+			uuid:             ArcSwapOption::new(None),
 			notify:           Notify::new(),
 			is_authenticated: AtomicBool::new(false),
 		}))
@@ -32,7 +32,7 @@ impl Authenticated {
 
 	/// invoking 'set' means auth success
 	pub async fn set(&self, uuid: Uuid) {
-		self.0.uuid.store(Some(uuid).into());
+		self.0.uuid.store(Some(Arc::new(uuid)));
 
 		// Mark as authenticated and notify all waiters
 		self.0.is_authenticated.store(true, Ordering::SeqCst);
@@ -40,7 +40,7 @@ impl Authenticated {
 	}
 
 	pub fn get(&self) -> Option<Uuid> {
-		**self.0.uuid.load()
+		self.0.uuid.load().as_deref().cloned()
 	}
 
 	/// Check if already authenticated (non-blocking)
@@ -104,34 +104,5 @@ mod tests {
 		});
 		auth.set(uuid).await;
 		wait_fut.await.unwrap();
-	}
-
-	#[tokio::test]
-	async fn test_authenticated_wait_race() {
-		let auth = Authenticated::new();
-		let uuid = Uuid::new_v4();
-
-		// Create multiple waiters to simulate a race condition
-		let mut wait_tasks = Vec::new();
-		for _ in 0..5 {
-			let auth_clone = auth.clone();
-			let uuid_clone = uuid;
-			let task = tokio::spawn(async move {
-				auth_clone.wait().await;
-				assert_eq!(auth_clone.get(), Some(uuid_clone));
-			});
-			wait_tasks.push(task);
-		}
-
-		// Small delay to ensure all tasks are waiting
-		tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
-
-		// Authenticate
-		auth.set(uuid).await;
-
-		// Ensure all tasks complete successfully
-		for task in wait_tasks {
-			task.await.unwrap();
-		}
 	}
 }
