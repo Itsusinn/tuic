@@ -155,6 +155,7 @@ jobs:
           args: --workspace --release --target ${{ matrix.target }} ${{ matrix.extra-args }}
         env:
           RUSTFLAGS: ${{ matrix.rustflags }} ${{ inputs.rustflags }}
+          CROSS_BUILD_ZIG: ${{ matrix.zig }}
 
       #--------------------------------------------------
       # Artifact Steps
