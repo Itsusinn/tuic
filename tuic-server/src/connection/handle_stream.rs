@@ -45,10 +45,13 @@ impl Connection {
 				self.authenticate(auth).await?;
 			}
 
-			tokio::select! {
-				() = self.auth.wait() => {}
-				err = self.inner.closed() => return Err(Error::from(err)),
-			};
+			// Fast path: if already authenticated, skip the select
+			if !self.auth.is_authenticated() {
+				tokio::select! {
+					() = self.auth.wait() => {}
+					err = self.inner.closed() => return Err(Error::from(err)),
+				};
+			}
 
 			let same_pkt_src =
 				matches!(task, Task::Packet(_)) && matches!(**self.udp_relay_mode.load(), Some(UdpRelayMode::Native));
@@ -107,10 +110,13 @@ impl Connection {
 				.await
 				.map_err(|_| Error::TaskNegotiationTimeout)??;
 
-			tokio::select! {
-				() = self.auth.wait() => {}
-				err = self.inner.closed() => return Err(Error::from(err)),
-			};
+			// Fast path: if already authenticated, skip the select
+			if !self.auth.is_authenticated() {
+				tokio::select! {
+					() = self.auth.wait() => {}
+					err = self.inner.closed() => return Err(Error::from(err)),
+				};
+			}
 
 			Ok(task)
 		};
@@ -142,10 +148,13 @@ impl Connection {
 		let pre_process = async {
 			let task = self.model.accept_datagram(dg)?;
 
-			tokio::select! {
-				() = self.auth.wait() => {}
-				err = self.inner.closed() => return Err(Error::from(err)),
-			};
+			// Fast path: if already authenticated, skip the select
+			if !self.auth.is_authenticated() {
+				tokio::select! {
+					() = self.auth.wait() => {}
+					err = self.inner.closed() => return Err(Error::from(err)),
+				};
+			}
 
 			let same_pkt_src =
 				matches!(task, Task::Packet(_)) && matches!(**self.udp_relay_mode.load(), Some(UdpRelayMode::Quic));
