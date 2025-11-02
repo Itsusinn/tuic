@@ -43,6 +43,11 @@ impl Authenticated {
 		**self.0.uuid.load()
 	}
 
+	/// Check if already authenticated (non-blocking)
+	pub fn is_authenticated(&self) -> bool {
+		self.0.is_authenticated.load(Ordering::SeqCst)
+	}
+
 	/// waiting for auth success
 	pub async fn wait(&self) {
 		// If already authenticated, return immediately
@@ -50,8 +55,17 @@ impl Authenticated {
 			return;
 		}
 
-		// Otherwise, wait for notification
-		self.0.notify.notified().await;
+		// Create the notified future BEFORE the double-check
+		// This ensures we don't miss notifications that happen between check and await
+		let notified = self.0.notify.notified();
+
+		// Double-check after creating the future to avoid unnecessary wait
+		if self.0.is_authenticated.load(Ordering::SeqCst) {
+			return;
+		}
+
+		// Now wait for notification
+		notified.await;
 	}
 }
 
