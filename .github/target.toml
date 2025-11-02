@@ -14,6 +14,7 @@
 # rustflags = ""                # Optional: Custom Rust compiler flags
 # retention-days = 3            # Optional: Number of days to retain artifacts
 # nasm = false                  # Optional: Whether to install NASM for assembly compilation
+# zig = "2.17"                  # Optional: Zig libc version for linking (if needed)
 
 # ==================== Linux Targets (GNU) ====================
 
@@ -24,6 +25,7 @@ target = "x86_64-unknown-linux-gnu"
 release-name = "x86_64-linux"
 tool = "cross"
 extra-args = "--features jemallocator"
+zig = "2.17"
 
 # 32-bit Linux (GNU)
 [[target]]
