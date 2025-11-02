@@ -24,7 +24,7 @@ clap = { version = "4", features = ["derive"] }
 socket2 = { version = "0.6", default-features = false }
 arc-swap = "1"
 uuid = { version = "1", default-features = false, features = ["serde", "std", "v4"] }
-chashmap = { package = "chashmap-async", version = "0.1" }
+moka = { version = "0.12", features = ["future"] }
 sha2 = "0.10"
 
 # QUIC

@@ -1,5 +1,5 @@
 use std::{
-	collections::{HashMap, HashSet},
+	collections::HashMap,
 	net::SocketAddr,
 	sync::{Arc, atomic::Ordering},
 };
@@ -14,6 +14,7 @@ use axum_extra::{
 	TypedHeader,
 	headers::{Authorization, authorization::Bearer},
 };
+use moka::future::Cache;
 use quinn::{Connection as QuinnConnection, VarInt};
 use serde_json::json;
 use tracing::warn;
@@ -48,8 +49,8 @@ async fn kick(
 		return StatusCode::UNAUTHORIZED;
 	}
 	for user in users {
-		if let Some(list) = ctx.online_clients.get(&user).await {
-			for client in list.iter() {
+		if let Some(cache) = ctx.online_clients.get(&user).await {
+			for (_id, client) in cache.iter() {
 				client.close(VarInt::from_u32(6002), "Client got kicked".as_bytes());
 			}
 		}
@@ -89,11 +90,13 @@ async fn list_detailed_online(
 		return (StatusCode::UNAUTHORIZED, Json(HashMap::new()));
 	}
 	let mut result = HashMap::new();
-	for (user, list) in ctx.online_clients.clone_locking().await.into_iter() {
-		if list.is_empty() {
+	for (user, cache) in ctx.online_clients.iter() {
+		let entry_count = cache.entry_count();
+		if entry_count == 0 {
 			continue;
 		}
-		result.insert(user, list.into_iter().map(|v| v.remote_address()).collect());
+		let addrs: Vec<SocketAddr> = cache.iter().map(|(_, client)| client.remote_address()).collect();
+		result.insert(*user, addrs);
 	}
 
 	(StatusCode::OK, Json(result))
@@ -154,11 +157,15 @@ pub async fn client_connect(ctx: &AppContext, uuid: &Uuid, conn: QuinnConnection
 			conn.close(VarInt::from_u32(6001), b"Reached maximum clients limitation");
 			return;
 		}
-		ctx.online_clients
-			.upsert(*uuid, HashSet::new, |v| {
-				v.insert(conn.into());
-			})
-			.await;
+		let cap = if cfg.maximum_clients_per_user == 0 {
+			10000
+		} else {
+			cfg.maximum_clients_per_user as u64
+		};
+		let cache = ctx.online_clients.get_with(*uuid, async { Arc::new(Cache::new(cap)) }).await;
+
+		let client: crate::compat::QuicClient = conn.into();
+		cache.insert(client.stable_id(), client).await;
 	}
 }
 pub async fn client_disconnect(ctx: &AppContext, uuid: &Uuid, conn: QuinnConnection) {
@@ -166,8 +173,10 @@ pub async fn client_disconnect(ctx: &AppContext, uuid: &Uuid, conn: QuinnConnect
 		.get(uuid)
 		.expect("Authorized UUID not present in users table")
 		.fetch_sub(1, Ordering::SeqCst);
-	if let Some(mut pair) = ctx.online_clients.get_mut(uuid).await {
-		pair.remove(&conn.into());
+
+	if let Some(cache) = ctx.online_clients.get(uuid).await {
+		let client: crate::compat::QuicClient = conn.into();
+		cache.invalidate(&client.stable_id()).await;
 	}
 }
 

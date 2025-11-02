@@ -2,11 +2,11 @@
 // This allows the server to be used as a library in integration tests
 
 use std::{
-	collections::{HashMap, HashSet},
+	collections::HashMap,
 	sync::{Arc, atomic::AtomicUsize},
 };
 
-use chashmap::CHashMap;
+use moka::future::Cache;
 use uuid::Uuid;
 
 pub mod acl;
@@ -25,7 +25,7 @@ pub use config::{Cli, Config, Control};
 pub struct AppContext {
 	pub cfg:            Config,
 	pub online_counter: HashMap<Uuid, AtomicUsize>,
-	pub online_clients: CHashMap<Uuid, HashSet<compat::QuicClient>>,
+	pub online_clients: Cache<Uuid, Arc<Cache<usize, compat::QuicClient>>>,
 	pub traffic_stats:  HashMap<Uuid, (AtomicUsize, AtomicUsize)>,
 }
 
@@ -42,17 +42,12 @@ pub async fn run(cfg: Config) -> eyre::Result<()> {
 	}
 
 	let ctx = Arc::new(AppContext {
-		cfg,
 		online_counter,
-		online_clients: CHashMap::new(),
+		online_clients: Cache::new(cfg.users.len() as u64),
 		traffic_stats,
+		cfg,
 	});
-
-	match server::Server::init(ctx.clone()).await {
-		Ok(server) => {
-			server.start().await;
-			Ok(())
-		}
-		Err(err) => Err(err.into()),
-	}
+	let server = server::Server::init(ctx.clone()).await?;
+	server.start().await;
+	Ok(())
 }
