@@ -96,6 +96,12 @@ jobs:
           target: ${{ matrix.target }}
           components: ${{ matrix.components || 'rustfmt, clippy' }}
 
+      - name: Cache Docker images for cross
+        if: matrix.tool == 'cross'
+        uses: AndreKurait/docker-cache@0.6.0
+        with:
+          key: docker-${{ runner.os }}-${{ matrix.target }}-${{ hashFiles('Cross.toml') }}
+
       - name: Install cross-compilation tools
         if: matrix.tool == 'cross'
         run: |

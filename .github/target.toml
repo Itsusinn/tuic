@@ -135,14 +135,14 @@ skip-test = true
 
 # Intel macOS (x86_64)
 [[target]]
-os = "macos-13"
+os = "macos-15-intel"
 target = "x86_64-apple-darwin"
 release-name = "x86_64-darwin"
 extra-args = "--features jemallocator"
 
 # Apple Silicon macOS (ARM64)
 [[target]]
-os = "macos-14"
+os = "macos-latest"
 target = "aarch64-apple-darwin"
 release-name = "aarch64-darwin"
 extra-args = "--features jemallocator"
