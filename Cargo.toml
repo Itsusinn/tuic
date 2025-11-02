@@ -12,7 +12,7 @@ license = "GPL-3.0-or-later"
 repository = "https://github.com/Itsusinn/tuic"
 
 [profile.release]
-opt-level = 3
+opt-level = "z"
 debug = 1
 lto = "fat"
 strip = true
