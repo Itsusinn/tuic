@@ -55,7 +55,7 @@ When paired with QUIC, TUIC can achieve:
     - Optional 0-RTT connection handshake
     - Connection migration
 
-Fully-detailed TUIC protocol specification can be found in [SPEC.md](https://github.com/Itsusinn/tuic/tree/dev/tuic/SPEC.md)
+Fully-detailed TUIC protocol specification can be found in [SPEC.md](https://github.com/proxy-rs/wind/blob/main/crates/wind-tuic/SPEC.md)
 
 ## Overview
 

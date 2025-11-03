@@ -125,11 +125,7 @@ impl Connection {
 			}
 		}
 		// Built-in safety: drop localhost if no explicit rule matched
-		let is_loopback = addrs.iter().any(|sa| match sa.ip() {
-			IpAddr::V4(v4) => v4.is_loopback(),
-			IpAddr::V6(v6) => v6.is_loopback(),
-		});
-		if is_loopback {
+		if self.ctx.cfg.experimental.drop_loopback && addrs.iter().any(|sa| sa.ip().is_loopback()) {
 			return ("drop".to_string(), None, true);
 		}
 		("default".to_string(), None, false)

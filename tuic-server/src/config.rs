@@ -133,6 +133,8 @@ pub struct Config {
 	#[educe(Default(expression = Vec::new()))]
 	pub acl: Vec<AclRule>,
 
+	pub experimental: ExperimentalConfig,
+
 	/// Old configuration fields
 	#[serde(default, rename = "self_sign")]
 	#[deprecated]
@@ -314,6 +316,14 @@ pub struct RestfulConfig {
 	pub secret:                   String,
 	#[educe(Default = 0)]
 	pub maximum_clients_per_user: usize,
+}
+
+#[derive(Deserialize, Serialize, Educe, Clone)]
+#[educe(Default)]
+#[serde(default, deny_unknown_fields)]
+pub struct ExperimentalConfig {
+	#[educe(Default = true)]
+	pub drop_loopback: bool,
 }
 
 impl Config {
