@@ -218,6 +218,13 @@ receive_window = 8388608
 # How long to wait before closing idle connection
 max_idle_time = "30s"
 
+# Experimental features
+[experimental]
+# Drop connections to loopback addresses (127.0.0.1, ::1) when no explicit ACL rule matches
+# This is a built-in safety feature to prevent accidental exposure of localhost services
+# Set to false to allow connections to loopback addresses by default
+drop_loopback = true
+
 # Outbound configuration
 [outbound]
 # Default outbound rule used when no name is specified
