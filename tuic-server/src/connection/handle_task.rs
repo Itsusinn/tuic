@@ -128,6 +128,10 @@ impl Connection {
 		if self.ctx.cfg.experimental.drop_loopback && addrs.iter().any(|sa| sa.ip().is_loopback()) {
 			return ("drop".to_string(), None, true);
 		}
+		if self.ctx.cfg.experimental.drop_private && addrs.iter().any(|sa| is_private_ip(&sa.ip())) {
+			return ("drop".to_string(), None, true);
+		}
+
 		("default".to_string(), None, false)
 	}
 
@@ -643,5 +647,26 @@ impl Connection {
 		}
 
 		Ok(stream)
+	}
+}
+
+fn is_private_ip(ip: &IpAddr) -> bool {
+	match ip {
+		IpAddr::V4(ipv4) => {
+			// 10.0.0.0/8
+			ipv4.octets()[0] == 10
+				// 172.16.0.0/12
+				|| (ipv4.octets()[0] == 172 && (ipv4.octets()[1] >= 16 && ipv4.octets()[1] <= 31))
+				// 192.168.0.0/16
+				|| (ipv4.octets()[0] == 192 && ipv4.octets()[1] == 168)
+				// 169.254.0.0/16 (Link-local)
+				|| (ipv4.octets()[0] == 169 && ipv4.octets()[1] == 254)
+		}
+		IpAddr::V6(ipv6) => {
+			// fc00::/7 (Unique Local Address)
+			ipv6.octets()[0] & 0xfe == 0xfc
+				// fe80::/10 (Link-local)
+				|| (ipv6.octets()[0] == 0xfe && (ipv6.octets()[1] & 0xc0) == 0x80)
+		}
 	}
 }

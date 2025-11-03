@@ -225,6 +225,13 @@ max_idle_time = "30s"
 # Set to false to allow connections to loopback addresses by default
 drop_loopback = true
 
+# Drop connections to private/LAN addresses when no explicit ACL rule matches
+# This prevents proxying to RFC 1918 private networks:
+# - IPv4: 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 169.254.0.0/16 (link-local)
+# - IPv6: fc00::/7 (unique local), fe80::/10 (link-local)
+# Set to false to allow connections to private addresses by default
+drop_private = true
+
 # Outbound configuration
 [outbound]
 # Default outbound rule used when no name is specified

@@ -320,10 +320,12 @@ pub struct RestfulConfig {
 
 #[derive(Deserialize, Serialize, Educe, Clone)]
 #[educe(Default)]
-#[serde(default, deny_unknown_fields)]
+#[serde(default)]
 pub struct ExperimentalConfig {
 	#[educe(Default = true)]
 	pub drop_loopback: bool,
+	#[educe(Default = true)]
+	pub drop_private:  bool,
 }
 
 impl Config {
