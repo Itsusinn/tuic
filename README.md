@@ -30,6 +30,7 @@ Compared to origin, this fork's new features:
 - RESTful API with traffic statistics
 - Network interface binding support
 - Default localhost access protection
+- Private/LAN address filtering for enhanced security
 
 **Client Features:**
 - TCP/UDP port forwarding support
