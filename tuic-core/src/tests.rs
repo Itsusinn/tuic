@@ -159,7 +159,7 @@ fn test_heartbeat_creation() {
 
 #[test]
 fn test_heartbeat_default() {
-	let _hb = Heartbeat::default();
+	let _hb = Heartbeat;
 	assert_eq!(Heartbeat::type_code(), 0x04);
 }
 

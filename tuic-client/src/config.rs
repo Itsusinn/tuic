@@ -423,7 +423,7 @@ mod tests {
 
 		let config_path = temp_dir.path().join(format!("config{}", extension));
 
-		fs::write(&config_path, &config_content).unwrap();
+		fs::write(&config_path, config_content).unwrap();
 
 		// Temporarily set command line arguments for clap to parse
 		let os_args = vec![
@@ -519,7 +519,7 @@ mod tests {
 
 		let config = config.unwrap();
 		assert_eq!(config.log_level, "debug");
-		assert_eq!(config.relay.zero_rtt_handshake, true);
+		assert!(config.relay.zero_rtt_handshake);
 	}
 
 	#[test]
@@ -533,23 +533,22 @@ mod tests {
 		assert_eq!(config.relay.ipstack_prefer, StackPrefer::V4first);
 		assert_eq!(config.relay.udp_relay_mode, UdpRelayMode::Native);
 		assert_eq!(config.relay.congestion_control, CongestionControl::Bbr);
-		assert_eq!(config.relay.zero_rtt_handshake, false);
-		assert_eq!(config.relay.disable_sni, false);
+		assert!(!config.relay.zero_rtt_handshake);
+		assert!(!config.relay.disable_sni);
 		assert_eq!(config.relay.timeout, Duration::from_secs(8));
 		assert_eq!(config.relay.heartbeat, Duration::from_secs(3));
-		assert_eq!(config.relay.disable_native_certs, false);
+		assert!(!config.relay.disable_native_certs);
 		assert_eq!(config.relay.send_window, 16 * 1024 * 1024);
 		assert_eq!(config.relay.receive_window, 8 * 1024 * 1024);
 		assert_eq!(config.relay.initial_mtu, 1200);
 		assert_eq!(config.relay.min_mtu, 1200);
-		assert_eq!(config.relay.gso, true);
-		assert_eq!(config.relay.pmtu, true);
+		assert!(config.relay.gso);
+		assert!(config.relay.pmtu);
 		assert_eq!(config.relay.gc_interval, Duration::from_secs(3));
 		assert_eq!(config.relay.gc_lifetime, Duration::from_secs(15));
-		assert_eq!(config.relay.skip_cert_verify, false);
+		assert!(!config.relay.skip_cert_verify);
 		assert_eq!(config.local.max_packet_size, 1500);
 	}
-
 	#[test]
 	fn test_tcp_udp_forward() {
 		let json5_config = include_str!("../tests/config/tcp_udp_forward.json5");

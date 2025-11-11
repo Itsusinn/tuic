@@ -59,7 +59,7 @@ pub enum AclAddress {
 
 /// Represents port specifications with optional protocols
 #[derive(Debug, Clone, PartialEq, Serialize, Display)]
-#[display("{}", format_port_list(&entries))]
+#[display("{}", format_port_list(entries))]
 pub struct AclPorts {
 	/// List of port ranges or single ports with optional protocols
 	pub entries: Vec<AclPortEntry>,
@@ -120,10 +120,8 @@ impl AclRule {
 	/// Check if the rule matches the given IP address
 	fn matches_address(&self, ip: IpAddr) -> bool {
 		match &self.addr {
-			AclAddress::Ip(ip_str) => ip_str.parse::<IpAddr>().map_or(false, |parsed| parsed == ip),
-			AclAddress::Cidr(cidr_str) => cidr_str
-				.parse::<ip_network::IpNetwork>()
-				.map_or(false, |net| net.contains(ip)),
+			AclAddress::Ip(ip_str) => ip_str.parse::<IpAddr>() == Ok(ip),
+			AclAddress::Cidr(cidr_str) => cidr_str.parse::<ip_network::IpNetwork>().is_ok_and(|net| net.contains(ip)),
 			AclAddress::Domain(domain) => Self::match_domain(domain, ip),
 			AclAddress::WildcardDomain(pattern) => Self::match_wildcard_domain(pattern, ip),
 			AclAddress::Localhost => Self::is_loopback(ip),
@@ -148,7 +146,7 @@ impl AclRule {
 		(domain, 0)
 			.to_socket_addrs()
 			.ok()
-			.map_or(false, |mut iter| iter.any(|sa| sa.ip() == ip))
+			.is_some_and(|mut iter| iter.any(|sa| sa.ip() == ip))
 	}
 
 	/// Match a wildcard domain against an IP address
@@ -164,7 +162,7 @@ impl AclRule {
 			(stripped, 0)
 				.to_socket_addrs()
 				.ok()
-				.map_or(false, |mut iter| iter.any(|sa| sa.ip() == ip))
+				.is_some_and(|mut iter| iter.any(|sa| sa.ip() == ip))
 		}
 	}
 
