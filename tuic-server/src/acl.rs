@@ -4,6 +4,7 @@ use derive_more::Display;
 use pest::Parser;
 use pest_derive::Parser;
 use serde::{Deserialize, Deserializer, Serialize, de};
+use tuic_core::is_private_ip;
 
 #[derive(Parser)]
 #[grammar = "acl.pest"]
@@ -128,7 +129,7 @@ impl AclRule {
 			AclAddress::Domain(domain) => Self::match_domain(domain, ip),
 			AclAddress::WildcardDomain(pattern) => Self::match_wildcard_domain(pattern, ip),
 			AclAddress::Localhost => Self::is_loopback(ip),
-			AclAddress::Private => Self::is_private(ip),
+			AclAddress::Private => is_private_ip(&ip),
 			AclAddress::Any => true,
 		}
 	}
@@ -176,31 +177,6 @@ impl AclRule {
 		match ip {
 			IpAddr::V4(v4) => v4.is_loopback(),
 			IpAddr::V6(v6) => v6.is_loopback(),
-		}
-	}
-
-	/// Check if an IP address is private (LAN address)
-	#[inline]
-	fn is_private(ip: IpAddr) -> bool {
-		match ip {
-			IpAddr::V4(ipv4) => {
-				let octets = ipv4.octets();
-				// 10.0.0.0/8
-				octets[0] == 10
-					// 172.16.0.0/12
-					|| (octets[0] == 172 && (octets[1] >= 16 && octets[1] <= 31))
-					// 192.168.0.0/16
-					|| (octets[0] == 192 && octets[1] == 168)
-					// 169.254.0.0/16 (Link-local)
-					|| (octets[0] == 169 && octets[1] == 254)
-			}
-			IpAddr::V6(ipv6) => {
-				let octets = ipv6.octets();
-				// fc00::/7 (Unique Local Address)
-				octets[0] & 0xfe == 0xfc
-					// fe80::/10 (Link-local)
-					|| (octets[0] == 0xfe && (octets[1] & 0xc0) == 0x80)
-			}
 		}
 	}
 }

@@ -1,5 +1,6 @@
 use std::{
 	fmt::{Display, Formatter, Result as FmtResult},
+	net::IpAddr,
 	str::FromStr,
 };
 
@@ -114,6 +115,34 @@ impl FromStr for StackPrefer {
 			"v4v6" | "v4first" | "prefer_v4" | "auto" => Ok(StackPrefer::V4first),
 			"v6v4" | "v6first" | "prefer_v6" => Ok(StackPrefer::V6first),
 			_ => Err("invalid stack preference"),
+		}
+	}
+}
+
+/// Check if an IP address is private (LAN address)
+///
+/// Returns `true` for:
+/// - IPv4: 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 169.254.0.0/16
+///   (Link-local)
+/// - IPv6: fc00::/7 (Unique Local Address), fe80::/10 (Link-local)
+#[inline]
+pub fn is_private_ip(ip: &IpAddr) -> bool {
+	match ip {
+		IpAddr::V4(ipv4) => {
+			// 10.0.0.0/8
+			ipv4.octets()[0] == 10
+				// 172.16.0.0/12
+				|| (ipv4.octets()[0] == 172 && (ipv4.octets()[1] >= 16 && ipv4.octets()[1] <= 31))
+				// 192.168.0.0/16
+				|| (ipv4.octets()[0] == 192 && ipv4.octets()[1] == 168)
+				// 169.254.0.0/16 (Link-local)
+				|| (ipv4.octets()[0] == 169 && ipv4.octets()[1] == 254)
+		}
+		IpAddr::V6(ipv6) => {
+			// fc00::/7 (Unique Local Address)
+			ipv6.octets()[0] & 0xfe == 0xfc
+				// fe80::/10 (Link-local)
+				|| (ipv6.octets()[0] == 0xfe && (ipv6.octets()[1] & 0xc0) == 0x80)
 		}
 	}
 }

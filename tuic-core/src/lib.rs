@@ -24,4 +24,4 @@ pub mod quinn;
 
 // Utility types
 mod utils;
-pub use self::utils::{CongestionControl, StackPrefer, UdpRelayMode};
+pub use self::utils::{CongestionControl, StackPrefer, UdpRelayMode, is_private_ip};

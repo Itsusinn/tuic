@@ -12,7 +12,7 @@ use tokio::{
 };
 use tracing::{info, warn};
 use tuic_core::{
-	Address,
+	Address, is_private_ip,
 	quinn::{Authenticate, Connect, Packet},
 };
 
@@ -647,26 +647,5 @@ impl Connection {
 		}
 
 		Ok(stream)
-	}
-}
-
-fn is_private_ip(ip: &IpAddr) -> bool {
-	match ip {
-		IpAddr::V4(ipv4) => {
-			// 10.0.0.0/8
-			ipv4.octets()[0] == 10
-				// 172.16.0.0/12
-				|| (ipv4.octets()[0] == 172 && (ipv4.octets()[1] >= 16 && ipv4.octets()[1] <= 31))
-				// 192.168.0.0/16
-				|| (ipv4.octets()[0] == 192 && ipv4.octets()[1] == 168)
-				// 169.254.0.0/16 (Link-local)
-				|| (ipv4.octets()[0] == 169 && ipv4.octets()[1] == 254)
-		}
-		IpAddr::V6(ipv6) => {
-			// fc00::/7 (Unique Local Address)
-			ipv6.octets()[0] & 0xfe == 0xfc
-				// fe80::/10 (Link-local)
-				|| (ipv6.octets()[0] == 0xfe && (ipv6.octets()[1] & 0xc0) == 0x80)
-		}
 	}
 }
