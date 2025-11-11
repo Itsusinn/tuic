@@ -23,8 +23,7 @@ async fn main() -> eyre::Result<()> {
 				println!("{}", control);
 				process::exit(0);
 			}
-			eprintln!("{}", err);
-			process::exit(1);
+			return Err(err);
 		}
 	};
 	let filter = tracing_subscriber::filter::Targets::new()
@@ -45,12 +44,21 @@ async fn main() -> eyre::Result<()> {
 				))),
 		)
 		.try_init()?;
-	tokio::spawn(async move {
-		if let Err(err) = tuic_server::run(cfg).await {
-			eprintln!("{err}");
-			process::exit(1);
+	tokio::select! {
+		res = tuic_server::run(cfg) => {
+			if let Err(err) = res {
+				tracing::error!("Server exited with error: {err}");
+				return Err(err);
+			}
 		}
-	});
-	tokio::signal::ctrl_c().await.expect("failed to listen for event");
+		res = tokio::signal::ctrl_c() => {
+			if let Err(err) = res {
+				tracing::error!("Failed to listen for Ctrl-C: {err}");
+				return Err(eyre::eyre!("Failed to listen for Ctrl-C: {err}"));
+			} else {
+				tracing::info!("Received Ctrl-C, shutting down.");
+			}
+		}
+	}
 	Ok(())
 }

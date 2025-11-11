@@ -53,8 +53,11 @@ serde_json = { version = "1", default-features = false, features = ["std"] }
 figment = { version = "0.10", features = ["toml", "yaml"] }
 figment-json5 = "0.1.1"
 educe = { version = "0.6", default-features = false, features = ["Default"] }
+derive_more = { version = "2", default-features = false, features = ["display"] }
 humantime-serde = "1"
 ip_network = "0.4"
+pest = "2.7"
+pest_derive = "2.7"
 
 # Logging
 time = { version = "0.3", features = ["macros", "local-offset"] }
