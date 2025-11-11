@@ -50,16 +50,14 @@ mod tests {
 	#[test]
 	fn test_stack_prefer_variants() {
 		// Test all variants exist and are distinct
-		let modes = vec![
+		let modes = [
 			StackPrefer::V4only,
 			StackPrefer::V6only,
 			StackPrefer::V4first,
 			StackPrefer::V6first,
 		];
 
-		assert_eq!(modes.len(), 4);
-
-		// Test equality
+		assert_eq!(modes.len(), 4); // Test equality
 		assert_eq!(StackPrefer::V4only, StackPrefer::V4only);
 		assert_ne!(StackPrefer::V4only, StackPrefer::V6only);
 	}

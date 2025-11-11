@@ -532,14 +532,12 @@ async fn test_server_client_integration() {
 							eprintln!("[TCP Test] Failed to read response: {}", e);
 							// Try regular read to see what we can get
 							let mut fallback_buffer = vec![0u8; 1024];
-							if let Ok(n) = timeout(Duration::from_secs(1), stream.read(&mut fallback_buffer)).await {
-								if let Ok(bytes) = n {
-									eprintln!(
-										"[TCP Test] Fallback read got {} bytes: {:?}",
-										bytes,
-										&fallback_buffer[..bytes]
-									);
-								}
+							if let Ok(Ok(bytes)) = timeout(Duration::from_secs(1), stream.read(&mut fallback_buffer)).await {
+								eprintln!(
+									"[TCP Test] Fallback read got {} bytes: {:?}",
+									bytes,
+									&fallback_buffer[..bytes]
+								);
 							}
 						}
 						Err(_) => {
@@ -596,31 +594,24 @@ async fn test_server_client_integration() {
 		let echo_task = tokio::spawn(async move {
 			let mut buf = vec![0u8; 1024];
 			println!("[UDP Echo Server] Waiting for packets...");
-			loop {
-				match timeout(Duration::from_secs(5), echo_server_clone.recv_from(&mut buf)).await {
-					Ok(Ok((n, addr))) => {
-						println!("[UDP Echo Server] Received {} bytes from {}", n, addr);
-						println!("[UDP Echo Server] Data: {:?}", &buf[..n]);
-						if let Err(e) = echo_server_clone.send_to(&buf[..n], addr).await {
-							eprintln!("[UDP Echo Server] Failed to send response: {}", e);
-						} else {
-							println!("[UDP Echo Server] Echoed {} bytes back to {}", n, addr);
-						}
-						break;
-					}
-					Ok(Err(e)) => {
-						eprintln!("[UDP Echo Server] Error receiving: {}", e);
-						break;
-					}
-					Err(_) => {
-						eprintln!("[UDP Echo Server] Timeout waiting for data (no packets received)");
-						break;
+			match timeout(Duration::from_secs(5), echo_server_clone.recv_from(&mut buf)).await {
+				Ok(Ok((n, addr))) => {
+					println!("[UDP Echo Server] Received {} bytes from {}", n, addr);
+					println!("[UDP Echo Server] Data: {:?}", &buf[..n]);
+					if let Err(e) = echo_server_clone.send_to(&buf[..n], addr).await {
+						eprintln!("[UDP Echo Server] Failed to send response: {}", e);
+					} else {
+						println!("[UDP Echo Server] Echoed {} bytes back to {}", n, addr);
 					}
 				}
+				Ok(Err(e)) => {
+					eprintln!("[UDP Echo Server] Error receiving: {}", e);
+				}
+				Err(_) => {
+					eprintln!("[UDP Echo Server] Timeout waiting for data (no packets received)");
+				}
 			}
-		});
-
-		// Give server time to start
+		}); // Give server time to start
 		tokio::time::sleep(Duration::from_millis(100)).await;
 
 		// Connect to SOCKS5 proxy using fast-socks5's UDP API

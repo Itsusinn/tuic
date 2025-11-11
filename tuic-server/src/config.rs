@@ -703,7 +703,7 @@ mod tests {
 		let temp_dir = tempdir().unwrap();
 		let config_path = temp_dir.path().join(format!("config{}", extension));
 
-		fs::write(&config_path, &config_content).unwrap();
+		fs::write(&config_path, config_content).unwrap();
 
 		// Temporarily set command line arguments for clap to parse
 		let os_args = vec![
@@ -716,11 +716,8 @@ mod tests {
 		let cli = Cli::try_parse_from(os_args)?;
 
 		// Call parse_config with the CLI and env_state
-		let result = parse_config(cli, env_state).await;
-
-		result
+		parse_config(cli, env_state).await
 	}
-
 	#[tokio::test]
 	async fn test_valid_toml_config() -> eyre::Result<()> {
 		let config = include_str!("../tests/config/valid_toml_config.toml");
@@ -729,13 +726,12 @@ mod tests {
 
 		assert_eq!(result.log_level, LogLevel::Warn);
 		assert_eq!(result.server, "127.0.0.1:8080".parse().unwrap());
-		assert_eq!(result.udp_relay_ipv6, false);
-		assert_eq!(result.zero_rtt_handshake, true);
+		assert!(!result.udp_relay_ipv6);
+		assert!(result.zero_rtt_handshake);
 
-		assert_eq!(result.tls.self_sign, true);
-		assert_eq!(result.tls.auto_ssl, true);
+		assert!(result.tls.self_sign);
+		assert!(result.tls.auto_ssl);
 		assert_eq!(result.tls.hostname, "testhost");
-
 		assert_eq!(result.quic.initial_mtu, 1400);
 		assert_eq!(result.quic.min_mtu, 1300);
 		assert_eq!(result.quic.send_window, 10000000);
@@ -772,10 +768,9 @@ mod tests {
 		let uuid = Uuid::parse_str("123e4567-e89b-12d3-a456-426614174002").unwrap();
 		assert_eq!(result.users.get(&uuid), Some(&"old_password".to_string()));
 
-		assert_eq!(result.tls.self_sign, false);
-		assert!(result.data_dir.ends_with("__test__legacy_data"));
 
-		// Cleanup test directories
+		assert!(!result.tls.self_sign);
+		assert!(result.data_dir.ends_with("__test__legacy_data")); // Cleanup test directories
 		let _ = tokio::fs::remove_dir_all("__test__legacy_data").await;
 	}
 
@@ -1009,9 +1004,9 @@ mod tests {
 		// Check default values
 		assert_eq!(result.log_level, LogLevel::Info);
 		assert_eq!(result.server, "[::]:8443".parse().unwrap());
-		assert_eq!(result.udp_relay_ipv6, true);
-		assert_eq!(result.zero_rtt_handshake, false);
-		assert_eq!(result.dual_stack, true);
+		assert!(result.udp_relay_ipv6);
+		assert!(!result.zero_rtt_handshake);
+		assert!(result.dual_stack);
 		assert_eq!(result.auth_timeout, Duration::from_secs(3));
 		assert_eq!(result.task_negotiation_timeout, Duration::from_secs(3));
 		assert_eq!(result.gc_interval, Duration::from_secs(10));
@@ -1019,7 +1014,6 @@ mod tests {
 		assert_eq!(result.max_external_packet_size, 1500);
 		assert_eq!(result.stream_timeout, Duration::from_secs(60));
 	}
-
 	#[tokio::test]
 	async fn test_invalid_uuid() {
 		let config = include_str!("../tests/config/invalid_uuid.toml");
@@ -1097,14 +1091,13 @@ mod tests {
 		let result = test_parse_config(config, ".json").await.unwrap();
 
 		// Verify migration worked
-		assert_eq!(result.tls.self_sign, true);
+		assert!(result.tls.self_sign);
 		assert!(result.tls.certificate.ends_with("cert.pem"));
 		assert!(result.tls.private_key.ends_with("key.pem"));
 		assert_eq!(result.tls.hostname, "example.com");
 		assert_eq!(result.quic.congestion_control.controller, CongestionController::Bbr);
 		assert_eq!(result.quic.max_idle_time, Duration::from_secs(60));
 		assert_eq!(result.quic.initial_mtu, 1500);
-
 		assert!(result.restful.is_some());
 		assert_eq!(result.restful.unwrap().addr, "0.0.0.0:8080".parse().unwrap());
 	}
@@ -1188,15 +1181,14 @@ mod tests {
 
 		assert_eq!(result.log_level, LogLevel::Info);
 		assert_eq!(result.server, "127.0.0.1:9443".parse().unwrap());
-		assert_eq!(result.udp_relay_ipv6, false);
-		assert_eq!(result.zero_rtt_handshake, true);
+		assert!(!result.udp_relay_ipv6);
+		assert!(result.zero_rtt_handshake);
 
 		assert_eq!(result.users.len(), 2);
 
-		assert_eq!(result.tls.self_sign, true);
-		assert_eq!(result.tls.auto_ssl, true);
+		assert!(result.tls.self_sign);
+		assert!(result.tls.auto_ssl);
 		assert_eq!(result.tls.hostname, "json5.example.com");
-
 		assert_eq!(result.quic.initial_mtu, 1400);
 		assert_eq!(result.quic.min_mtu, 1300);
 		assert_eq!(result.quic.send_window, 8000000);
@@ -1239,9 +1231,8 @@ mod tests {
 		let result = test_parse_config(config, ".json5").await.unwrap();
 		assert_eq!(result.log_level, LogLevel::Error);
 		assert_eq!(result.server, "192.168.1.1:8443".parse().unwrap());
-		assert_eq!(result.tls.self_sign, false);
+		assert!(!result.tls.self_sign);
 	}
-
 	#[tokio::test]
 	async fn test_dir_parameter_finds_config() {
 		// Test that --dir finds the first config file in a directory
