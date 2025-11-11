@@ -52,6 +52,9 @@ pub enum AclAddress {
 	/// Special localhost identifier
 	#[display("localhost")]
 	Localhost,
+	/// Special private address identifier (LAN addresses)
+	#[display("private")]
+	Private,
 	/// Match any address (when address is omitted)
 	#[display("*")]
 	Any,
@@ -125,6 +128,7 @@ impl AclRule {
 			AclAddress::Domain(domain) => Self::match_domain(domain, ip),
 			AclAddress::WildcardDomain(pattern) => Self::match_wildcard_domain(pattern, ip),
 			AclAddress::Localhost => Self::is_loopback(ip),
+			AclAddress::Private => Self::is_private(ip),
 			AclAddress::Any => true,
 		}
 	}
@@ -172,6 +176,31 @@ impl AclRule {
 		match ip {
 			IpAddr::V4(v4) => v4.is_loopback(),
 			IpAddr::V6(v6) => v6.is_loopback(),
+		}
+	}
+
+	/// Check if an IP address is private (LAN address)
+	#[inline]
+	fn is_private(ip: IpAddr) -> bool {
+		match ip {
+			IpAddr::V4(ipv4) => {
+				let octets = ipv4.octets();
+				// 10.0.0.0/8
+				octets[0] == 10
+					// 172.16.0.0/12
+					|| (octets[0] == 172 && (octets[1] >= 16 && octets[1] <= 31))
+					// 192.168.0.0/16
+					|| (octets[0] == 192 && octets[1] == 168)
+					// 169.254.0.0/16 (Link-local)
+					|| (octets[0] == 169 && octets[1] == 254)
+			}
+			IpAddr::V6(ipv6) => {
+				let octets = ipv6.octets();
+				// fc00::/7 (Unique Local Address)
+				octets[0] & 0xfe == 0xfc
+					// fe80::/10 (Link-local)
+					|| (octets[0] == 0xfe && (octets[1] & 0xc0) == 0x80)
+			}
 		}
 	}
 }
@@ -251,6 +280,7 @@ fn parse_address_from_pair(pair: pest::iterators::Pair<Rule>) -> eyre::Result<Ac
 
 	Ok(match inner.as_rule() {
 		Rule::localhost_kw | Rule::suffix_localhost => AclAddress::Localhost,
+		Rule::private_kw => AclAddress::Private,
 		Rule::any_addr => AclAddress::Any,
 		Rule::wildcard_domain => AclAddress::WildcardDomain(inner.as_str().to_string()),
 		Rule::cidr => AclAddress::Cidr(inner.as_str().to_string()),
@@ -621,6 +651,84 @@ mod tests {
 		assert!(rule.matching(v4("127.0.0.1", 0), 0, true));
 		assert!(rule.matching(v6("::1", 0), 0, true));
 		assert!(!rule.matching(v4("192.0.2.1", 0), 0, true));
+	}
+
+	#[test]
+	fn private_match_ipv4() {
+		let rule = AclRule {
+			addr:     AclAddress::Private,
+			ports:    None,
+			outbound: "default".to_string(),
+			hijack:   None,
+		};
+
+		// Test 10.0.0.0/8 range
+		assert!(rule.matching(v4("10.0.0.0", 0), 0, true));
+		assert!(rule.matching(v4("10.0.0.1", 0), 0, true));
+		assert!(rule.matching(v4("10.255.255.255", 0), 0, true));
+
+		// Test 172.16.0.0/12 range
+		assert!(rule.matching(v4("172.16.0.0", 0), 0, true));
+		assert!(rule.matching(v4("172.16.0.1", 0), 0, true));
+		assert!(rule.matching(v4("172.31.255.255", 0), 0, true));
+		assert!(!rule.matching(v4("172.15.255.255", 0), 0, true));
+		assert!(!rule.matching(v4("172.32.0.0", 0), 0, true));
+
+		// Test 192.168.0.0/16 range
+		assert!(rule.matching(v4("192.168.0.0", 0), 0, true));
+		assert!(rule.matching(v4("192.168.1.1", 0), 0, true));
+		assert!(rule.matching(v4("192.168.255.255", 0), 0, true));
+
+		// Test 169.254.0.0/16 range (Link-local)
+		assert!(rule.matching(v4("169.254.0.0", 0), 0, true));
+		assert!(rule.matching(v4("169.254.1.1", 0), 0, true));
+		assert!(rule.matching(v4("169.254.255.255", 0), 0, true));
+
+		// Test public addresses (should not match)
+		assert!(!rule.matching(v4("8.8.8.8", 0), 0, true));
+		assert!(!rule.matching(v4("1.1.1.1", 0), 0, true));
+		assert!(!rule.matching(v4("203.0.113.1", 0), 0, true));
+	}
+
+	#[test]
+	fn private_match_ipv6() {
+		let rule = AclRule {
+			addr:     AclAddress::Private,
+			ports:    None,
+			outbound: "default".to_string(),
+			hijack:   None,
+		};
+
+		// Test fc00::/7 (Unique Local Address)
+		assert!(rule.matching(v6("fc00::1", 0), 0, true));
+		assert!(rule.matching(v6("fd00::1", 0), 0, true));
+		assert!(rule.matching(v6("fdff:ffff:ffff:ffff:ffff:ffff:ffff:ffff", 0), 0, true));
+
+		// Test fe80::/10 (Link-local)
+		assert!(rule.matching(v6("fe80::1", 0), 0, true));
+		assert!(rule.matching(v6("fe80::dead:beef", 0), 0, true));
+		assert!(rule.matching(v6("febf:ffff:ffff:ffff:ffff:ffff:ffff:ffff", 0), 0, true));
+
+		// Test public addresses (should not match)
+		assert!(!rule.matching(v6("2001:db8::1", 0), 0, true));
+		assert!(!rule.matching(v6("2606:4700:4700::1111", 0), 0, true));
+	}
+
+	#[test]
+	fn parse_private_keyword() {
+		let result = parse_acl_rule("allow private").unwrap();
+		assert_eq!(result.outbound, "allow");
+		assert_eq!(result.addr, AclAddress::Private);
+		assert_eq!(result.ports, None);
+		assert_eq!(result.hijack, None);
+	}
+
+	#[test]
+	fn parse_private_with_ports() {
+		let result = parse_acl_rule("block private tcp/80,udp/53").unwrap();
+		assert_eq!(result.outbound, "block");
+		assert_eq!(result.addr, AclAddress::Private);
+		assert!(result.ports.is_some());
 	}
 
 	#[test]
@@ -1348,6 +1456,7 @@ acl = """
 allow 192.168.1.0/24 tcp/443
 deny *.ads.com
 allow localhost
+allow private
 """
 "#;
 		#[derive(Deserialize)]
@@ -1357,10 +1466,11 @@ allow localhost
 		}
 
 		let config: Config = toml::from_str(toml)?;
-		assert_eq!(config.acl.len(), 3);
+		assert_eq!(config.acl.len(), 4);
 		assert_eq!(config.acl[0].outbound, "allow");
 		assert_eq!(config.acl[1].outbound, "deny");
 		assert_eq!(config.acl[2].outbound, "allow");
+		assert_eq!(config.acl[3].addr, AclAddress::Private);
 		Ok(())
 	}
 
@@ -1375,6 +1485,10 @@ ports = "tcp/443"
 [[acl]]
 outbound = "deny"
 addr = "*.ads.com"
+
+[[acl]]
+outbound = "deny"
+addr = "private"
 "#;
 		#[derive(Deserialize)]
 		struct Config {
@@ -1383,9 +1497,10 @@ addr = "*.ads.com"
 		}
 
 		let config: Config = toml::from_str(toml)?;
-		assert_eq!(config.acl.len(), 2);
+		assert_eq!(config.acl.len(), 3);
 		assert_eq!(config.acl[0].outbound, "allow");
 		assert_eq!(config.acl[1].outbound, "deny");
+		assert_eq!(config.acl[2].addr, AclAddress::Private);
 		Ok(())
 	}
 }

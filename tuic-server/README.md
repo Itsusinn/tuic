@@ -146,7 +146,7 @@ stream_timeout = "60s"
 
 # Format 1: Array of tables format
 [[acl]]
-# Address: IPv4/IPv6, CIDR, domain, wildcard, or localhost
+# Address: IPv4/IPv6, CIDR, domain, wildcard, localhost, or private
 addr = "127.0.0.1"
 
 # Ports: comma-separated list, can specify protocol (e.g. "udp/53,tcp/80,udp/10000-20000,443")
@@ -160,11 +160,19 @@ hijack = "1.1.1.1"
 addr = "localhost"
 outbound = "drop"
 
+# You can also use 'private' to match all LAN/private IP addresses
+# This includes: 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 169.254.0.0/16 (IPv4)
+# and fc00::/7, fe80::/10 (IPv6)
+[[acl]]
+addr = "private"
+outbound = "drop"
+
 # Format 2: Multi-line string format (more concise)
 acl = '''
 # Format: <outbound_name> <address> [<ports>] [<hijack_address>]
 direct localhost tcp/80,tcp/443,udp/443
 drop localhost
+drop private
 default 8.8.4.4 udp/53 1.1.1.1
 '''
 
