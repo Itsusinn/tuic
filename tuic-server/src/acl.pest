@@ -1,0 +1,94 @@
+// ACL Rule Grammar
+// Format: <outbound> [address] [ports] [hijack]
+// Example: allow 192.168.1.0/24 tcp/443,udp/53 10.0.0.1
+
+WHITESPACE = _{ " " | "\t" }
+COMMENT = _{ "#" ~ (!NEWLINE ~ ANY)* }
+
+// Main rule structure
+acl_rule = { SOI ~ outbound ~ address? ~ ports? ~ hijack? ~ EOI }
+
+// Outbound identifier (first part)
+outbound = @{ (ASCII_ALPHANUMERIC | "_" | "-")+ }
+
+// Address patterns
+address = { 
+    localhost_kw 
+    | suffix_localhost
+    | wildcard_domain 
+    | cidr 
+    | ipv6 
+    | ipv4 
+    | domain 
+    | any_addr 
+}
+
+// Special keywords
+localhost_kw = { "localhost" }
+suffix_localhost = { "suffix:localhost" }
+any_addr = { "*" }
+
+// IP addresses
+ipv4 = @{ 
+    ASCII_DIGIT{1,3} ~ "." ~ 
+    ASCII_DIGIT{1,3} ~ "." ~ 
+    ASCII_DIGIT{1,3} ~ "." ~ 
+    ASCII_DIGIT{1,3} 
+}
+
+ipv6 = @{
+    (ASCII_HEX_DIGIT | ":")+ ~ 
+    &(WHITESPACE | EOI)
+}
+
+// CIDR notation
+cidr = @{ 
+    (ipv4_cidr | ipv6_cidr)
+}
+
+ipv4_cidr = @{
+    ASCII_DIGIT{1,3} ~ "." ~ 
+    ASCII_DIGIT{1,3} ~ "." ~ 
+    ASCII_DIGIT{1,3} ~ "." ~ 
+    ASCII_DIGIT{1,3} ~ "/" ~ ASCII_DIGIT{1,3}
+}
+
+ipv6_cidr = @{
+    (ASCII_HEX_DIGIT | ":")+ ~ "/" ~ ASCII_DIGIT{1,3}
+}
+
+// Domain patterns
+wildcard_domain = @{ 
+    ("*." | "suffix:") ~ domain_chars
+}
+
+domain = @{ 
+    domain_chars
+}
+
+domain_chars = @{
+    (ASCII_ALPHANUMERIC | "-" | ".")+ 
+}
+
+// Port specifications
+ports = { port_list | any_port }
+any_port = { "*" }
+port_list = { port_entry ~ ("," ~ port_entry)* }
+
+port_entry = { protocol_port | port_spec }
+
+protocol_port = { protocol ~ "/" ~ port_spec }
+
+protocol = { tcp | udp }
+tcp = { "tcp" | "TCP" }
+udp = { "udp" | "UDP" }
+
+port_spec = { port_range | single_port }
+
+port_range = @{ ASCII_DIGIT{1,5} ~ "-" ~ ASCII_DIGIT{1,5} }
+single_port = @{ ASCII_DIGIT{1,5} }
+
+// Hijack address (optional fourth part)
+hijack = @{ 
+    (ASCII_ALPHANUMERIC | "." | ":" | "-")+ 
+}

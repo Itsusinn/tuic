@@ -1,6 +1,5 @@
 use std::{
 	collections::HashMap,
-	fmt,
 	net::{Ipv4Addr, Ipv6Addr, SocketAddr},
 	path::PathBuf,
 	time::Duration,
@@ -13,15 +12,14 @@ use figment::{
 	providers::{Format, Serialized, Toml, Yaml},
 };
 use figment_json5::Json5;
-use serde::{
-	Deserialize, Deserializer, Serialize,
-	de::{self, Unexpected, Visitor},
-};
+use serde::{Deserialize, Serialize};
 use tracing::{level_filters::LevelFilter, warn};
 use uuid::Uuid;
 
+#[cfg(test)]
+use crate::acl::{AclAddress, AclPorts};
 use crate::{
-	acl::{AclAddress, AclPorts, AclRule},
+	acl::AclRule,
 	utils::{CongestionController, StackPrefer},
 };
 
@@ -129,7 +127,7 @@ pub struct Config {
 	pub outbound: OutboundConfig,
 
 	/// Access Control List rules
-	#[serde(default, deserialize_with = "deserialize_acl")]
+	#[serde(default, deserialize_with = "crate::acl::deserialize_acl")]
 	#[educe(Default(expression = Vec::new()))]
 	pub acl: Vec<AclRule>,
 
@@ -685,160 +683,6 @@ pub async fn parse_config(cli: Cli, env_state: EnvState) -> eyre::Result<Config>
 	Ok(config)
 }
 
-/// Deserialize the `acl` field which may be either:
-///   * an array of TOML tables (array-of-tables format)
-///   * a single multiline string with space-separated rules
-fn deserialize_acl<'de, D>(deserializer: D) -> Result<Vec<AclRule>, D::Error>
-where
-	D: Deserializer<'de>,
-{
-	struct AclVisitor;
-
-	impl<'de> Visitor<'de> for AclVisitor {
-		type Value = Vec<AclRule>;
-
-		fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
-			formatter.write_str("a sequence of ACL rule tables or a multiline string")
-		}
-
-		// Handle array-of-tables format: [[acl]] entries
-		fn visit_seq<A>(self, mut seq: A) -> Result<Self::Value, A::Error>
-		where
-			A: de::SeqAccess<'de>,
-		{
-			let mut vec = Vec::new();
-			while let Some(rule) = seq.next_element::<AclRule>()? {
-				vec.push(rule);
-			}
-			Ok(vec)
-		}
-
-		// Handle multiline string format
-		fn visit_str<E>(self, v: &str) -> Result<Self::Value, E>
-		where
-			E: de::Error,
-		{
-			parse_multiline_acl_string(v).map_err(|e| de::Error::invalid_value(Unexpected::Str(v), &e.as_str()))
-		}
-
-		fn visit_string<E>(self, v: String) -> Result<Self::Value, E>
-		where
-			E: de::Error,
-		{
-			self.visit_str(&v)
-		}
-	}
-
-	deserializer.deserialize_any(AclVisitor)
-}
-
-/// Parse a multiline string into ACL rules
-/// Format: <outbound_name> <address> <optional:port(s)>
-/// <optional:hijack_ip_address>
-fn parse_multiline_acl_string(input: &str) -> Result<Vec<AclRule>, String> {
-	let mut rules = Vec::new();
-
-	for (line_num, line) in input.lines().enumerate() {
-		let line = line.trim();
-
-		// Skip empty lines and comments
-		if line.is_empty() || line.starts_with('#') {
-			continue;
-		}
-
-		// Split by whitespace
-		let parts: Vec<&str> = line.split_whitespace().collect();
-
-		if parts.len() < 2 {
-			return Err(format!(
-				"Line {}: Invalid ACL rule format. Expected: <outbound> <address> [ports] [hijack]",
-				line_num + 1
-			));
-		}
-
-		let outbound = parts[0].to_string();
-		let addr_str = parts[1];
-
-		// Parse address
-		let addr = addr_str
-			.parse::<AclAddress>()
-			.map_err(|e| format!("Line {}: Invalid address '{}': {}", line_num + 1, addr_str, e))?;
-
-		// Parse optional ports (3rd parameter)
-		let ports = if parts.len() > 2 && parts[2].parse::<std::net::IpAddr>().is_err() {
-			// If the 3rd part is not an IP address, treat it as ports
-			Some(
-				parts[2]
-					.parse::<AclPorts>()
-					.map_err(|e| format!("Line {}: Invalid ports '{}': {}", line_num + 1, parts[2], e))?,
-			)
-		} else {
-			None
-		};
-
-		// Parse optional hijack IP (last parameter if it's an IP)
-		let hijack = if parts.len() > 2 {
-			let last_part = parts[parts.len() - 1];
-			if last_part.parse::<std::net::IpAddr>().is_ok() {
-				Some(last_part.to_string())
-			} else {
-				None
-			}
-		} else {
-			None
-		};
-
-		rules.push(AclRule {
-			outbound,
-			addr,
-			ports,
-			hijack,
-		});
-	}
-
-	Ok(rules)
-}
-
-// You'll also need to implement Deserialize for AclRule to handle TOML table
-// format
-impl<'de> Deserialize<'de> for AclRule {
-	fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-	where
-		D: Deserializer<'de>,
-	{
-		#[derive(Deserialize)]
-		struct AclRuleHelper {
-			outbound: String,
-			addr:     String,
-			ports:    Option<String>,
-			hijack:   Option<String>,
-		}
-
-		let helper = AclRuleHelper::deserialize(deserializer)?;
-
-		let addr = helper
-			.addr
-			.parse::<AclAddress>()
-			.map_err(|e| de::Error::invalid_value(Unexpected::Str(&helper.addr), &format!("valid address: {e}").as_str()))?;
-
-		let ports =
-			if let Some(ports_str) = helper.ports {
-				Some(ports_str.parse::<AclPorts>().map_err(|e| {
-					de::Error::invalid_value(Unexpected::Str(&ports_str), &format!("valid ports: {e}").as_str())
-				})?)
-			} else {
-				None
-			};
-
-		Ok(AclRule {
-			outbound: helper.outbound,
-			addr,
-			ports,
-			hijack: helper.hijack,
-		})
-	}
-}
-
 #[cfg(test)]
 mod tests {
 	use std::{
@@ -1115,27 +959,33 @@ mod tests {
 
 	#[tokio::test]
 	async fn test_acl_parsing_edge_cases() {
-		// Test individual parsing functions
-		assert_eq!(crate::acl::parse_acl_address("localhost").unwrap(), AclAddress::Localhost);
-		assert_eq!(
-			crate::acl::parse_acl_address("*.example.com").unwrap(),
-			AclAddress::WildcardDomain("*.example.com".to_string())
-		);
-		assert_eq!(
-			crate::acl::parse_acl_address("192.168.1.0/24").unwrap(),
-			AclAddress::Cidr("192.168.1.0/24".to_string())
-		);
-		assert_eq!(
-			crate::acl::parse_acl_address("127.0.0.1").unwrap(),
-			AclAddress::Ip("127.0.0.1".to_string())
-		);
-		assert_eq!(
-			crate::acl::parse_acl_address("example.com").unwrap(),
-			AclAddress::Domain("example.com".to_string())
-		);
+		use serde::de::value::StrDeserializer;
+
+		// Test individual parsing functions using serde Deserialize
+		let addr: AclAddress =
+			serde::Deserialize::deserialize(StrDeserializer::<serde::de::value::Error>::new("localhost")).unwrap();
+		assert_eq!(addr, AclAddress::Localhost);
+
+		let addr: AclAddress =
+			serde::Deserialize::deserialize(StrDeserializer::<serde::de::value::Error>::new("*.example.com")).unwrap();
+		assert_eq!(addr, AclAddress::WildcardDomain("*.example.com".to_string()));
+
+		let addr: AclAddress =
+			serde::Deserialize::deserialize(StrDeserializer::<serde::de::value::Error>::new("192.168.1.0/24")).unwrap();
+		assert_eq!(addr, AclAddress::Cidr("192.168.1.0/24".to_string()));
+
+		let addr: AclAddress =
+			serde::Deserialize::deserialize(StrDeserializer::<serde::de::value::Error>::new("127.0.0.1")).unwrap();
+		assert_eq!(addr, AclAddress::Ip("127.0.0.1".to_string()));
+
+		let addr: AclAddress =
+			serde::Deserialize::deserialize(StrDeserializer::<serde::de::value::Error>::new("example.com")).unwrap();
+		assert_eq!(addr, AclAddress::Domain("example.com".to_string()));
 
 		// Test port parsing
-		let ports = crate::acl::parse_acl_ports("80,443,1000-2000,udp/53").unwrap();
+		let ports: AclPorts =
+			serde::Deserialize::deserialize(StrDeserializer::<serde::de::value::Error>::new("80,443,1000-2000,udp/53"))
+				.unwrap();
 		assert_eq!(ports.entries.len(), 4);
 		assert_eq!(ports.entries[0].port_spec, AclPortSpec::Single(80));
 		assert_eq!(ports.entries[2].port_spec, AclPortSpec::Range(1000, 2000));
