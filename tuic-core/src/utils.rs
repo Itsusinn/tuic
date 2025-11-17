@@ -162,23 +162,6 @@ pub fn is_private_ip(ip: &IpAddr) -> bool {
 /// * `Ok(Some(String))` - Successfully extracted SNI hostname
 /// * `Ok(None)` - Stream is not TLS or SNI extension not present
 /// * `Err(_)` - IO error or parsing error
-///
-/// # Examples
-///
-/// ```no_run
-/// use tokio::net::TcpStream;
-/// use tuic_core::sniff_from_stream;
-///
-/// # async fn example() -> std::io::Result<()> {
-/// let stream = TcpStream::connect("example.com:443").await?;
-/// match sniff_from_stream(stream).await {
-///     Ok(Some(sni)) => println!("SNI: {}", sni),
-///     Ok(None) => println!("No SNI found"),
-///     Err(e) => println!("Error: {}", e),
-/// }
-/// # Ok(())
-/// # }
-/// ```
 pub async fn sniff_from_stream<R>(mut stream: R) -> std::io::Result<Option<String>>
 where
 	R: AsyncRead + Unpin,
@@ -187,15 +170,15 @@ where
 	// Typical ClientHello is 200-400 bytes, but can be larger with many extensions
 	const MAX_HEADER_SIZE: usize = 8192;
 	let mut buffer = vec![0u8; MAX_HEADER_SIZE];
-	
+
 	// Read available data from stream
 	let n = stream.read(&mut buffer).await?;
 	if n == 0 {
 		return Ok(None);
 	}
-	
+
 	buffer.truncate(n);
-	
+
 	// Try to parse TLS handshake
 	extract_sni_from_bytes(&buffer)
 }
@@ -207,100 +190,100 @@ fn extract_sni_from_bytes(data: &[u8]) -> std::io::Result<Option<String>> {
 	if data.len() < 5 {
 		return Ok(None);
 	}
-	
+
 	// Check if this is a TLS Handshake record (0x16)
 	if data[0] != 0x16 {
 		return Ok(None);
 	}
-	
+
 	// Check TLS version (we support TLS 1.0-1.3)
 	// TLS 1.0: 0x0301, TLS 1.1: 0x0302, TLS 1.2: 0x0303, TLS 1.3: 0x0303
 	if data[1] != 0x03 || data[2] > 0x03 {
 		return Ok(None);
 	}
-	
+
 	let mut pos = 5; // Skip TLS record header
-	
+
 	// Handshake header: 4 bytes
 	// Type (1) | Length (3)
 	if data.len() < pos + 4 {
 		return Ok(None);
 	}
-	
+
 	// Check if this is ClientHello (0x01)
 	if data[pos] != 0x01 {
 		return Ok(None);
 	}
-	
+
 	pos += 1; // Skip handshake type
-	
+
 	// Get handshake length
 	let handshake_len = u32::from_be_bytes([0, data[pos], data[pos + 1], data[pos + 2]]) as usize;
 	pos += 3;
-	
+
 	if data.len() < pos + handshake_len {
 		return Ok(None);
 	}
-	
+
 	// Skip client version (2 bytes) and random (32 bytes)
 	pos += 34;
-	
+
 	if data.len() < pos + 1 {
 		return Ok(None);
 	}
-	
+
 	// Skip session ID
 	let session_id_len = data[pos] as usize;
 	pos += 1 + session_id_len;
-	
+
 	if data.len() < pos + 2 {
 		return Ok(None);
 	}
-	
+
 	// Skip cipher suites
 	let cipher_suites_len = u16::from_be_bytes([data[pos], data[pos + 1]]) as usize;
 	pos += 2 + cipher_suites_len;
-	
+
 	if data.len() < pos + 1 {
 		return Ok(None);
 	}
-	
+
 	// Skip compression methods
 	let compression_methods_len = data[pos] as usize;
 	pos += 1 + compression_methods_len;
-	
+
 	if data.len() < pos + 2 {
 		return Ok(None);
 	}
-	
+
 	// Extensions length
 	let extensions_len = u16::from_be_bytes([data[pos], data[pos + 1]]) as usize;
 	pos += 2;
-	
+
 	if data.len() < pos + extensions_len {
 		return Ok(None);
 	}
-	
+
 	let extensions_end = pos + extensions_len;
-	
+
 	// Parse extensions
 	while pos + 4 <= extensions_end {
 		let ext_type = u16::from_be_bytes([data[pos], data[pos + 1]]);
 		let ext_len = u16::from_be_bytes([data[pos + 2], data[pos + 3]]) as usize;
 		pos += 4;
-		
+
 		if pos + ext_len > extensions_end {
 			break;
 		}
-		
+
 		// SNI extension type is 0x0000
 		if ext_type == 0x0000 {
 			return parse_sni_extension(&data[pos..pos + ext_len]);
 		}
-		
+
 		pos += ext_len;
 	}
-	
+
 	Ok(None)
 }
 
@@ -309,34 +292,34 @@ fn parse_sni_extension(data: &[u8]) -> std::io::Result<Option<String>> {
 	if data.len() < 2 {
 		return Ok(None);
 	}
-	
+
 	// SNI list length
 	let list_len = u16::from_be_bytes([data[0], data[1]]) as usize;
 	let mut pos = 2;
-	
+
 	if data.len() < pos + list_len {
 		return Ok(None);
 	}
-	
+
 	while pos + 3 <= data.len() {
 		let name_type = data[pos];
 		let name_len = u16::from_be_bytes([data[pos + 1], data[pos + 2]]) as usize;
 		pos += 3;
-		
+
 		if pos + name_len > data.len() {
 			break;
 		}
-		
+
 		// HostName type is 0x00
 		if name_type == 0x00 {
 			if let Ok(hostname) = std::str::from_utf8(&data[pos..pos + name_len]) {
 				return Ok(Some(hostname.to_string()));
 			}
 		}
-		
+
 		pos += name_len;
 	}
-	
+
 	Ok(None)
 }
 
@@ -502,21 +485,13 @@ mod tests {
 			// ClientHello
 			0x03, 0x03, // Version: TLS 1.2
 			// Random (32 bytes)
-			0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07,
-			0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f,
-			0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17,
-			0x18, 0x19, 0x1a, 0x1b, 0x1c, 0x1d, 0x1e, 0x1f,
-			// Session ID Length
-			0x00,
-			// Cipher Suites Length
-			0x00, 0x02,
-			// Cipher Suites
-			0x00, 0x2f,
-			// Compression Methods Length
-			0x01,
-			// Compression Methods
-			0x00,
-			// Extensions Length
+			0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f, 0x10, 0x11, 0x12,
+			0x13, 0x14, 0x15, 0x16, 0x17, 0x18, 0x19, 0x1a, 0x1b, 0x1c, 0x1d, 0x1e, 0x1f, // Session ID Length
+			0x00, // Cipher Suites Length
+			0x00, 0x02, // Cipher Suites
+			0x00, 0x2f, // Compression Methods Length
+			0x01, // Compression Methods
+			0x00, // Extensions Length
 			0x00, 0x17, // 23 bytes
 			// Extension: SNI
 			0x00, 0x00, // Extension Type: server_name
@@ -525,8 +500,7 @@ mod tests {
 			0x00, // Server Name Type: host_name
 			0x00, 0x0e, // Server Name Length: 14 bytes
 			// "www.google.com"
-			0x77, 0x77, 0x77, 0x2e, 0x67, 0x6f, 0x6f, 0x67,
-			0x6c, 0x65, 0x2e, 0x63, 0x6f, 0x6d,
+			0x77, 0x77, 0x77, 0x2e, 0x67, 0x6f, 0x6f, 0x67, 0x6c, 0x65, 0x2e, 0x63, 0x6f, 0x6d,
 		];
 
 		let result = extract_sni_from_bytes(&client_hello_with_sni);
@@ -539,7 +513,7 @@ mod tests {
 	fn test_extract_sni_no_tls() {
 		// Non-TLS data
 		let non_tls = vec![0x48, 0x54, 0x54, 0x50]; // "HTTP"
-		
+
 		let result = extract_sni_from_bytes(&non_tls);
 		assert!(result.is_ok());
 		assert_eq!(result.unwrap(), None);
@@ -550,30 +524,19 @@ mod tests {
 		// TLS ClientHello without SNI extension
 		let client_hello_no_sni = vec![
 			// TLS Record Header
-			0x16, 0x03, 0x01, 0x00, 0x31,
-			// Handshake Header
-			0x01, 0x00, 0x00, 0x2d,
-			// ClientHello
-			0x03, 0x03,
-			// Random (32 bytes)
-			0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07,
-			0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f,
-			0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17,
-			0x18, 0x19, 0x1a, 0x1b, 0x1c, 0x1d, 0x1e, 0x1f,
-			// Session ID Length
-			0x00,
-			// Cipher Suites Length
-			0x00, 0x02,
-			// Cipher Suites
-			0x00, 0x2f,
-			// Compression Methods Length
-			0x01,
-			// Compression Methods
-			0x00,
-			// Extensions Length (0 - no extensions)
+			0x16, 0x03, 0x01, 0x00, 0x31, // Handshake Header
+			0x01, 0x00, 0x00, 0x2d, // ClientHello
+			0x03, 0x03, // Random (32 bytes)
+			0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f, 0x10, 0x11, 0x12,
+			0x13, 0x14, 0x15, 0x16, 0x17, 0x18, 0x19, 0x1a, 0x1b, 0x1c, 0x1d, 0x1e, 0x1f, // Session ID Length
+			0x00, // Cipher Suites Length
+			0x00, 0x02, // Cipher Suites
+			0x00, 0x2f, // Compression Methods Length
+			0x01, // Compression Methods
+			0x00, // Extensions Length (0 - no extensions)
 			0x00, 0x00,
 		];
-		
+
 		let result = extract_sni_from_bytes(&client_hello_no_sni);
 		assert!(result.is_ok());
 		assert_eq!(result.unwrap(), None);
@@ -582,30 +545,18 @@ mod tests {
 	#[tokio::test]
 	async fn test_sniff_from_stream() {
 		use std::io::Cursor;
-		
+
 		// Test data with SNI
 		let client_hello_with_sni = vec![
-			0x16, 0x03, 0x01, 0x00, 0x70,
-			0x01, 0x00, 0x00, 0x6c,
-			0x03, 0x03,
-			0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07,
-			0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f,
-			0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17,
-			0x18, 0x19, 0x1a, 0x1b, 0x1c, 0x1d, 0x1e, 0x1f,
-			0x00,
-			0x00, 0x02, 0x00, 0x2f,
-			0x01, 0x00,
-			0x00, 0x17,
-			0x00, 0x00, 0x00, 0x13,
-			0x00, 0x11,
-			0x00, 0x00, 0x0e,
-			0x77, 0x77, 0x77, 0x2e, 0x67, 0x6f, 0x6f, 0x67,
-			0x6c, 0x65, 0x2e, 0x63, 0x6f, 0x6d,
+			0x16, 0x03, 0x01, 0x00, 0x70, 0x01, 0x00, 0x00, 0x6c, 0x03, 0x03, 0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07,
+			0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f, 0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18, 0x19, 0x1a,
+			0x1b, 0x1c, 0x1d, 0x1e, 0x1f, 0x00, 0x00, 0x02, 0x00, 0x2f, 0x01, 0x00, 0x00, 0x17, 0x00, 0x00, 0x00, 0x13, 0x00,
+			0x11, 0x00, 0x00, 0x0e, 0x77, 0x77, 0x77, 0x2e, 0x67, 0x6f, 0x6f, 0x67, 0x6c, 0x65, 0x2e, 0x63, 0x6f, 0x6d,
 		];
-		
+
 		let cursor = Cursor::new(client_hello_with_sni);
 		let result = sniff_from_stream(cursor).await;
-		
+
 		assert!(result.is_ok());
 		// Handcrafted packet, just ensure no crash
 		let _sni = result.unwrap();
@@ -616,7 +567,7 @@ mod tests {
 		// Helper to create a valid ClientHello with SNI
 		fn create_client_hello(record_version: (u8, u8), handshake_version: (u8, u8), sni: &str) -> Vec<u8> {
 			let mut packet = Vec::new();
-			
+
 			// Calculate lengths
 			let sni_bytes = sni.as_bytes();
 			let sni_list_len = 3 + sni_bytes.len(); // type(1) + length(2) + name
@@ -625,97 +576,113 @@ mod tests {
 			let handshake_body = 2 + 32 + 1 + 2 + 2 + 1 + 1 + 2 + extensions_len;
 			let handshake_len = handshake_body;
 			let record_len = 4 + handshake_len; // handshake header(4) + body
-			
+
 			// TLS Record Header
 			packet.push(0x16); // Content Type: Handshake
 			packet.push(record_version.0);
 			packet.push(record_version.1);
 			packet.push((record_len >> 8) as u8);
 			packet.push((record_len & 0xff) as u8);
-			
+
 			// Handshake Header
 			packet.push(0x01); // Handshake Type: ClientHello
 			packet.push(0x00);
 			packet.push((handshake_len >> 8) as u8);
 			packet.push((handshake_len & 0xff) as u8);
-			
+
 			// ClientHello body
 			packet.push(handshake_version.0); // Version
 			packet.push(handshake_version.1);
-			
+
 			// Random (32 bytes)
 			for i in 0..32 {
 				packet.push(i);
 			}
-			
+
 			// Session ID Length
 			packet.push(0x00);
-			
+
 			// Cipher Suites Length + Cipher Suites
 			packet.push(0x00);
 			packet.push(0x02);
 			packet.push(0x00);
 			packet.push(0x2f);
-			
+
 			// Compression Methods Length + Methods
 			packet.push(0x01);
 			packet.push(0x00);
-			
+
 			// Extensions Length
 			packet.push((extensions_len >> 8) as u8);
 			packet.push((extensions_len & 0xff) as u8);
-			
+
 			// SNI Extension
 			packet.push(0x00); // Extension Type: server_name
 			packet.push(0x00);
 			packet.push((sni_ext_len >> 8) as u8);
 			packet.push((sni_ext_len & 0xff) as u8);
-			
+
 			// SNI List Length
 			packet.push((sni_list_len >> 8) as u8);
 			packet.push((sni_list_len & 0xff) as u8);
-			
+
 			// SNI Entry
 			packet.push(0x00); // Name Type: host_name
 			packet.push((sni_bytes.len() >> 8) as u8);
 			packet.push((sni_bytes.len() & 0xff) as u8);
 			packet.extend_from_slice(sni_bytes);
-			
+
 			packet
 		}
-		
+
 		// Test TLS 1.0
 		let tls_10 = create_client_hello((0x03, 0x01), (0x03, 0x01), "tls10.example.com");
 		let result = extract_sni_from_bytes(&tls_10);
 		assert!(result.is_ok());
-		assert_eq!(result.unwrap(), Some("tls10.example.com".to_string()), "TLS 1.0 SNI extraction failed");
+		assert_eq!(
+			result.unwrap(),
+			Some("tls10.example.com".to_string()),
+			"TLS 1.0 SNI extraction failed"
+		);
 
 		// Test TLS 1.1
 		let tls_11 = create_client_hello((0x03, 0x02), (0x03, 0x02), "tls11.example.com");
 		let result = extract_sni_from_bytes(&tls_11);
 		assert!(result.is_ok());
-		assert_eq!(result.unwrap(), Some("tls11.example.com".to_string()), "TLS 1.1 SNI extraction failed");
+		assert_eq!(
+			result.unwrap(),
+			Some("tls11.example.com".to_string()),
+			"TLS 1.1 SNI extraction failed"
+		);
 
 		// Test TLS 1.2
 		let tls_12 = create_client_hello((0x03, 0x03), (0x03, 0x03), "tls12.example.com");
 		let result = extract_sni_from_bytes(&tls_12);
 		assert!(result.is_ok());
-		assert_eq!(result.unwrap(), Some("tls12.example.com".to_string()), "TLS 1.2 SNI extraction failed");
+		assert_eq!(
+			result.unwrap(),
+			Some("tls12.example.com".to_string()),
+			"TLS 1.2 SNI extraction failed"
+		);
 
 		// Test TLS 1.3 (uses TLS 1.2 version for compatibility)
 		let tls_13 = create_client_hello((0x03, 0x03), (0x03, 0x03), "tls13.example.com");
 		let result = extract_sni_from_bytes(&tls_13);
 		assert!(result.is_ok());
-		assert_eq!(result.unwrap(), Some("tls13.example.com".to_string()), "TLS 1.3 SNI extraction failed");
+		assert_eq!(
+			result.unwrap(),
+			Some("tls13.example.com".to_string()),
+			"TLS 1.3 SNI extraction failed"
+		);
 	}
 
 	#[tokio::test]
 	async fn test_sniff_from_real_tls_stream() {
+		use std::sync::Arc;
+
 		use rcgen::CertificateParams;
 		use rustls::pki_types::{CertificateDer, PrivateKeyDer, ServerName};
-		use std::sync::Arc;
-		use tokio::io::copy;
-		use tokio::net::TcpListener;
+		use tokio::{io::copy, net::TcpListener};
 		use tokio_rustls::{TlsAcceptor, TlsConnector};
 
 		// Install default crypto provider
@@ -738,7 +705,7 @@ mod tests {
 		// Setup client TLS config (accept our self-signed cert)
 		let mut root_store = rustls::RootCertStore::empty();
 		root_store.add(cert_der).unwrap();
-		
+
 		let client_config = rustls::ClientConfig::builder()
 			.with_root_certificates(root_store)
 			.with_no_client_auth();
@@ -763,12 +730,15 @@ mod tests {
 		tokio::time::sleep(std::time::Duration::from_millis(100)).await;
 
 		// Create a custom stream that captures written data
-		use std::pin::Pin;
-		use std::task::{Context, Poll};
+		use std::{
+			pin::Pin,
+			task::{Context, Poll},
+		};
+
 		use tokio::io::AsyncWrite;
-		
+
 		struct CapturingStream {
-			inner: tokio::net::TcpStream,
+			inner:    tokio::net::TcpStream,
 			captured: Arc<tokio::sync::Mutex<Vec<u8>>>,
 		}
 
@@ -783,11 +753,7 @@ mod tests {
 		}
 
 		impl AsyncWrite for CapturingStream {
-			fn poll_write(
-				mut self: Pin<&mut Self>,
-				cx: &mut Context<'_>,
-				buf: &[u8],
-			) -> Poll<Result<usize, std::io::Error>> {
+			fn poll_write(mut self: Pin<&mut Self>, cx: &mut Context<'_>, buf: &[u8]) -> Poll<Result<usize, std::io::Error>> {
 				// Capture data being written
 				if let Ok(mut captured) = self.captured.try_lock() {
 					captured.extend_from_slice(buf);
@@ -795,17 +761,11 @@ mod tests {
 				Pin::new(&mut self.inner).poll_write(cx, buf)
 			}
 
-			fn poll_flush(
-				mut self: Pin<&mut Self>,
-				cx: &mut Context<'_>,
-			) -> Poll<Result<(), std::io::Error>> {
+			fn poll_flush(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), std::io::Error>> {
 				Pin::new(&mut self.inner).poll_flush(cx)
 			}
 
-			fn poll_shutdown(
-				mut self: Pin<&mut Self>,
-				cx: &mut Context<'_>,
-			) -> Poll<Result<(), std::io::Error>> {
+			fn poll_shutdown(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), std::io::Error>> {
 				Pin::new(&mut self.inner).poll_shutdown(cx)
 			}
 		}
@@ -813,9 +773,9 @@ mod tests {
 		// Connect and capture ClientHello
 		let tcp_stream = tokio::net::TcpStream::connect(server_addr).await.unwrap();
 		let captured_data = Arc::new(tokio::sync::Mutex::new(Vec::new()));
-		
+
 		let capturing_stream = CapturingStream {
-			inner: tcp_stream,
+			inner:    tcp_stream,
 			captured: captured_data.clone(),
 		};
 
@@ -830,35 +790,31 @@ mod tests {
 
 		// Extract captured data
 		let captured = captured_data.lock().await.clone();
-		
+
 		assert!(!captured.is_empty(), "Should have captured ClientHello data");
 
 		// Test SNI extraction
 		let result = extract_sni_from_bytes(&captured);
 		assert!(result.is_ok(), "SNI extraction should succeed");
-		
+
 		let sni = result.unwrap();
 		assert_eq!(sni, Some("example.com".to_string()), "SNI should be example.com");
 	}
 
 	#[tokio::test]
 	async fn test_sniff_multiple_tls_versions() {
+		use std::sync::Arc;
+
 		use rcgen::CertificateParams;
 		use rustls::pki_types::{CertificateDer, PrivateKeyDer, ServerName};
-		use std::sync::Arc;
-		use tokio::io::copy;
-		use tokio::net::TcpListener;
+		use tokio::{io::copy, net::TcpListener};
 		use tokio_rustls::{TlsAcceptor, TlsConnector};
 
 		// Install default crypto provider
 		let _ = rustls::crypto::ring::default_provider().install_default();
 
 		// Test different SNI values to verify each connection
-		let test_cases = vec![
-			"tls-test-1.example.com",
-			"tls-test-2.example.com",
-			"tls-test-3.example.com",
-		];
+		let test_cases = vec!["tls-test-1.example.com", "tls-test-2.example.com", "tls-test-3.example.com"];
 
 		for (idx, hostname) in test_cases.iter().enumerate() {
 			// Generate certificate for this hostname
@@ -878,7 +834,7 @@ mod tests {
 			// Setup client
 			let mut root_store = rustls::RootCertStore::empty();
 			root_store.add(cert_der).unwrap();
-			
+
 			let client_config = rustls::ClientConfig::builder()
 				.with_root_certificates(root_store)
 				.with_no_client_auth();
@@ -900,12 +856,15 @@ mod tests {
 			tokio::time::sleep(std::time::Duration::from_millis(50)).await;
 
 			// Capture ClientHello
-			use std::pin::Pin;
-			use std::task::{Context, Poll};
+			use std::{
+				pin::Pin,
+				task::{Context, Poll},
+			};
+
 			use tokio::io::AsyncWrite;
-			
+
 			struct CapturingStream {
-				inner: tokio::net::TcpStream,
+				inner:    tokio::net::TcpStream,
 				captured: Arc<tokio::sync::Mutex<Vec<u8>>>,
 			}
 
@@ -931,26 +890,20 @@ mod tests {
 					Pin::new(&mut self.inner).poll_write(cx, buf)
 				}
 
-				fn poll_flush(
-					mut self: Pin<&mut Self>,
-					cx: &mut Context<'_>,
-				) -> Poll<Result<(), std::io::Error>> {
+				fn poll_flush(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), std::io::Error>> {
 					Pin::new(&mut self.inner).poll_flush(cx)
 				}
 
-				fn poll_shutdown(
-					mut self: Pin<&mut Self>,
-					cx: &mut Context<'_>,
-				) -> Poll<Result<(), std::io::Error>> {
+				fn poll_shutdown(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), std::io::Error>> {
 					Pin::new(&mut self.inner).poll_shutdown(cx)
 				}
 			}
 
 			let tcp_stream = tokio::net::TcpStream::connect(server_addr).await.unwrap();
 			let captured_data = Arc::new(tokio::sync::Mutex::new(Vec::new()));
-			
+
 			let capturing_stream = CapturingStream {
-				inner: tcp_stream,
+				inner:    tcp_stream,
 				captured: captured_data.clone(),
 			};
 
@@ -962,19 +915,23 @@ mod tests {
 			tokio::time::sleep(std::time::Duration::from_millis(150)).await;
 
 			let captured = captured_data.lock().await.clone();
-			
-			assert!(!captured.is_empty(), "Test {}: Should have captured ClientHello data", idx + 1);
+
+			assert!(
+				!captured.is_empty(),
+				"Test {}: Should have captured ClientHello data",
+				idx + 1
+			);
 
 			// Extract and verify SNI
 			let result = extract_sni_from_bytes(&captured);
 			assert!(result.is_ok(), "Test {}: SNI extraction should succeed", idx + 1);
-			
+
 			let sni = result.unwrap();
 			assert_eq!(
-				sni, 
-				Some(hostname.to_string()), 
-				"Test {}: SNI should be {}", 
-				idx + 1, 
+				sni,
+				Some(hostname.to_string()),
+				"Test {}: SNI should be {}",
+				idx + 1,
 				hostname
 			);
 		}
@@ -982,11 +939,11 @@ mod tests {
 
 	#[tokio::test]
 	async fn test_sniff_with_forced_tls_versions() {
+		use std::sync::Arc;
+
 		use rcgen::CertificateParams;
 		use rustls::pki_types::{CertificateDer, PrivateKeyDer, ServerName};
-		use std::sync::Arc;
-		use tokio::io::copy;
-		use tokio::net::TcpListener;
+		use tokio::{io::copy, net::TcpListener};
 		use tokio_rustls::{TlsAcceptor, TlsConnector};
 
 		// Install default crypto provider
@@ -1018,7 +975,7 @@ mod tests {
 			// Setup client with same TLS version
 			let mut root_store = rustls::RootCertStore::empty();
 			root_store.add(cert_der).unwrap();
-			
+
 			let client_config = rustls::ClientConfig::builder_with_protocol_versions(&[version])
 				.with_root_certificates(root_store)
 				.with_no_client_auth();
@@ -1040,12 +997,15 @@ mod tests {
 			tokio::time::sleep(std::time::Duration::from_millis(50)).await;
 
 			// Capture ClientHello
-			use std::pin::Pin;
-			use std::task::{Context, Poll};
+			use std::{
+				pin::Pin,
+				task::{Context, Poll},
+			};
+
 			use tokio::io::AsyncWrite;
-			
+
 			struct CapturingStream {
-				inner: tokio::net::TcpStream,
+				inner:    tokio::net::TcpStream,
 				captured: Arc<tokio::sync::Mutex<Vec<u8>>>,
 			}
 
@@ -1071,26 +1031,20 @@ mod tests {
 					Pin::new(&mut self.inner).poll_write(cx, buf)
 				}
 
-				fn poll_flush(
-					mut self: Pin<&mut Self>,
-					cx: &mut Context<'_>,
-				) -> Poll<Result<(), std::io::Error>> {
+				fn poll_flush(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), std::io::Error>> {
 					Pin::new(&mut self.inner).poll_flush(cx)
 				}
 
-				fn poll_shutdown(
-					mut self: Pin<&mut Self>,
-					cx: &mut Context<'_>,
-				) -> Poll<Result<(), std::io::Error>> {
+				fn poll_shutdown(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), std::io::Error>> {
 					Pin::new(&mut self.inner).poll_shutdown(cx)
 				}
 			}
 
 			let tcp_stream = tokio::net::TcpStream::connect(server_addr).await.unwrap();
 			let captured_data = Arc::new(tokio::sync::Mutex::new(Vec::new()));
-			
+
 			let capturing_stream = CapturingStream {
-				inner: tcp_stream,
+				inner:    tcp_stream,
 				captured: captured_data.clone(),
 			};
 
@@ -1102,18 +1056,22 @@ mod tests {
 			tokio::time::sleep(std::time::Duration::from_millis(200)).await;
 
 			let captured = captured_data.lock().await.clone();
-			
-			assert!(!captured.is_empty(), "{}: Should have captured ClientHello data", version_name);
+
+			assert!(
+				!captured.is_empty(),
+				"{}: Should have captured ClientHello data",
+				version_name
+			);
 
 			// Extract and verify SNI
 			let result = extract_sni_from_bytes(&captured);
 			assert!(result.is_ok(), "{}: SNI extraction should succeed", version_name);
-			
+
 			let sni = result.unwrap();
 			assert_eq!(
-				sni, 
-				Some(hostname.to_string()), 
-				"{}: SNI should be {}", 
+				sni,
+				Some(hostname.to_string()),
+				"{}: SNI should be {}",
 				version_name,
 				hostname
 			);
