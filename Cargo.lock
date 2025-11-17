@@ -1232,7 +1232,7 @@ dependencies = [
  "hyper",
  "hyper-rustls",
  "hyper-util",
- "rcgen 0.14.5",
+ "rcgen",
  "ring",
  "rustls",
  "rustls-pki-types",
@@ -1843,19 +1843,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "99d9a13982dcf210057a8a78572b2217b667c3beacbf3a0d8b454f6f82837d38"
 dependencies = [
  "getrandom 0.3.4",
-]
-
-[[package]]
-name = "rcgen"
-version = "0.13.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "75e669e5202259b5314d1ea5397316ad400819437857b90861765f24c4cf80a2"
-dependencies = [
- "pem",
- "ring",
- "rustls-pki-types",
- "time",
- "yasna",
 ]
 
 [[package]]
@@ -2890,7 +2877,7 @@ dependencies = [
  "futures-util",
  "parking_lot",
  "quinn",
- "rcgen 0.13.2",
+ "rcgen",
  "register-count",
  "rustls",
  "serde",
@@ -2929,7 +2916,7 @@ dependencies = [
  "pest",
  "pest_derive",
  "quinn",
- "rcgen 0.14.5",
+ "rcgen",
  "regex",
  "register-count",
  "reqwest",
