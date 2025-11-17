@@ -13,8 +13,8 @@ repository.workspace = true
 
 [features]
 default = ["aws-lc-rs"]
-ring = ["rustls/ring", "quinn/rustls-ring"]
-aws-lc-rs = ["dep:aws-lc-rs", "rustls/aws-lc-rs", "quinn/rustls-aws-lc-rs"]
+ring = ["tuic-core/ring", "rustls/ring", "quinn/rustls-ring"]
+aws-lc-rs = ["tuic-core/aws-lc-rs", "dep:aws-lc-rs", "rustls/aws-lc-rs", "quinn/rustls-aws-lc-rs"]
 jemallocator = ["tikv-jemallocator"]
 
 [dependencies]
