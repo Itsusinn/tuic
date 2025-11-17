@@ -79,6 +79,7 @@ docker run --name tuic-server \
   -v /PATH/TO/CERTIFICATE:/PATH/TO/CERTIFICATE \
   -v /PATH/TO/PRIVATE_KEY:/PATH/TO/PRIVATE_KEY \
   -dit ghcr.io/itsusinn/tuic-server:latest
+  ## or -dit docker.io/itsusinn/tuic-server:latest
 ```
 
 **Note:** The Docker image now uses `-d /etc/tuic` by default, allowing you to mount your config directory.
@@ -89,6 +90,7 @@ docker run --name tuic-server \
 services:
   tuic:
     image: ghcr.io/itsusinn/tuic-server:latest
+    ## or image: docker.io/itsusinn/tuic-server:latest
     restart: always
     container_name: tuic
     network_mode: host
