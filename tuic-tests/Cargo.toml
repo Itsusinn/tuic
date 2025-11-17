@@ -10,13 +10,13 @@ publish = false
 
 [features]
 default = ["aws-lc-rs"]
-ring = ["rustls/ring", "tuic-client/ring", "tuic-server/ring"]
-aws-lc-rs = ["dep:aws-lc-rs", "rustls/aws-lc-rs", "tuic-client/aws-lc-rs", "tuic-server/aws-lc-rs"]
+ring = ["tuic-core/ring", "rustls/ring", "tuic-client/ring", "tuic-server/ring"]
+aws-lc-rs = ["tuic-core/aws-lc-rs", "dep:aws-lc-rs", "rustls/aws-lc-rs", "tuic-client/aws-lc-rs", "tuic-server/aws-lc-rs"]
 deplog = ["tracing-test/no-env-filter"]
 
 [dependencies]
 # Core dependencies for integration tests
-tuic-core = { path = "../tuic-core", features = ["async_marshal", "marshal", "model"] }
+tuic-core = { path = "../tuic-core", default-features = false, features = ["async_marshal", "marshal", "model"] }
 tuic-client = { path = "../tuic-client", default-features = false }
 tuic-server = { path = "../tuic-server", default-features = false }
 
