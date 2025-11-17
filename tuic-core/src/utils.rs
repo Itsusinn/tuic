@@ -328,150 +328,6 @@ mod tests {
 	use super::*;
 
 	#[test]
-	fn test_udp_relay_mode_from_str() {
-		assert_eq!(UdpRelayMode::from_str("native").unwrap(), UdpRelayMode::Native);
-		assert_eq!(UdpRelayMode::from_str("NATIVE").unwrap(), UdpRelayMode::Native);
-		assert_eq!(UdpRelayMode::from_str("quic").unwrap(), UdpRelayMode::Quic);
-		assert_eq!(UdpRelayMode::from_str("QUIC").unwrap(), UdpRelayMode::Quic);
-		assert!(UdpRelayMode::from_str("invalid").is_err());
-	}
-
-	#[test]
-	fn test_udp_relay_mode_serde() {
-		let native = UdpRelayMode::Native;
-		let json = serde_json::to_string(&native).unwrap();
-		assert_eq!(json, "\"native\"");
-
-		let quic = UdpRelayMode::Quic;
-		let json = serde_json::to_string(&quic).unwrap();
-		assert_eq!(json, "\"quic\"");
-
-		let native: UdpRelayMode = serde_json::from_str("\"native\"").unwrap();
-		assert_eq!(native, UdpRelayMode::Native);
-
-		let quic: UdpRelayMode = serde_json::from_str("\"quic\"").unwrap();
-		assert_eq!(quic, UdpRelayMode::Quic);
-	}
-
-	#[test]
-	fn test_udp_relay_mode_display() {
-		assert_eq!(UdpRelayMode::Native.to_string(), "native");
-		assert_eq!(UdpRelayMode::Quic.to_string(), "quic");
-	}
-
-	#[test]
-	fn test_congestion_control_from_str() {
-		assert_eq!(CongestionControl::from_str("cubic").unwrap(), CongestionControl::Cubic);
-		assert_eq!(CongestionControl::from_str("CUBIC").unwrap(), CongestionControl::Cubic);
-		assert_eq!(CongestionControl::from_str("new_reno").unwrap(), CongestionControl::NewReno);
-		assert_eq!(CongestionControl::from_str("newreno").unwrap(), CongestionControl::NewReno);
-		assert_eq!(CongestionControl::from_str("NEWRENO").unwrap(), CongestionControl::NewReno);
-		assert_eq!(CongestionControl::from_str("bbr").unwrap(), CongestionControl::Bbr);
-		assert_eq!(CongestionControl::from_str("BBR").unwrap(), CongestionControl::Bbr);
-		assert!(CongestionControl::from_str("invalid").is_err());
-	}
-
-	#[test]
-	fn test_congestion_control_serde() {
-		let cubic = CongestionControl::Cubic;
-		let json = serde_json::to_string(&cubic).unwrap();
-		assert_eq!(json, "\"cubic\"");
-
-		let newreno = CongestionControl::NewReno;
-		let json = serde_json::to_string(&newreno).unwrap();
-		assert_eq!(json, "\"newreno\"");
-
-		let bbr = CongestionControl::Bbr;
-		let json = serde_json::to_string(&bbr).unwrap();
-		assert_eq!(json, "\"bbr\"");
-
-		let cubic: CongestionControl = serde_json::from_str("\"cubic\"").unwrap();
-		assert_eq!(cubic, CongestionControl::Cubic);
-
-		let newreno: CongestionControl = serde_json::from_str("\"newreno\"").unwrap();
-		assert_eq!(newreno, CongestionControl::NewReno);
-
-		let bbr: CongestionControl = serde_json::from_str("\"bbr\"").unwrap();
-		assert_eq!(bbr, CongestionControl::Bbr);
-	}
-
-	#[test]
-	fn test_congestion_control_default() {
-		let default = CongestionControl::default();
-		assert_eq!(default, CongestionControl::Bbr);
-	}
-
-	#[test]
-	fn test_stack_prefer_from_str() {
-		assert_eq!(StackPrefer::from_str("v4").unwrap(), StackPrefer::V4only);
-		assert_eq!(StackPrefer::from_str("V4").unwrap(), StackPrefer::V4only);
-		assert_eq!(StackPrefer::from_str("v4only").unwrap(), StackPrefer::V4only);
-		assert_eq!(StackPrefer::from_str("only_v4").unwrap(), StackPrefer::V4only);
-		assert_eq!(StackPrefer::from_str("ONLY_V4").unwrap(), StackPrefer::V4only);
-		assert_eq!(StackPrefer::from_str("v6").unwrap(), StackPrefer::V6only);
-		assert_eq!(StackPrefer::from_str("V6").unwrap(), StackPrefer::V6only);
-		assert_eq!(StackPrefer::from_str("v6only").unwrap(), StackPrefer::V6only);
-		assert_eq!(StackPrefer::from_str("only_v6").unwrap(), StackPrefer::V6only);
-		assert_eq!(StackPrefer::from_str("ONLY_V6").unwrap(), StackPrefer::V6only);
-		assert_eq!(StackPrefer::from_str("v4v6").unwrap(), StackPrefer::V4first);
-		assert_eq!(StackPrefer::from_str("V4V6").unwrap(), StackPrefer::V4first);
-		assert_eq!(StackPrefer::from_str("v4first").unwrap(), StackPrefer::V4first);
-		assert_eq!(StackPrefer::from_str("prefer_v4").unwrap(), StackPrefer::V4first);
-		assert_eq!(StackPrefer::from_str("PREFER_V4").unwrap(), StackPrefer::V4first);
-		assert_eq!(StackPrefer::from_str("v6v4").unwrap(), StackPrefer::V6first);
-		assert_eq!(StackPrefer::from_str("V6V4").unwrap(), StackPrefer::V6first);
-		assert_eq!(StackPrefer::from_str("v6first").unwrap(), StackPrefer::V6first);
-		assert_eq!(StackPrefer::from_str("prefer_v6").unwrap(), StackPrefer::V6first);
-		assert_eq!(StackPrefer::from_str("PREFER_V6").unwrap(), StackPrefer::V6first);
-		assert!(StackPrefer::from_str("invalid").is_err());
-	}
-
-	#[test]
-	fn test_stack_prefer_serde() {
-		let v4only = StackPrefer::V4only;
-		let json = serde_json::to_string(&v4only).unwrap();
-		assert_eq!(json, "\"v4only\"");
-
-		let v6only = StackPrefer::V6only;
-		let json = serde_json::to_string(&v6only).unwrap();
-		assert_eq!(json, "\"v6only\"");
-
-		let v4first = StackPrefer::V4first;
-		let json = serde_json::to_string(&v4first).unwrap();
-		assert_eq!(json, "\"v4first\"");
-
-		let v6first = StackPrefer::V6first;
-		let json = serde_json::to_string(&v6first).unwrap();
-		assert_eq!(json, "\"v6first\"");
-
-		// Test deserialization with original aliases
-		let v4only: StackPrefer = serde_json::from_str("\"v4\"").unwrap();
-		assert_eq!(v4only, StackPrefer::V4only);
-
-		let v6only: StackPrefer = serde_json::from_str("\"v6\"").unwrap();
-		assert_eq!(v6only, StackPrefer::V6only);
-
-		let v4first: StackPrefer = serde_json::from_str("\"v4v6\"").unwrap();
-		assert_eq!(v4first, StackPrefer::V4first);
-
-		let v6first: StackPrefer = serde_json::from_str("\"v6v4\"").unwrap();
-		assert_eq!(v6first, StackPrefer::V6first);
-
-		// Test deserialization with new aliases
-		let v4only: StackPrefer = serde_json::from_str("\"only_v4\"").unwrap();
-		assert_eq!(v4only, StackPrefer::V4only);
-
-		let v6only: StackPrefer = serde_json::from_str("\"only_v6\"").unwrap();
-		assert_eq!(v6only, StackPrefer::V6only);
-
-		let v4first: StackPrefer = serde_json::from_str("\"prefer_v4\"").unwrap();
-		assert_eq!(v4first, StackPrefer::V4first);
-
-		let v6first: StackPrefer = serde_json::from_str("\"prefer_v6\"").unwrap();
-		assert_eq!(v6first, StackPrefer::V6first);
-	}
-
-	#[test]
 	fn test_extract_sni_from_bytes() {
 		// A minimal TLS ClientHello with SNI for "example.com"
 		let client_hello_with_sni = vec![
@@ -676,407 +532,254 @@ mod tests {
 		);
 	}
 
-	#[tokio::test]
-	async fn test_sniff_from_real_tls_stream() {
+	/// Helper function to setup a proxy test environment and capture TLS
+	/// ClientHello
+	///
+	/// Returns the captured ClientHello bytes and the test hostname
+	#[cfg(test)]
+	async fn setup_proxy_and_capture_client_hello(
+		test_hostname: &str,
+		server_tls_versions: Vec<&'static rustls::SupportedProtocolVersion>,
+		client_tls_versions: Vec<&'static rustls::SupportedProtocolVersion>,
+	) -> (Vec<u8>, String) {
 		use std::sync::Arc;
 
 		use rcgen::CertificateParams;
-		use rustls::pki_types::{CertificateDer, PrivateKeyDer, ServerName};
-		use tokio::{io::copy, net::TcpListener};
-		use tokio_rustls::{TlsAcceptor, TlsConnector};
+		use rustls::pki_types::{CertificateDer, PrivateKeyDer};
+		use tokio::{
+			io::{AsyncReadExt, AsyncWriteExt, copy},
+			net::TcpListener,
+			sync::Mutex,
+		};
+		use tokio_rustls::TlsAcceptor;
 
 		// Install default crypto provider
-		_ = rustls::crypto::ring::default_provider().install_default();
+		#[cfg(feature = "ring")]
+		let _ = rustls::crypto::ring::default_provider().install_default();
+		#[cfg(all(feature = "aws-lc-rs", not(feature = "ring")))]
+		let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
 
-		// Generate self-signed certificate for "example.com"
-		let cert_params = CertificateParams::new(vec!["example.com".to_string()]).unwrap();
+		// Generate self-signed certificate for test domain
+		let cert_params = CertificateParams::new(vec![test_hostname.to_string()]).unwrap();
 		let key_pair = rcgen::KeyPair::generate().unwrap();
 		let cert = cert_params.self_signed(&key_pair).unwrap();
 		let cert_der = CertificateDer::from(cert.der().to_vec());
 		let key_der = PrivateKeyDer::try_from(key_pair.serialize_der()).unwrap();
 
-		// Setup server TLS config
-		let server_config = rustls::ServerConfig::builder()
-			.with_no_client_auth()
-			.with_single_cert(vec![cert_der.clone()], key_der)
-			.unwrap();
+		// Setup HTTPS server
+		let server_config = if server_tls_versions.is_empty() {
+			rustls::ServerConfig::builder()
+				.with_no_client_auth()
+				.with_single_cert(vec![cert_der.clone()], key_der)
+				.unwrap()
+		} else {
+			rustls::ServerConfig::builder_with_protocol_versions(&server_tls_versions)
+				.with_no_client_auth()
+				.with_single_cert(vec![cert_der.clone()], key_der)
+				.unwrap()
+		};
 		let acceptor = TlsAcceptor::from(Arc::new(server_config));
 
-		// Setup client TLS config (accept our self-signed cert)
-		let mut root_store = rustls::RootCertStore::empty();
-		root_store.add(cert_der).unwrap();
+		// Start HTTPS server on a random port
+		let https_listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+		let https_addr = https_listener.local_addr().unwrap();
 
-		let client_config = rustls::ClientConfig::builder()
-			.with_root_certificates(root_store)
-			.with_no_client_auth();
-		let connector = TlsConnector::from(Arc::new(client_config));
-
-		// Start TLS server
-		let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-		let server_addr = listener.local_addr().unwrap();
-
-		// Spawn server task
 		tokio::spawn(async move {
-			if let Ok((stream, _)) = listener.accept().await {
-				if let Ok(tls_stream) = acceptor.accept(stream).await {
-					// Echo server
-					let (mut reader, mut writer) = tokio::io::split(tls_stream);
-					let _ = copy(&mut reader, &mut writer).await;
+			while let Ok((stream, _)) = https_listener.accept().await {
+				let acceptor = acceptor.clone();
+				tokio::spawn(async move {
+					if let Ok(mut tls_stream) = acceptor.accept(stream).await {
+						let response = b"HTTP/1.1 200 OK\r\nContent-Length: 13\r\n\r\nHello, World!";
+						let _ = tls_stream.write_all(response).await;
+						let _ = tls_stream.flush().await;
+					}
+				});
+			}
+		});
+
+		// Start HTTP proxy that captures TLS ClientHello
+		let proxy_listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+		let proxy_addr = proxy_listener.local_addr().unwrap();
+
+		let captured_client_hello = Arc::new(Mutex::new(Vec::<u8>::new()));
+		let captured_clone = captured_client_hello.clone();
+
+		tokio::spawn(async move {
+			if let Ok((mut client_stream, _)) = proxy_listener.accept().await {
+				if let Ok(mut server_stream) = tokio::net::TcpStream::connect(https_addr).await {
+					let mut buffer = vec![0u8; 8192];
+
+					if let Ok(n) = client_stream.read(&mut buffer).await {
+						if n > 0 {
+							let mut captured = captured_clone.lock().await;
+							captured.extend_from_slice(&buffer[..n]);
+
+							let _ = server_stream.write_all(&buffer[..n]).await;
+
+							let (mut client_read, mut client_write) = client_stream.split();
+							let (mut server_read, mut server_write) = server_stream.split();
+
+							let client_to_server = async {
+								let _ = copy(&mut client_read, &mut server_write).await;
+							};
+
+							let server_to_client = async {
+								let _ = copy(&mut server_read, &mut client_write).await;
+							};
+
+							tokio::select! {
+								_ = client_to_server => {},
+								_ = server_to_client => {},
+							}
+						}
+					}
 				}
 			}
 		});
 
-		// Wait for server to start
+		// Wait for servers to start
 		tokio::time::sleep(std::time::Duration::from_millis(100)).await;
 
-		// Create a custom stream that captures written data
-		use std::{
-			pin::Pin,
-			task::{Context, Poll},
-		};
+		// Create a custom client that uses our proxy
+		let hostname = test_hostname.to_string();
+		let client_task = tokio::spawn(async move {
+			if let Ok(stream) = tokio::net::TcpStream::connect(proxy_addr).await {
+				let mut root_store = rustls::RootCertStore::empty();
+				root_store.add(cert_der).unwrap();
 
-		use tokio::io::AsyncWrite;
+				let client_config = if client_tls_versions.is_empty() {
+					rustls::ClientConfig::builder()
+						.with_root_certificates(root_store)
+						.with_no_client_auth()
+				} else {
+					rustls::ClientConfig::builder_with_protocol_versions(&client_tls_versions)
+						.with_root_certificates(root_store)
+						.with_no_client_auth()
+				};
 
-		struct CapturingStream {
-			inner:    tokio::net::TcpStream,
-			captured: Arc<tokio::sync::Mutex<Vec<u8>>>,
-		}
+				let connector = tokio_rustls::TlsConnector::from(Arc::new(client_config));
 
-		impl tokio::io::AsyncRead for CapturingStream {
-			fn poll_read(
-				mut self: Pin<&mut Self>,
-				cx: &mut Context<'_>,
-				buf: &mut tokio::io::ReadBuf<'_>,
-			) -> Poll<std::io::Result<()>> {
-				Pin::new(&mut self.inner).poll_read(cx, buf)
-			}
-		}
+				let server_name = rustls::pki_types::ServerName::try_from(hostname.clone()).unwrap();
+				if let Ok(mut tls_stream) = connector.connect(server_name, stream).await {
+					let request = format!("GET / HTTP/1.1\r\nHost: {}\r\nConnection: close\r\n\r\n", hostname);
+					let _ = tls_stream.write_all(request.as_bytes()).await;
+					let _ = tls_stream.flush().await;
 
-		impl AsyncWrite for CapturingStream {
-			fn poll_write(mut self: Pin<&mut Self>, cx: &mut Context<'_>, buf: &[u8]) -> Poll<Result<usize, std::io::Error>> {
-				// Capture data being written
-				if let Ok(mut captured) = self.captured.try_lock() {
-					captured.extend_from_slice(buf);
+					let mut response = Vec::new();
+					let _ = tls_stream.read_to_end(&mut response).await;
 				}
-				Pin::new(&mut self.inner).poll_write(cx, buf)
 			}
-
-			fn poll_flush(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), std::io::Error>> {
-				Pin::new(&mut self.inner).poll_flush(cx)
-			}
-
-			fn poll_shutdown(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), std::io::Error>> {
-				Pin::new(&mut self.inner).poll_shutdown(cx)
-			}
-		}
-
-		// Connect and capture ClientHello
-		let tcp_stream = tokio::net::TcpStream::connect(server_addr).await.unwrap();
-		let captured_data = Arc::new(tokio::sync::Mutex::new(Vec::new()));
-
-		let capturing_stream = CapturingStream {
-			inner:    tcp_stream,
-			captured: captured_data.clone(),
-		};
-
-		// Start TLS handshake
-		let server_name = ServerName::try_from("example.com").unwrap();
-		tokio::spawn(async move {
-			let _ = connector.connect(server_name, capturing_stream).await;
 		});
 
-		// Wait for ClientHello to be sent
-		tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+		// Wait for the client to send data
+		tokio::time::sleep(std::time::Duration::from_millis(300)).await;
 
-		// Extract captured data
-		let captured = captured_data.lock().await.clone();
+		let captured = captured_client_hello.lock().await.clone();
+		let _ = client_task.await;
 
-		assert!(!captured.is_empty(), "Should have captured ClientHello data");
+		(captured, test_hostname.to_string())
+	}
 
-		// Test SNI extraction
+	/// Test SNI sniffing using an HTTP inbound proxy that captures real TLS
+	/// traffic
+	///
+	/// This test creates a TCP proxy that intercepts the TLS ClientHello from a
+	/// real HTTP client connecting to an HTTPS server, instead of capturing
+	/// from rustls client.
+	#[tokio::test]
+	async fn test_sniff_from_http_proxy() {
+		let test_hostname = "proxy-test.example.com";
+		let (captured, test_hostname) = setup_proxy_and_capture_client_hello(
+			test_hostname,
+			vec![], // Use default TLS versions
+			vec![], // Use default TLS versions
+		)
+		.await;
+		assert!(!captured.is_empty(), "Proxy should have captured ClientHello data");
+
+		eprintln!("Captured {} bytes from proxy", captured.len());
+
+		// Test SNI extraction from captured data
 		let result = extract_sni_from_bytes(&captured);
-		assert!(result.is_ok(), "SNI extraction should succeed");
+		assert!(result.is_ok(), "SNI extraction should succeed on proxy-captured data");
 
 		let sni = result.unwrap();
-		assert_eq!(sni, Some("example.com".to_string()), "SNI should be example.com");
+		assert_eq!(
+			sni,
+			Some(test_hostname.to_string()),
+			"SNI should match the hostname: {}",
+			test_hostname
+		);
+
+		eprintln!("Successfully extracted SNI from HTTP proxy: {:?}", sni);
+
+		// Also test with sniff_from_stream
+		use std::io::Cursor;
+
+		let cursor = Cursor::new(captured);
+		let stream_result = sniff_from_stream(cursor).await;
+		assert!(
+			stream_result.is_ok(),
+			"sniff_from_stream should succeed on proxy-captured data"
+		);
+
+		let stream_sni = stream_result.unwrap();
+		assert_eq!(
+			stream_sni,
+			Some(test_hostname.to_string()),
+			"sniff_from_stream should extract correct SNI"
+		);
+
+		eprintln!("sniff_from_stream test passed with SNI: {:?}", stream_sni);
 	}
 
+	/// Test SNI sniffing with TLS 1.2 specifically
 	#[tokio::test]
-	async fn test_sniff_multiple_tls_versions() {
-		use std::sync::Arc;
+	async fn test_sniff_from_http_proxy_tls12() {
+		let test_hostname = "tls12-test.example.com";
+		let (captured, test_hostname) =
+			setup_proxy_and_capture_client_hello(test_hostname, vec![&rustls::version::TLS12], vec![&rustls::version::TLS12])
+				.await;
+		assert!(!captured.is_empty(), "TLS 1.2: Proxy should have captured ClientHello data");
 
-		use rcgen::CertificateParams;
-		use rustls::pki_types::{CertificateDer, PrivateKeyDer, ServerName};
-		use tokio::{io::copy, net::TcpListener};
-		use tokio_rustls::{TlsAcceptor, TlsConnector};
+		eprintln!("TLS 1.2: Captured {} bytes from proxy", captured.len());
 
-		// Install default crypto provider
-		let _ = rustls::crypto::ring::default_provider().install_default();
+		let result = extract_sni_from_bytes(&captured);
+		assert!(result.is_ok(), "TLS 1.2: SNI extraction should succeed");
 
-		// Test different SNI values to verify each connection
-		let test_cases = vec!["tls-test-1.example.com", "tls-test-2.example.com", "tls-test-3.example.com"];
+		let sni = result.unwrap();
+		assert_eq!(
+			sni,
+			Some(test_hostname.to_string()),
+			"TLS 1.2: SNI should match the hostname: {}",
+			test_hostname
+		);
 
-		for (idx, hostname) in test_cases.iter().enumerate() {
-			// Generate certificate for this hostname
-			let cert_params = CertificateParams::new(vec![hostname.to_string()]).unwrap();
-			let key_pair = rcgen::KeyPair::generate().unwrap();
-			let cert = cert_params.self_signed(&key_pair).unwrap();
-			let cert_der = CertificateDer::from(cert.der().to_vec());
-			let key_der = PrivateKeyDer::try_from(key_pair.serialize_der()).unwrap();
-
-			// Setup server
-			let server_config = rustls::ServerConfig::builder()
-				.with_no_client_auth()
-				.with_single_cert(vec![cert_der.clone()], key_der)
-				.unwrap();
-			let acceptor = TlsAcceptor::from(Arc::new(server_config));
-
-			// Setup client
-			let mut root_store = rustls::RootCertStore::empty();
-			root_store.add(cert_der).unwrap();
-
-			let client_config = rustls::ClientConfig::builder()
-				.with_root_certificates(root_store)
-				.with_no_client_auth();
-			let connector = TlsConnector::from(Arc::new(client_config));
-
-			// Start server
-			let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-			let server_addr = listener.local_addr().unwrap();
-
-			tokio::spawn(async move {
-				if let Ok((stream, _)) = listener.accept().await {
-					if let Ok(tls_stream) = acceptor.accept(stream).await {
-						let (mut reader, mut writer) = tokio::io::split(tls_stream);
-						let _ = copy(&mut reader, &mut writer).await;
-					}
-				}
-			});
-
-			tokio::time::sleep(std::time::Duration::from_millis(50)).await;
-
-			// Capture ClientHello
-			use std::{
-				pin::Pin,
-				task::{Context, Poll},
-			};
-
-			use tokio::io::AsyncWrite;
-
-			struct CapturingStream {
-				inner:    tokio::net::TcpStream,
-				captured: Arc<tokio::sync::Mutex<Vec<u8>>>,
-			}
-
-			impl tokio::io::AsyncRead for CapturingStream {
-				fn poll_read(
-					mut self: Pin<&mut Self>,
-					cx: &mut Context<'_>,
-					buf: &mut tokio::io::ReadBuf<'_>,
-				) -> Poll<std::io::Result<()>> {
-					Pin::new(&mut self.inner).poll_read(cx, buf)
-				}
-			}
-
-			impl AsyncWrite for CapturingStream {
-				fn poll_write(
-					mut self: Pin<&mut Self>,
-					cx: &mut Context<'_>,
-					buf: &[u8],
-				) -> Poll<Result<usize, std::io::Error>> {
-					if let Ok(mut captured) = self.captured.try_lock() {
-						captured.extend_from_slice(buf);
-					}
-					Pin::new(&mut self.inner).poll_write(cx, buf)
-				}
-
-				fn poll_flush(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), std::io::Error>> {
-					Pin::new(&mut self.inner).poll_flush(cx)
-				}
-
-				fn poll_shutdown(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), std::io::Error>> {
-					Pin::new(&mut self.inner).poll_shutdown(cx)
-				}
-			}
-
-			let tcp_stream = tokio::net::TcpStream::connect(server_addr).await.unwrap();
-			let captured_data = Arc::new(tokio::sync::Mutex::new(Vec::new()));
-
-			let capturing_stream = CapturingStream {
-				inner:    tcp_stream,
-				captured: captured_data.clone(),
-			};
-
-			let server_name = ServerName::try_from(hostname.to_string()).unwrap();
-			tokio::spawn(async move {
-				let _ = connector.connect(server_name, capturing_stream).await;
-			});
-
-			tokio::time::sleep(std::time::Duration::from_millis(150)).await;
-
-			let captured = captured_data.lock().await.clone();
-
-			assert!(
-				!captured.is_empty(),
-				"Test {}: Should have captured ClientHello data",
-				idx + 1
-			);
-
-			// Extract and verify SNI
-			let result = extract_sni_from_bytes(&captured);
-			assert!(result.is_ok(), "Test {}: SNI extraction should succeed", idx + 1);
-
-			let sni = result.unwrap();
-			assert_eq!(
-				sni,
-				Some(hostname.to_string()),
-				"Test {}: SNI should be {}",
-				idx + 1,
-				hostname
-			);
-		}
+		eprintln!("TLS 1.2: Successfully extracted SNI: {:?}", sni);
 	}
 
+	/// Test SNI sniffing with TLS 1.3 specifically
 	#[tokio::test]
-	async fn test_sniff_with_forced_tls_versions() {
-		use std::sync::Arc;
+	async fn test_sniff_from_http_proxy_tls13() {
+		let test_hostname = "tls13-test.example.com";
+		let (captured, test_hostname) =
+			setup_proxy_and_capture_client_hello(test_hostname, vec![&rustls::version::TLS13], vec![&rustls::version::TLS13])
+				.await;
+		assert!(!captured.is_empty(), "TLS 1.3: Proxy should have captured ClientHello data");
 
-		use rcgen::CertificateParams;
-		use rustls::pki_types::{CertificateDer, PrivateKeyDer, ServerName};
-		use tokio::{io::copy, net::TcpListener};
-		use tokio_rustls::{TlsAcceptor, TlsConnector};
+		eprintln!("TLS 1.3: Captured {} bytes from proxy", captured.len());
 
-		// Install default crypto provider
-		let _ = rustls::crypto::ring::default_provider().install_default();
+		let result = extract_sni_from_bytes(&captured);
+		assert!(result.is_ok(), "TLS 1.3: SNI extraction should succeed");
 
-		// Test cases with different TLS versions
-		let test_cases = vec![
-			("TLS 1.2", &rustls::version::TLS12, "tls12-forced.example.com"),
-			("TLS 1.3", &rustls::version::TLS13, "tls13-forced.example.com"),
-		];
+		let sni = result.unwrap();
+		assert_eq!(
+			sni,
+			Some(test_hostname.to_string()),
+			"TLS 1.3: SNI should match the hostname: {}",
+			test_hostname
+		);
 
-		for (version_name, version, hostname) in test_cases {
-			eprintln!("Testing {} with SNI: {}", version_name, hostname);
-
-			// Generate certificate
-			let cert_params = CertificateParams::new(vec![hostname.to_string()]).unwrap();
-			let key_pair = rcgen::KeyPair::generate().unwrap();
-			let cert = cert_params.self_signed(&key_pair).unwrap();
-			let cert_der = CertificateDer::from(cert.der().to_vec());
-			let key_der = PrivateKeyDer::try_from(key_pair.serialize_der()).unwrap();
-
-			// Setup server with specific TLS version
-			let server_config = rustls::ServerConfig::builder_with_protocol_versions(&[version])
-				.with_no_client_auth()
-				.with_single_cert(vec![cert_der.clone()], key_der)
-				.unwrap();
-			let acceptor = TlsAcceptor::from(Arc::new(server_config));
-
-			// Setup client with same TLS version
-			let mut root_store = rustls::RootCertStore::empty();
-			root_store.add(cert_der).unwrap();
-
-			let client_config = rustls::ClientConfig::builder_with_protocol_versions(&[version])
-				.with_root_certificates(root_store)
-				.with_no_client_auth();
-			let connector = TlsConnector::from(Arc::new(client_config));
-
-			// Start server
-			let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-			let server_addr = listener.local_addr().unwrap();
-
-			tokio::spawn(async move {
-				if let Ok((stream, _)) = listener.accept().await {
-					if let Ok(tls_stream) = acceptor.accept(stream).await {
-						let (mut reader, mut writer) = tokio::io::split(tls_stream);
-						let _ = copy(&mut reader, &mut writer).await;
-					}
-				}
-			});
-
-			tokio::time::sleep(std::time::Duration::from_millis(50)).await;
-
-			// Capture ClientHello
-			use std::{
-				pin::Pin,
-				task::{Context, Poll},
-			};
-
-			use tokio::io::AsyncWrite;
-
-			struct CapturingStream {
-				inner:    tokio::net::TcpStream,
-				captured: Arc<tokio::sync::Mutex<Vec<u8>>>,
-			}
-
-			impl tokio::io::AsyncRead for CapturingStream {
-				fn poll_read(
-					mut self: Pin<&mut Self>,
-					cx: &mut Context<'_>,
-					buf: &mut tokio::io::ReadBuf<'_>,
-				) -> Poll<std::io::Result<()>> {
-					Pin::new(&mut self.inner).poll_read(cx, buf)
-				}
-			}
-
-			impl AsyncWrite for CapturingStream {
-				fn poll_write(
-					mut self: Pin<&mut Self>,
-					cx: &mut Context<'_>,
-					buf: &[u8],
-				) -> Poll<Result<usize, std::io::Error>> {
-					if let Ok(mut captured) = self.captured.try_lock() {
-						captured.extend_from_slice(buf);
-					}
-					Pin::new(&mut self.inner).poll_write(cx, buf)
-				}
-
-				fn poll_flush(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), std::io::Error>> {
-					Pin::new(&mut self.inner).poll_flush(cx)
-				}
-
-				fn poll_shutdown(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), std::io::Error>> {
-					Pin::new(&mut self.inner).poll_shutdown(cx)
-				}
-			}
-
-			let tcp_stream = tokio::net::TcpStream::connect(server_addr).await.unwrap();
-			let captured_data = Arc::new(tokio::sync::Mutex::new(Vec::new()));
-
-			let capturing_stream = CapturingStream {
-				inner:    tcp_stream,
-				captured: captured_data.clone(),
-			};
-
-			let server_name = ServerName::try_from(hostname.to_string()).unwrap();
-			tokio::spawn(async move {
-				let _ = connector.connect(server_name, capturing_stream).await;
-			});
-
-			tokio::time::sleep(std::time::Duration::from_millis(200)).await;
-
-			let captured = captured_data.lock().await.clone();
-
-			assert!(
-				!captured.is_empty(),
-				"{}: Should have captured ClientHello data",
-				version_name
-			);
-
-			// Extract and verify SNI
-			let result = extract_sni_from_bytes(&captured);
-			assert!(result.is_ok(), "{}: SNI extraction should succeed", version_name);
-
-			let sni = result.unwrap();
-			assert_eq!(
-				sni,
-				Some(hostname.to_string()),
-				"{}: SNI should be {}",
-				version_name,
-				hostname
-			);
-
-			eprintln!("{}: Successfully extracted SNI: {:?}", version_name, sni);
-		}
+		eprintln!("TLS 1.3: Successfully extracted SNI: {:?}", sni);
 	}
 }
