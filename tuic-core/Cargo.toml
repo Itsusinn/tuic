@@ -36,6 +36,10 @@ eyre = { version = "0.6" }
 tuic-core = { path = ".", features = ["async_marshal", "marshal", "model"] }
 uuid = { version = "1", features = ["v4"] }
 serde_json = { version = "1" }
+tokio = { version = "1", default-features = false, features = ["macros", "rt", "net", "io-util", "time"] }
+rustls = { version = "0.23", default-features = false, features = ["std", "ring"] }
+rcgen = { version = "0.13" }
+tokio-rustls = { version = "0.26" }
 
 [package.metadata.docs.rs]
 all-features = true
