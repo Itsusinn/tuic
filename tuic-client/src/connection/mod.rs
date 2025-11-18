@@ -177,7 +177,7 @@ impl Connection {
 		config.transport_config(Arc::new(tp_cfg));
 
 		// Prepare server address and create the primary endpoint with IPv4 binding
-		let server = ServerAddr::new(cfg.server.0, cfg.server.1, cfg.ip, cfg.ipstack_prefer);
+		let server = ServerAddr::with_sni(cfg.server.0, cfg.server.1, cfg.ip, cfg.ipstack_prefer, cfg.sni);
 		let socket = UdpSocket::bind(SocketAddr::from((Ipv4Addr::UNSPECIFIED, 0)))?;
 		let mut ep = QuinnEndpoint::new(EndpointConfig::default(), None, socket, Arc::new(TokioRuntime))?;
 

@@ -113,6 +113,9 @@ pub struct Relay {
 	#[educe(Default = false)]
 	pub disable_sni: bool,
 
+	#[educe(Default = None)]
+	pub sni: Option<String>,
+
 	#[educe(Default(expression = Duration::from_secs(8)))]
 	#[serde(with = "humantime_serde")]
 	pub timeout: Duration,
