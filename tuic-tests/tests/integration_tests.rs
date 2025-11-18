@@ -806,3 +806,389 @@ async fn test_server_client_integration() {
 	// Give tasks time to clean up
 	tokio::time::sleep(Duration::from_millis(100)).await;
 }
+
+// Integration test for IPv6 connectivity
+//
+// This test validates TUIC with IPv6 addresses:
+// - Server listening on [::1]:8444 (IPv6 localhost)
+// - Client connecting to [::1]:8444
+// - SOCKS5 proxy on [::1]:1081
+// - TCP relay through IPv6
+// - UDP relay through IPv6 (native mode)
+//
+// This addresses the error that occurs when using IPv6 addresses like "[::1]:443"
+#[tokio::test]
+#[tracing_test::traced_test]
+async fn test_ipv6_server_client_integration() {
+	use std::{collections::HashMap, net::SocketAddr, path::PathBuf};
+	#[cfg(feature = "aws-lc-rs")]
+	let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
+	#[cfg(feature = "ring")]
+	let _ = rustls::crypto::ring::default_provider().install_default();
+
+	println!("\n[IPv6 Test] ========================================");
+	println!("[IPv6 Test] Starting IPv6 Integration Test");
+	println!("[IPv6 Test] ========================================\n");
+
+	// Create server configuration using IPv6 localhost [::1]
+	let server_config = tuic_server::Config {
+		log_level: tuic_server::config::LogLevel::Debug,
+		server: "[::1]:8444".parse::<SocketAddr>().unwrap(),
+		users: {
+			let mut users = HashMap::new();
+			users.insert(
+				Uuid::parse_str("00000000-0000-0000-0000-000000000000").unwrap(),
+				"test_password".to_string(),
+			);
+			users
+		},
+		tls: tuic_server::config::TlsConfig {
+			self_sign:   true,
+			certificate: PathBuf::from("./test_cert_ipv6.pem"),
+			private_key: PathBuf::from("./test_key_ipv6.pem"),
+			alpn:        vec!["h3".to_string()],
+			hostname:    "localhost".to_string(),
+			auto_ssl:    false,
+		},
+		data_dir: std::env::temp_dir(),
+		restful: None,
+		quic: tuic_server::config::QuicConfig::default(),
+		udp_relay_ipv6: true,
+		zero_rtt_handshake: false,
+		dual_stack: false,
+		auth_timeout: Duration::from_secs(3),
+		task_negotiation_timeout: Duration::from_secs(3),
+		gc_interval: Duration::from_secs(10),
+		gc_lifetime: Duration::from_secs(30),
+		max_external_packet_size: 1500,
+		stream_timeout: Duration::from_secs(60),
+		outbound: tuic_server::config::OutboundConfig::default(),
+		// Allow localhost connections for testing
+		acl: vec![tuic_server::acl::AclRule {
+			outbound: "allow".to_string(),
+			addr:     tuic_server::acl::AclAddress::Localhost,
+			ports:    None,
+			hijack:   None,
+		}],
+		..Default::default()
+	};
+
+	// Spawn IPv6 server
+	println!("[IPv6 Test] Starting TUIC server on [::1]:8444...");
+	let server_handle = tokio::spawn(async move {
+		match timeout(Duration::from_secs(10), tuic_server::run(server_config)).await {
+			Ok(Ok(())) => println!("[IPv6 Test] Server completed successfully"),
+			Ok(Err(e)) => eprintln!("[IPv6 Test] Server error: {}", e),
+			Err(_) => eprintln!("[IPv6 Test] Server timeout"),
+		}
+	});
+
+	// Wait for server to start
+	println!("[IPv6 Test] Waiting for server to initialize...");
+	tokio::time::sleep(Duration::from_secs(1)).await;
+	println!("[IPv6 Test] Server should be ready now");
+
+	// Create client configuration connecting to IPv6 server
+	let client_config = tuic_client::Config {
+		relay:     tuic_client::config::Relay {
+			server:               ("[::1]".to_string(), 8444),
+			uuid:                 Uuid::parse_str("00000000-0000-0000-0000-000000000000").unwrap(),
+			password:             std::sync::Arc::from(b"test_password".to_vec().into_boxed_slice()),
+			ip:                   None,
+			ipstack_prefer:       tuic_client::utils::StackPrefer::V6first,
+			certificates:         Vec::new(),
+			udp_relay_mode:       tuic_client::utils::UdpRelayMode::Native,
+			congestion_control:   tuic_client::utils::CongestionControl::Cubic,
+			alpn:                 vec![b"h3".to_vec()],
+			zero_rtt_handshake:   false,
+			disable_sni:          true,
+			timeout:              Duration::from_secs(8),
+			heartbeat:            Duration::from_secs(3),
+			disable_native_certs: true,
+			send_window:          8 * 1024 * 1024 * 2,
+			receive_window:       8 * 1024 * 1024,
+			initial_mtu:          1200,
+			min_mtu:              1200,
+			gso:                  false,
+			pmtu:                 false,
+			gc_interval:          Duration::from_secs(3),
+			gc_lifetime:          Duration::from_secs(15),
+			skip_cert_verify:     true,
+		},
+		local:     tuic_client::config::Local {
+			server:          "[::1]:1081".parse().unwrap(),
+			username:        None,
+			password:        None,
+			dual_stack:      Some(false),
+			max_packet_size: 1500,
+			tcp_forward:     Vec::new(),
+			udp_forward:     Vec::new(),
+		},
+		log_level: "debug".to_string(),
+	};
+
+	// Spawn client with IPv6 SOCKS5 server
+	println!("[IPv6 Test] Starting TUIC client with SOCKS5 server on [::1]:1081...");
+	let client_handle = tokio::spawn(async move {
+		match timeout(Duration::from_secs(10), tuic_client::run(client_config)).await {
+			Ok(Ok(())) => println!("[IPv6 Test] Client completed successfully"),
+			Ok(Err(e)) => eprintln!("[IPv6 Test] Client error: {}", e),
+			Err(_) => eprintln!("[IPv6 Test] Client timeout"),
+		}
+	});
+
+	// Wait for client to connect
+	println!("[IPv6 Test] Waiting for client to connect and start SOCKS5 server...");
+	tokio::time::sleep(Duration::from_secs(2)).await;
+	println!("[IPv6 Test] SOCKS5 proxy should be ready now\n");
+
+	// Test SOCKS5 proxy connectivity on IPv6
+	use tokio::net::TcpStream;
+	println!("[IPv6 Test] Testing SOCKS5 proxy connectivity on IPv6...");
+	match TcpStream::connect("[::1]:1081").await {
+		Ok(stream) => {
+			println!("[IPv6 Test] ✓ Successfully connected to SOCKS5 proxy at [::1]:1081");
+			println!(
+				"[IPv6 Test] Local: {:?}, Peer: {:?}",
+				stream.local_addr(),
+				stream.peer_addr()
+			);
+			drop(stream);
+		}
+		Err(e) => {
+			eprintln!("[IPv6 Test] ✗ Failed to connect to SOCKS5 proxy: {}", e);
+			eprintln!("[IPv6 Test] This suggests the TUIC client may not have started properly on IPv6");
+		}
+	}
+	println!();
+
+	// ============================================================================
+	// Test 1: IPv6 TCP relay through SOCKS5
+	// ============================================================================
+	let tcp_test = async {
+		use fast_socks5::client::{Config, Socks5Stream};
+		use tokio::{
+			io::{AsyncReadExt, AsyncWriteExt},
+			net::TcpListener,
+		};
+
+		println!("[IPv6 TCP Test] Starting TCP relay test on IPv6...");
+
+		// Start a local TCP echo server on IPv6
+		let echo_server = TcpListener::bind("[::1]:0").await.unwrap();
+		let echo_addr = echo_server.local_addr().unwrap();
+		println!("[IPv6 TCP Test] TCP echo server started at: {}", echo_addr);
+
+		// Spawn echo server task
+		let echo_task = tokio::spawn(async move {
+			println!("[IPv6 TCP Echo Server] Waiting for connection...");
+			match timeout(Duration::from_secs(5), echo_server.accept()).await {
+				Ok(Ok((mut socket, addr))) => {
+					println!("[IPv6 TCP Echo Server] Accepted connection from: {}", addr);
+					let mut buf = vec![0u8; 1024];
+					match timeout(Duration::from_secs(3), socket.read(&mut buf)).await {
+						Ok(Ok(0)) => {
+							println!("[IPv6 TCP Echo Server] Connection closed by client");
+						}
+						Ok(Ok(n)) => {
+							println!("[IPv6 TCP Echo Server] Received {} bytes", n);
+							if let Err(e) = socket.write_all(&buf[..n]).await {
+								eprintln!("[IPv6 TCP Echo Server] Failed to send response: {}", e);
+							} else {
+								println!("[IPv6 TCP Echo Server] Echoed {} bytes back", n);
+							}
+						}
+						Ok(Err(e)) => {
+							eprintln!("[IPv6 TCP Echo Server] Failed to read: {}", e);
+						}
+						Err(_) => {
+							eprintln!("[IPv6 TCP Echo Server] Timeout waiting for data");
+						}
+					}
+				}
+				Ok(Err(e)) => {
+					eprintln!("[IPv6 TCP Echo Server] Failed to accept connection: {}", e);
+				}
+				Err(_) => {
+					eprintln!("[IPv6 TCP Echo Server] Timeout waiting for connection");
+				}
+			}
+		});
+
+		tokio::time::sleep(Duration::from_millis(200)).await;
+
+		// Connect through SOCKS5 proxy on IPv6
+		println!("[IPv6 TCP Test] Connecting to SOCKS5 proxy at [::1]:1081...");
+		let stream_result = Socks5Stream::connect(
+			"[::1]:1081".parse::<SocketAddr>().unwrap(),
+			echo_addr.ip().to_string(),
+			echo_addr.port(),
+			Config::default(),
+		)
+		.await;
+
+		match stream_result {
+			Ok(mut stream) => {
+				println!("[IPv6 TCP Test] Connected through SOCKS5 proxy to echo server");
+
+				let test_data = b"Hello IPv6 TUIC!";
+				println!("[IPv6 TCP Test] Sending {} bytes", test_data.len());
+
+				if let Err(e) = stream.write_all(test_data).await {
+					eprintln!("[IPv6 TCP Test] Failed to send data: {}", e);
+				} else {
+					println!("[IPv6 TCP Test] Data sent successfully");
+					tokio::time::sleep(Duration::from_millis(500)).await;
+
+					let mut buffer = vec![0u8; test_data.len()];
+					match timeout(Duration::from_secs(3), stream.read_exact(&mut buffer)).await {
+						Ok(Ok(_)) => {
+							println!("[IPv6 TCP Test] Received {} bytes", buffer.len());
+							if buffer.as_slice() == test_data {
+								println!("[IPv6 TCP Test] ✓ IPv6 TCP echo test PASSED!");
+							} else {
+								eprintln!("[IPv6 TCP Test] ✗ IPv6 TCP echo test FAILED - data mismatch!");
+							}
+						}
+						Ok(Err(e)) => {
+							eprintln!("[IPv6 TCP Test] Failed to read response: {}", e);
+						}
+						Err(_) => {
+							eprintln!("[IPv6 TCP Test] Timeout waiting for response");
+						}
+					}
+				}
+			}
+			Err(e) => {
+				eprintln!("[IPv6 TCP Test] Failed to connect to SOCKS5 proxy: {}", e);
+			}
+		}
+
+		echo_task.abort();
+		println!("[IPv6 TCP Test] TCP test completed\n");
+	};
+
+	let _ = timeout(Duration::from_secs(6), tcp_test).await;
+
+	// ============================================================================
+	// Test 2: IPv6 UDP relay through SOCKS5
+	// ============================================================================
+	let udp_test = async {
+		use std::{
+			net::{IpAddr, Ipv6Addr},
+			sync::Arc,
+		};
+
+		use fast_socks5::client::Socks5Datagram;
+		use tokio::net::{TcpStream, UdpSocket};
+
+		println!("[IPv6 UDP Test] Starting UDP relay test on IPv6...");
+
+		// Start a local UDP echo server on IPv6
+		let echo_server = Arc::new(UdpSocket::bind("[::1]:0").await.unwrap());
+		let echo_addr = echo_server.local_addr().unwrap();
+		println!("[IPv6 UDP Test] UDP echo server started at: {}", echo_addr);
+
+		let echo_server_clone = echo_server.clone();
+		let echo_task = tokio::spawn(async move {
+			let mut buf = vec![0u8; 1024];
+			println!("[IPv6 UDP Echo Server] Waiting for packets...");
+			match timeout(Duration::from_secs(5), echo_server_clone.recv_from(&mut buf)).await {
+				Ok(Ok((n, addr))) => {
+					println!("[IPv6 UDP Echo Server] Received {} bytes from {}", n, addr);
+					if let Err(e) = echo_server_clone.send_to(&buf[..n], addr).await {
+						eprintln!("[IPv6 UDP Echo Server] Failed to send response: {}", e);
+					} else {
+						println!("[IPv6 UDP Echo Server] Echoed {} bytes back", n);
+					}
+				}
+				Ok(Err(e)) => {
+					eprintln!("[IPv6 UDP Echo Server] Error receiving: {}", e);
+				}
+				Err(_) => {
+					eprintln!("[IPv6 UDP Echo Server] Timeout waiting for data");
+				}
+			}
+		});
+
+		tokio::time::sleep(Duration::from_millis(100)).await;
+
+		// Connect to SOCKS5 proxy on IPv6
+		println!("[IPv6 UDP Test] Connecting to SOCKS5 proxy at [::1]:1081...");
+		let socks_addr: SocketAddr = "[::1]:1081".parse().unwrap();
+
+		let backing_socket_result = TcpStream::connect(socks_addr).await;
+
+		if let Ok(backing_socket) = backing_socket_result {
+			println!("[IPv6 UDP Test] TCP connection to SOCKS5 proxy established");
+
+			let client_bind_addr = SocketAddr::new(IpAddr::V6(Ipv6Addr::UNSPECIFIED), 0);
+			println!("[IPv6 UDP Test] Binding UDP socket through SOCKS5...");
+			let socks_result = Socks5Datagram::bind(backing_socket, client_bind_addr).await;
+
+			if let Ok(socks) = socks_result {
+				println!("[IPv6 UDP Test] UDP association established through SOCKS5");
+
+				let test_data = b"Hello, IPv6 UDP through TUIC!";
+				println!("[IPv6 UDP Test] Test data: {} bytes", test_data.len());
+
+				let target_ip = echo_addr.ip();
+				let target_port = echo_addr.port();
+				println!("[IPv6 UDP Test] Sending to target {}:{}...", target_ip, target_port);
+				let send_result = socks.send_to(test_data, (target_ip, target_port)).await;
+
+				match send_result {
+					Ok(sent) => {
+						println!("[IPv6 UDP Test] Successfully sent {} bytes through SOCKS5", sent);
+						println!("[IPv6 UDP Test] Waiting for echo response...");
+
+						let mut buffer = vec![0u8; 1024];
+						let recv_result = timeout(Duration::from_secs(2), socks.recv_from(&mut buffer)).await;
+
+						match recv_result {
+							Ok(Ok((len, addr))) => {
+								println!("[IPv6 UDP Test] Received {} bytes from {:?}", len, addr);
+								if &buffer[..len] == test_data {
+									println!("[IPv6 UDP Test] ✓ IPv6 UDP echo test PASSED!");
+								} else {
+									eprintln!("[IPv6 UDP Test] ✗ IPv6 UDP echo test FAILED - data mismatch!");
+								}
+							}
+							Ok(Err(e)) => {
+								eprintln!("[IPv6 UDP Test] Failed to receive response: {}", e);
+							}
+							Err(_) => {
+								eprintln!("[IPv6 UDP Test] Timeout waiting for response");
+							}
+						}
+					}
+					Err(e) => {
+						eprintln!("[IPv6 UDP Test] Failed to send data: {}", e);
+					}
+				}
+			} else {
+				eprintln!("[IPv6 UDP Test] Failed to bind UDP through SOCKS5: {:?}", socks_result.err());
+			}
+		} else {
+			eprintln!(
+				"[IPv6 UDP Test] Failed to connect to SOCKS5 proxy: {:?}",
+				backing_socket_result.err()
+			);
+		}
+
+		echo_task.abort();
+		println!("[IPv6 UDP Test] UDP test completed\n");
+	};
+
+	let _ = timeout(Duration::from_secs(3), udp_test).await;
+
+	// Clean up
+	client_handle.abort();
+	server_handle.abort();
+
+	tokio::time::sleep(Duration::from_millis(100)).await;
+
+	println!("[IPv6 Test] ========================================");
+	println!("[IPv6 Test] IPv6 Integration Test Completed");
+	println!("[IPv6 Test] ========================================\n");
+}

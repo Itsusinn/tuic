@@ -335,6 +335,11 @@ where
 	let port = port.parse().map_err(DeError::custom)?;
 	s.truncate(domain.len());
 
+	// Strip brackets from IPv6 addresses (e.g., "[::1]" -> "::1")
+	if s.starts_with('[') && s.ends_with(']') {
+		s = s[1..s.len() - 1].to_string();
+	}
+
 	Ok((s, port))
 }
 

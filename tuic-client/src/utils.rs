@@ -45,6 +45,14 @@ pub struct ServerAddr {
 
 impl ServerAddr {
 	pub fn new(domain: String, port: u16, ip: Option<IpAddr>, ipstack_prefer: StackPrefer) -> Self {
+		// Strip brackets from IPv6 addresses (e.g., "[::1]" -> "::1")
+		// Brackets are URL notation and not valid in TLS server names
+		let domain = if domain.starts_with('[') && domain.ends_with(']') {
+			domain[1..domain.len() - 1].to_string()
+		} else {
+			domain
+		};
+
 		Self {
 			domain,
 			port,
