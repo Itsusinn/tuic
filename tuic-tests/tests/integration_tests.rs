@@ -3,6 +3,7 @@
 
 use std::{io::Cursor, time::Duration};
 
+use serial_test::serial;
 use tokio::time::timeout;
 use tuic_core::{Address, Authenticate, Connect, Dissociate, Header, Heartbeat, Packet};
 use uuid::Uuid;
@@ -509,6 +510,7 @@ fn test_header_serialization_lengths() {
 // IMPORTANT: The server ACL must be configured to allow localhost connections
 // for the test to work, since all echo servers run on 127.0.0.1
 #[tokio::test]
+#[serial]
 #[tracing_test::traced_test]
 async fn test_server_client_integration() {
 	use std::{collections::HashMap, net::SocketAddr, path::PathBuf};
@@ -828,6 +830,7 @@ async fn test_server_client_integration() {
 // This addresses the error that occurs when using IPv6 addresses like
 // "[::1]:443"
 #[tokio::test]
+#[serial]
 #[tracing_test::traced_test]
 async fn test_ipv6_server_client_integration() {
 	use std::{collections::HashMap, net::SocketAddr, path::PathBuf};
