@@ -12,6 +12,7 @@ congestion_control = "cubic"
 alpn = ["h3"]
 zero_rtt_handshake = true
 disable_sni = true
+sni = "custom.sni.example.com"
 timeout = "20s"
 heartbeat = "10s"
 disable_native_certs = true

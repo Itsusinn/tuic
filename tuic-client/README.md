@@ -75,6 +75,10 @@ zero_rtt_handshake = false
 # Disable SNI (Server Name Indication)
 disable_sni = false
 
+# Optional: Override SNI (Server Name Indication) hostname
+# Use this to specify a custom SNI that differs from the server hostname
+# sni = "custom.example.com"
+
 # Connection timeout
 timeout = "8s"
 

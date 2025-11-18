@@ -41,10 +41,15 @@ pub struct ServerAddr {
 	port:               u16,
 	ip:                 Option<IpAddr>,
 	pub ipstack_prefer: StackPrefer,
+	sni:                Option<String>,
 }
 
 impl ServerAddr {
 	pub fn new(domain: String, port: u16, ip: Option<IpAddr>, ipstack_prefer: StackPrefer) -> Self {
+		Self::with_sni(domain, port, ip, ipstack_prefer, None)
+	}
+
+	pub fn with_sni(domain: String, port: u16, ip: Option<IpAddr>, ipstack_prefer: StackPrefer, sni: Option<String>) -> Self {
 		// Strip brackets from IPv6 addresses (e.g., "[::1]" -> "::1")
 		// Brackets are URL notation and not valid in TLS server names
 		let domain = if domain.starts_with('[') && domain.ends_with(']') {
@@ -58,11 +63,12 @@ impl ServerAddr {
 			port,
 			ip,
 			ipstack_prefer,
+			sni,
 		}
 	}
 
 	pub fn server_name(&self) -> &str {
-		&self.domain
+		self.sni.as_deref().unwrap_or(&self.domain)
 	}
 
 	pub async fn resolve(&self) -> Result<impl Iterator<Item = SocketAddr>, Error> {
