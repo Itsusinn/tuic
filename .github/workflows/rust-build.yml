@@ -93,8 +93,8 @@ jobs:
         uses: dtolnay/rust-toolchain@master
         with:
           toolchain: ${{ matrix.toolchain || inputs.rust-toolchain }}
-          target: ${{ matrix.target }}
-          components: ${{ matrix.components || 'rustfmt, clippy' }}
+          targets: ${{ matrix.build-std && 'x86_64-unknown-linux-gnu' || matrix.target }}
+          components: ${{ matrix.components || matrix.build-std && 'rustfmt,clippy,rust-src' || 'rustfmt, clippy' }}
 
       - name: Cache Docker images for cross
         if: matrix.tool == 'cross'
@@ -105,7 +105,9 @@ jobs:
       - name: Install cross-compilation tools
         if: matrix.tool == 'cross'
         run: |
-          rustup target add ${TARGET}
+          if [ "${{ matrix.build-std }}" != "true" ]; then
+            rustup target add ${TARGET}
+          fi
           cargo install cross --git https://github.com/cross-rs/cross --force
         env:
           TARGET: ${{ matrix.target }}
@@ -134,7 +136,7 @@ jobs:
         with:
           tool: ${{ matrix.tool }}
           command: clippy
-          args: --all --target ${{ matrix.target }} ${{ matrix.extra-args }} -- -D warnings
+          args: --all --target ${{ matrix.target }} ${{ matrix.build-std && '-Z build-std=std,panic_abort' || '' }} ${{ matrix.extra-args }} -- -D warnings
         env:
           RUSTFLAGS: ${{ matrix.rustflags }} ${{ inputs.rustflags }}
 
@@ -158,7 +160,7 @@ jobs:
         with:
           tool: ${{ matrix.tool }}
           command: build
-          args: --workspace --release --target ${{ matrix.target }} ${{ matrix.extra-args }}
+          args: --workspace --release --target ${{ matrix.target }} ${{ matrix.build-std && '-Z build-std=std,panic_abort' || '' }} ${{ matrix.extra-args }}
         env:
           RUSTFLAGS: ${{ matrix.rustflags }} ${{ inputs.rustflags }}
           CROSS_BUILD_ZIG: ${{ matrix.zig }}
