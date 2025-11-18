@@ -149,7 +149,7 @@ jobs:
         with:
           tool: ${{ matrix.tool }}
           command: test
-          args: --all --target ${{ matrix.target }} ${{ matrix.extra-args }} -- --nocapture
+          args: --all --target ${{ matrix.target }} ${{ matrix.build-std && '-Z build-std=std,panic_abort' || '' }} ${{ matrix.extra-args }} -- --nocapture
         env:
           CROSS_CONTAINER_OPTS: "--network host"
           RUSTFLAGS: ${{ matrix.rustflags }} ${{ inputs.rustflags }}
