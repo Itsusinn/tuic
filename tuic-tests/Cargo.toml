@@ -23,7 +23,7 @@ tuic-server = { path = "../tuic-server", default-features = false }
 # Required dependencies
 uuid = { version = "1", features = ["v4", "serde", "std"] }
 tokio = { version = "1", features = ["full"] }
-json5 = { version = "0.4" }
+json5 = { version = "1.0" }
 lexopt = { version = "0.3" }
 eyre = { version = "0.6" }
 fast-socks5 = { version = "1.0.0-rc.0" }
