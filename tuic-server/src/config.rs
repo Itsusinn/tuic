@@ -557,9 +557,18 @@ pub async fn parse_config(cli: Cli, env_state: EnvState) -> eyre::Result<Config>
 	// Handle --init flag
 	if cli.init {
 		warn!("Generating an example configuration to config.toml......");
+
 		let example = Config::full_example();
 		let example = toml::to_string_pretty(&example).unwrap();
-		tokio::fs::write("config.toml", example).await?;
+
+		let default_path = std::path::Path::new("config.toml");
+		if tokio::fs::try_exists(default_path).await? {
+			return Err(eyre::eyre!(
+				"config.toml already exists in the current directory, aborting to avoid overwriting."
+			));
+		}
+
+		tokio::fs::write(default_path, example).await?;
 		return Err(Control("Done").into());
 	}
 
@@ -767,7 +776,6 @@ mod tests {
 
 		let uuid = Uuid::parse_str("123e4567-e89b-12d3-a456-426614174002").unwrap();
 		assert_eq!(result.users.get(&uuid), Some(&"old_password".to_string()));
-
 
 		assert!(!result.tls.self_sign);
 		assert!(result.data_dir.ends_with("__test__legacy_data")); // Cleanup test directories
