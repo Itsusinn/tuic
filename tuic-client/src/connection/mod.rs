@@ -46,7 +46,7 @@ static TIMEOUT: AtomicCell<Duration> = AtomicCell::new(Duration::from_secs(8));
 /// Default error code for QUIC connection
 pub const ERROR_CODE: VarInt = VarInt::from_u32(0);
 /// Default maximum concurrent streams
-const DEFAULT_CONCURRENT_STREAMS: u32 = 64;
+const DEFAULT_CONCURRENT_STREAMS: u32 = 512;
 
 /// Represents a client QUIC connection, including stream counters and
 /// configuration
