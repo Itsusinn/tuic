@@ -717,7 +717,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "26f6982da09e166efe7dc3c5cf1fe01ef85419733eb188c0df0b571eda9e8a81"
 dependencies = [
  "figment",
- "json5",
+ "json5 0.4.1",
  "serde",
 ]
 
@@ -1319,6 +1319,16 @@ dependencies = [
  "pest",
  "pest_derive",
  "serde",
+]
+
+[[package]]
+name = "json5"
+version = "1.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "56c86c72f9e1d3fe29baa32cab8896548eef9aae271fce4e796d16b583fdf6d5"
+dependencies = [
+ "serde",
+ "ucd-trie",
 ]
 
 [[package]]
@@ -2844,7 +2854,7 @@ dependencies = [
  "figment-json5",
  "humantime",
  "humantime-serde",
- "json5",
+ "json5 1.3.0",
  "once_cell",
  "quinn",
  "register-count",
@@ -2912,7 +2922,7 @@ dependencies = [
  "instant-acme",
  "ip_network",
  "ipnet",
- "json5",
+ "json5 1.3.0",
  "moka",
  "pest",
  "pest_derive",
@@ -2948,7 +2958,7 @@ dependencies = [
  "aws-lc-rs",
  "eyre",
  "fast-socks5",
- "json5",
+ "json5 1.3.0",
  "lexopt",
  "rustls",
  "serial_test",
