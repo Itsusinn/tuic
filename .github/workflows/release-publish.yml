@@ -20,13 +20,13 @@ jobs:
       # Setup Steps
       #--------------------------------------------------
       - name: Checkout code
-        uses: actions/checkout@v5
+        uses: actions/checkout@v6
         with:
           fetch-depth: 0
           fetch-tags: true
 
       - name: Download binary artifacts
-        uses: actions/download-artifact@v6
+        uses: actions/download-artifact@v7
         with:
           pattern: "*-binaries"
           path: ./packages
