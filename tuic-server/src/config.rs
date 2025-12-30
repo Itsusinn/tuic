@@ -12,6 +12,7 @@ use figment::{
 	providers::{Format, Serialized, Toml, Yaml},
 };
 use figment_json5::Json5;
+use rand::{Rng, distr::Alphanumeric, rng};
 use serde::{Deserialize, Serialize};
 use tracing::{level_filters::LevelFilter, warn};
 use uuid::Uuid;
@@ -326,6 +327,13 @@ pub struct ExperimentalConfig {
 	pub drop_private:  bool,
 }
 
+fn generate_random_alphanumeric_string(min: usize, max: usize) -> String {
+	let mut rng = rng();
+	let len = rng.random_range(min..=max);
+
+	rng.sample_iter(&Alphanumeric).take(len).map(char::from).collect()
+}
+
 impl Config {
 	pub fn migrate(&mut self) {
 		// Migrate TLS-related fields
@@ -401,10 +409,15 @@ impl Config {
 		Self {
 			users: {
 				let mut users = HashMap::new();
-				users.insert(Uuid::new_v4(), "YOUR_USER_PASSWD_HERE".into());
+				for _ in 0..5 {
+					users.insert(Uuid::new_v4(), generate_random_alphanumeric_string(30, 50));
+				}
 				users
 			},
-			restful: Some(RestfulConfig::default()),
+			restful: Some(RestfulConfig {
+				secret: generate_random_alphanumeric_string(30, 50),
+				..Default::default()
+			}),
 			// Provide a minimal outbound example
 			outbound: OutboundConfig {
 				default: OutboundRule {
