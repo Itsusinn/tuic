@@ -2927,6 +2927,7 @@ dependencies = [
  "pest",
  "pest_derive",
  "quinn",
+ "rand",
  "rcgen",
  "regex",
  "register-count",

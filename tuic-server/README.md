@@ -191,10 +191,12 @@ certificate = ""
 private_key = ""
 # ALPN protocols (e.g. ["h3"])
 alpn = []
-# Domain name for certificate issuance or self-sign
+# Domain name or IP address for certificate issuance or self-sign
 hostname = "localhost"
 # Enable built-in ACME automatic SSL certificate provisioning
 auto_ssl = false
+# (Optional) email for ACME account creation, if left empty, will use 'admin@<hostname>' or 'admin@<random_string>.com'
+acme_email = ""
 
 [restful]
 # Address to bind RESTful API server
