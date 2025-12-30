@@ -76,6 +76,7 @@ axum = { version = "0.8", features = ["json", "tokio"] }
 axum-extra = { version = "0.12", features = ["typed-header"] }
 
 tikv-jemallocator = { version = "0.6", optional = true }
+rand = "0.9.2"
 
 [dev-dependencies]
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"]}
