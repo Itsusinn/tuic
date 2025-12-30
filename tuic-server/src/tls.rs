@@ -275,17 +275,15 @@ async fn provision_certificate_attempt(hostname: &str, cert_path: &Path, key_pat
 	info!("Starting ACME certificate provisioning for domain: {}", hostname);
 	let is_ip_addr = hostname.parse::<IpAddr>().is_ok();
 	let contact = if !acme_email.is_empty() {
-		acme_email
+		acme_email.to_string()
+	} else if is_ip_addr {
+		let mut hasher = Sha256::new();
+		hasher.update(hostname);
+		let hash = hasher.finalize();
+		let random_str = &hash.iter().map(|b| format!("{:02x}", b)).collect::<String>()[..32];
+		format!("admin@{random_str}.com")
 	} else {
-		&*if is_ip_addr {
-			let mut hasher = Sha256::new();
-			hasher.update(hostname);
-			let hash = hasher.finalize();
-			let random_str = &hash.iter().map(|b| format!("{:02x}", b)).collect::<String>()[..32];
-			format!("admin@{random_str}.com")
-		} else {
-			format!("admin@{hostname}")
-		}
+		format!("admin@{hostname}")
 	};
 	info!("Using {} as ACME account email", contact);
 
@@ -311,12 +309,15 @@ async fn provision_certificate_attempt(hostname: &str, cert_path: &Path, key_pat
 	} else {
 		vec![Identifier::Dns(hostname.to_string())]
 	};
-	let _order = if is_ip_addr {
+	let order_config = if is_ip_addr {
 		NewOrder::new(&identifiers).profile("shortlived")
 	} else {
 		NewOrder::new(&identifiers)
 	};
-	let mut order = account.new_order(&_order).await.context("Failed to create ACME order")?;
+	let mut order = account
+		.neworder_config(&order_config)
+		.await
+		.context("Failed to create ACME order")?;
 
 	let state = order.state();
 	info!("ACME order state: {:?}", state.status);
