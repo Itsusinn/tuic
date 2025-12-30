@@ -315,7 +315,7 @@ async fn provision_certificate_attempt(hostname: &str, cert_path: &Path, key_pat
 		NewOrder::new(&identifiers)
 	};
 	let mut order = account
-		.neworder_config(&order_config)
+		.new_order(&order_config)
 		.await
 		.context("Failed to create ACME order")?;
 
