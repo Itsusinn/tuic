@@ -8,6 +8,7 @@ zero_rtt_handshake = true
 self_sign = true
 auto_ssl = true
 hostname = "testhost"
+acme_email = "admin@example.com"
 
 [quic]
 initial_mtu = 1400

@@ -150,6 +150,9 @@ pub struct Config {
 	#[serde(default, rename = "hostname")]
 	#[deprecated]
 	pub __hostname:           Option<String>,
+	#[serde(default, rename = "acme_email")]
+	#[deprecated]
+	pub __acme_email:         Option<String>,
 	#[serde(default, rename = "congestion_control")]
 	#[deprecated]
 	pub __congestion_control: Option<CongestionController>,
@@ -200,6 +203,8 @@ pub struct TlsConfig {
 	pub hostname:    String,
 	#[educe(Default(expression = false))]
 	pub auto_ssl:    bool,
+	#[educe(Default(expression = ""))]
+	pub acme_email:  String,
 }
 
 #[derive(Deserialize, Serialize, Educe)]
@@ -353,6 +358,9 @@ impl Config {
 			}
 			if let Some(hostname) = self.__hostname.take() {
 				self.tls.hostname = hostname;
+			}
+			if let Some(acme_email) = self.__acme_email.take() {
+				self.tls.acme_email = acme_email;
 			}
 			if let Some(alpn) = self.__alpn.take() {
 				self.tls.alpn = alpn;
@@ -754,6 +762,7 @@ mod tests {
 		assert!(result.tls.self_sign);
 		assert!(result.tls.auto_ssl);
 		assert_eq!(result.tls.hostname, "testhost");
+		assert_eq!(result.tls.acme_email, "admin@example.com");
 		assert_eq!(result.quic.initial_mtu, 1400);
 		assert_eq!(result.quic.min_mtu, 1300);
 		assert_eq!(result.quic.send_window, 10000000);

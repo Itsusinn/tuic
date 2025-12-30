@@ -77,7 +77,6 @@ impl Server {
 					.map_err(|err| Error::Socket("socks5 server dual-stack socket setting error", err))?;
 			}
 
-
 			socket
 				.set_reuse_address(true)
 				.map_err(|err| Error::Socket("failed to set socks5 server socket to reuse_address", err))?;
