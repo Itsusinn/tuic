@@ -39,7 +39,7 @@ impl Connection {
 		}
 	}
 
-	fn decide_acl_for_addrs(
+	async fn decide_acl_for_addrs(
 		&self,
 		addrs: &[SocketAddr],
 		port: u16,
@@ -110,10 +110,26 @@ impl Connection {
 					AclAddress::Domain(_) | AclAddress::WildcardDomain(_) => {
 						domain_matches(&rule.addr, dom) && ports_proto_ok(rule)
 					}
-					_ => addrs.iter().any(|sa| rule.matching(*sa, port, is_tcp)),
+					_ => {
+						let mut found = false;
+						for sa in addrs {
+							if rule.matching(*sa, port, is_tcp).await {
+								found = true;
+								break;
+							}
+						}
+						found
+					}
 				}
 			} else {
-				addrs.iter().any(|sa| rule.matching(*sa, port, is_tcp))
+				let mut found = false;
+				for sa in addrs {
+					if rule.matching(*sa, port, is_tcp).await {
+						found = true;
+						break;
+					}
+				}
+				found
 			};
 
 			if matched {
@@ -189,7 +205,7 @@ impl Connection {
 				Address::DomainAddress(d, _) => Some(d.as_str()),
 				_ => None,
 			};
-			let (outbound_name, hijack, drop) = self.decide_acl_for_addrs(&initial_addrs, port, true, domain);
+			let (outbound_name, hijack, drop) = self.decide_acl_for_addrs(&initial_addrs, port, true, domain).await;
 
 			if drop {
 				warn!(
@@ -368,7 +384,8 @@ impl Connection {
 				Address::DomainAddress(d, _) => Some(d.as_str()),
 				_ => None,
 			};
-			let (outbound_name, hijack, should_drop) = self.decide_acl_for_addrs(&initial_addrs, addr.port(), false, domain);
+			let (outbound_name, hijack, should_drop) =
+				self.decide_acl_for_addrs(&initial_addrs, addr.port(), false, domain).await;
 			if should_drop {
 				// Silently drop the packet as per ACL
 				warn!(
