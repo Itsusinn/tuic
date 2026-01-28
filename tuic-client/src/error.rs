@@ -23,6 +23,8 @@ pub enum Error {
 	WrongPacketSource,
 	#[error("invalid socks5 authentication")]
 	InvalidSocks5Auth,
+	#[error("socks5 error: {0}")]
+	Socks5(String),
 	#[error(transparent)]
 	Other(#[from] anyhow::Error),
 }
