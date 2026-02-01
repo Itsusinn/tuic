@@ -58,8 +58,8 @@ humantime-serde = "1"
 ip_network = "0.4"
 ipnet = { version = "2", features = ["serde"] }
 regex = "1"
-pest = "2.7"
-pest_derive = "2.7"
+pest = "2.8"
+pest_derive = "2.8"
 
 # Logging
 time = { version = "0.3", features = ["macros", "local-offset"] }
