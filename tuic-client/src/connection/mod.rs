@@ -1,6 +1,6 @@
 // Standard library imports for networking, synchronization, and timing
 use std::{
-	net::{Ipv4Addr, Ipv6Addr, SocketAddr, UdpSocket},
+	net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, UdpSocket},
 	sync::{Arc, atomic::AtomicU32},
 	time::Duration,
 };
@@ -10,8 +10,8 @@ use anyhow::Context;
 use crossbeam_utils::atomic::AtomicCell;
 use once_cell::sync::OnceCell;
 use quinn::{
-	ClientConfig, Connection as QuinnConnection, Endpoint as QuinnEndpoint, EndpointConfig, TokioRuntime, TransportConfig,
-	VarInt, ZeroRttAccepted,
+	AsyncUdpSocket, ClientConfig, Connection as QuinnConnection, Endpoint as QuinnEndpoint, EndpointConfig, TokioRuntime,
+	TransportConfig, VarInt, ZeroRttAccepted,
 	congestion::{BbrConfig, CubicConfig, NewRenoConfig},
 	crypto::rustls::QuicClientConfig,
 };
@@ -30,13 +30,16 @@ use tuic_core::quinn::{Connection as Model, side};
 use uuid::Uuid;
 
 use crate::{
-	config::Relay,
+	config::{ProxyConfig, Relay},
 	error::Error,
 	utils::{self, CongestionControl, ServerAddr, UdpRelayMode},
 };
 
 mod handle_stream;
 mod handle_task;
+mod socks5;
+
+use self::socks5::Socks5UdpSocket;
 
 // Global state for endpoint, connection, and timeout
 static ENDPOINT: OnceCell<AsyncRwLock<Endpoint>> = OnceCell::new();
@@ -178,8 +181,35 @@ impl Connection {
 
 		// Prepare server address and create the primary endpoint with IPv4 binding
 		let server = ServerAddr::with_sni(cfg.server.0, cfg.server.1, cfg.ip, cfg.ipstack_prefer, cfg.sni);
-		let socket = UdpSocket::bind(SocketAddr::from((Ipv4Addr::UNSPECIFIED, 0)))?;
-		let mut ep = QuinnEndpoint::new(EndpointConfig::default(), None, socket, Arc::new(TokioRuntime))?;
+
+		let (mut ep, socks5_ctrl) = if let Some(proxy_cfg) = cfg.proxy {
+			debug!(
+				"[relay] outgoing traffic is using socks5 proxy {}:{}",
+				proxy_cfg.server.0.as_str(),
+				proxy_cfg.server.1
+			);
+
+			let (ctrl, relay_addr) = socks5_handshake(&proxy_cfg).await?;
+			let bind_addr = if relay_addr.is_ipv6() {
+				SocketAddr::from((Ipv6Addr::UNSPECIFIED, 0))
+			} else {
+				SocketAddr::from((Ipv4Addr::UNSPECIFIED, 0))
+			};
+			let socket = UdpSocket::bind(bind_addr)?;
+			socket.set_nonblocking(true)?;
+			let socket = tokio::net::UdpSocket::from_std(socket)?;
+			let ep = QuinnEndpoint::new_with_abstract_socket(
+				EndpointConfig::default(),
+				None,
+				Arc::new(Socks5UdpSocket::new(socket, relay_addr, proxy_cfg.udp_buffer_size)) as Arc<dyn AsyncUdpSocket>,
+				Arc::new(TokioRuntime),
+			)?;
+			(ep, Some(ctrl))
+		} else {
+			let socket = UdpSocket::bind(SocketAddr::from((Ipv4Addr::UNSPECIFIED, 0)))?;
+			let ep = QuinnEndpoint::new(EndpointConfig::default(), None, socket, Arc::new(TokioRuntime))?;
+			(ep, None)
+		};
 
 		ep.set_default_client_config(config);
 
@@ -194,6 +224,7 @@ impl Connection {
 			heartbeat: cfg.heartbeat,
 			gc_interval: cfg.gc_interval,
 			gc_lifetime: cfg.gc_lifetime,
+			socks5_ctrl,
 		};
 
 		ENDPOINT
@@ -323,6 +354,9 @@ struct Endpoint {
 	heartbeat:          Duration,
 	gc_interval:        Duration,
 	gc_lifetime:        Duration,
+	// SOCKS5 control TCP stream for UDP ASSOCIATE: this must be kept alive to
+	// maintain the UDP relay session, since closing it invalidates the relay address.
+	socks5_ctrl:        Option<tokio::net::TcpStream>,
 }
 
 impl Endpoint {
@@ -331,9 +365,12 @@ impl Endpoint {
 	async fn connect(&self) -> Result<Connection, Error> {
 		let server_addr = self.server.resolve().await?.next().context("no resolved address")?;
 		// Check if endpoint's local address IP family matches the server's resolved IP
-		// family
+		// family. When using SOCKS5 proxy, rebinding is skipped because the endpoint is
+		// already bound to the IP family of the SOCKS5 relay address. The SOCKS5 proxy
+		// handles the actual connection to the target server, making the target
+		// server's IP family irrelevant to the local socket's binding.
 		let mut need_rebind = false;
-		if self.ep.local_addr()?.is_ipv4() && !server_addr.ip().is_ipv4() {
+		if self.socks5_ctrl.is_none() && self.ep.local_addr()?.is_ipv4() && !server_addr.ip().is_ipv4() {
 			need_rebind = true;
 		}
 		if need_rebind {
@@ -389,4 +426,96 @@ impl Endpoint {
 			Err(err) => Err(err),
 		}
 	}
+}
+
+async fn socks5_handshake(proxy_cfg: &ProxyConfig) -> Result<(tokio::net::TcpStream, SocketAddr), Error> {
+	use tokio::{
+		io::{AsyncReadExt, AsyncWriteExt},
+		net::TcpStream,
+	};
+
+	let mut stream = TcpStream::connect((proxy_cfg.server.0.as_str(), proxy_cfg.server.1))
+		.await
+		.map_err(|e| Error::Socks5(format!("failed to connect to proxy: {}", e)))?;
+
+	// Greeting
+	if proxy_cfg.username.is_some() {
+		stream.write_all(&[0x05, 0x02, 0x00, 0x02]).await?;
+	} else {
+		stream.write_all(&[0x05, 0x01, 0x00]).await?;
+	}
+
+	let mut buf = [0u8; 2];
+	stream.read_exact(&mut buf).await?;
+	if buf[0] != 0x05 {
+		return Err(Error::Socks5("invalid socks5 version".to_string()));
+	}
+
+	match buf[1] {
+		0x00 => {} // No auth
+		0x02 => {
+			// Password auth
+			let username = proxy_cfg.username.as_ref().unwrap();
+			let password = proxy_cfg.password.as_ref().unwrap();
+			let mut auth_buf = Vec::new();
+			auth_buf.push(0x01); // Version
+			auth_buf.push(username.len() as u8);
+			auth_buf.extend_from_slice(username.as_bytes());
+			auth_buf.push(password.len() as u8);
+			auth_buf.extend_from_slice(password.as_bytes());
+			stream.write_all(&auth_buf).await?;
+
+			let mut auth_res = [0u8; 2];
+			stream.read_exact(&mut auth_res).await?;
+			if auth_res[1] != 0x00 {
+				return Err(Error::Socks5("socks5 authentication failed".to_string()));
+			}
+		}
+		0xFF => return Err(Error::Socks5("no acceptable authentication methods".to_string())),
+		_ => return Err(Error::Socks5("unsupported authentication method".to_string())),
+	}
+
+	// UDP ASSOCIATE
+	stream.write_all(&[0x05, 0x03, 0x00, 0x01, 0, 0, 0, 0, 0, 0]).await?;
+
+	let mut res_buf = [0u8; 4];
+	stream.read_exact(&mut res_buf).await?;
+	if res_buf[0] != 0x05 || res_buf[1] != 0x00 {
+		return Err(Error::Socks5(format!("UDP ASSOCIATE failed with status: {}", res_buf[1])));
+	}
+
+	let atyp = res_buf[3];
+	let relay_addr = match atyp {
+		0x01 => {
+			let mut ip = [0u8; 4];
+			stream.read_exact(&mut ip).await?;
+			let mut port = [0u8; 2];
+			stream.read_exact(&mut port).await?;
+			SocketAddr::new(IpAddr::V4(Ipv4Addr::from(ip)), u16::from_be_bytes(port))
+		}
+		0x03 => {
+			let mut len = [0u8; 1];
+			stream.read_exact(&mut len).await?;
+			let mut domain = vec![0u8; len[0] as usize];
+			stream.read_exact(&mut domain).await?;
+			let mut port = [0u8; 2];
+			stream.read_exact(&mut port).await?;
+			let domain = String::from_utf8_lossy(&domain);
+			let port = u16::from_be_bytes(port);
+			tokio::net::lookup_host(format!("{}:{}", domain, port))
+				.await?
+				.next()
+				.ok_or_else(|| Error::Socks5("failed to resolve relay address".to_string()))?
+		}
+		0x04 => {
+			let mut ip = [0u8; 16];
+			stream.read_exact(&mut ip).await?;
+			let mut port = [0u8; 2];
+			stream.read_exact(&mut port).await?;
+			SocketAddr::new(IpAddr::V6(Ipv6Addr::from(ip)), u16::from_be_bytes(port))
+		}
+		_ => return Err(Error::Socks5("unsupported address type".to_string())),
+	};
+
+	Ok((stream, relay_addr))
 }

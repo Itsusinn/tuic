@@ -608,6 +608,7 @@ async fn test_server_client_integration() {
 			gc_interval:          Duration::from_secs(3),
 			gc_lifetime:          Duration::from_secs(15),
 			skip_cert_verify:     true,
+			proxy:                None,
 		},
 		local:     tuic_client::config::Local {
 			server:          "127.0.0.1:1080".parse().unwrap(),
@@ -930,6 +931,7 @@ async fn test_ipv6_server_client_integration() {
 			gc_interval:          Duration::from_secs(3),
 			gc_lifetime:          Duration::from_secs(15),
 			skip_cert_verify:     true,
+			proxy:                None,
 		},
 		local:     tuic_client::config::Local {
 			server:          "[::1]:1081".parse().unwrap(),

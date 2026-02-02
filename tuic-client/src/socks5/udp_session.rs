@@ -64,7 +64,13 @@ impl UdpSession {
 		})
 	}
 
-	pub async fn send(&self, pkt: Bytes, src_addr: Address) -> Result<(), Error> {
+	pub async fn send(&self, pkt: Bytes, mut src_addr: Address) -> Result<(), Error> {
+		if let Address::SocketAddress(SocketAddr::V6(v6)) = src_addr {
+			if let Some(v4) = v6.ip().to_ipv4_mapped() {
+				src_addr = Address::SocketAddress(SocketAddr::new(IpAddr::V4(v4), v6.port()));
+			}
+		}
+
 		let src_addr_display = src_addr.to_string();
 
 		debug!(
@@ -90,7 +96,13 @@ impl UdpSession {
 	}
 
 	pub async fn recv(&self) -> Result<(Bytes, Address), Error> {
-		let (pkt, frag, dst_addr, src_addr) = self.socket.recv_from().await?;
+		let (pkt, frag, mut dst_addr, src_addr) = self.socket.recv_from().await?;
+
+		if let Address::SocketAddress(SocketAddr::V6(v6)) = dst_addr {
+			if let Some(v4) = v6.ip().to_ipv4_mapped() {
+				dst_addr = Address::SocketAddress(SocketAddr::new(IpAddr::V4(v4), v6.port()));
+			}
+		}
 
 		if let Ok(connected_addr) = self.socket.peer_addr() {
 			let connected_addr = match connected_addr {

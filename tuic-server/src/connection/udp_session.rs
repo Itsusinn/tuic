@@ -1,6 +1,6 @@
 use std::{
 	io::Error as IoError,
-	net::{Ipv4Addr, Ipv6Addr, SocketAddr, UdpSocket as StdUdpSocket},
+	net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, UdpSocket as StdUdpSocket},
 	sync::{Arc, Weak},
 };
 
@@ -129,7 +129,13 @@ impl UdpSession {
 		Ok(Arc::downgrade(&session))
 	}
 
-	pub async fn send(&self, pkt: Bytes, addr: SocketAddr) -> Result<(), Error> {
+	pub async fn send(&self, pkt: Bytes, mut addr: SocketAddr) -> Result<(), Error> {
+		if let SocketAddr::V6(v6) = addr {
+			if let Some(v4) = v6.ip().to_ipv4_mapped() {
+				addr = SocketAddr::new(IpAddr::V4(v4), v6.port());
+			}
+		}
+
 		let socket = match addr {
 			SocketAddr::V4(_) => &self.socket_v4,
 			SocketAddr::V6(_) => self.socket_v6.as_ref().ok_or_else(|| Error::UdpRelayIpv6Disabled(addr))?,
@@ -142,7 +148,12 @@ impl UdpSession {
 	async fn recv(&self) -> Result<(Bytes, SocketAddr), IoError> {
 		let recv = async |socket: &UdpSocket| -> Result<(Bytes, SocketAddr), IoError> {
 			let mut buf = vec![0u8; self.ctx.cfg.max_external_packet_size];
-			let (n, addr) = socket.recv_from(&mut buf).await?;
+			let (n, mut addr) = socket.recv_from(&mut buf).await?;
+			if let SocketAddr::V6(v6) = addr {
+				if let Some(v4) = v6.ip().to_ipv4_mapped() {
+					addr = SocketAddr::new(IpAddr::V4(v4), v6.port());
+				}
+			}
 			buf.truncate(n);
 			Ok((Bytes::from(buf), addr))
 		};
