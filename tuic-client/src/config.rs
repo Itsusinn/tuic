@@ -155,6 +155,27 @@ pub struct Relay {
 
 	#[educe(Default = false)]
 	pub skip_cert_verify: bool,
+
+	#[educe(Default = None)]
+	pub proxy: Option<ProxyConfig>,
+}
+
+#[derive(Debug, Deserialize, serde::Serialize, Educe, Clone, PartialEq, Eq)]
+#[educe(Default)]
+#[serde(deny_unknown_fields, default)]
+pub struct ProxyConfig {
+	#[serde(deserialize_with = "deserialize_server")]
+	#[educe(Default(expression = ("".to_string(), 0)))]
+	pub server: (String, u16),
+
+	#[educe(Default = None)]
+	pub username: Option<String>,
+
+	#[educe(Default = None)]
+	pub password: Option<String>,
+
+	#[educe(Default = 2048)]
+	pub udp_buffer_size: usize,
 }
 
 #[derive(Debug, Deserialize, serde::Serialize, Educe)]
@@ -600,6 +621,29 @@ mod tests {
 		assert_eq!(config.relay.alpn[0], b"h3".to_vec());
 		assert_eq!(config.relay.alpn[1], b"h2".to_vec());
 		assert_eq!(config.relay.alpn[2], b"http/1.1".to_vec());
+	}
+
+	#[test]
+	fn test_proxy_config() {
+		let toml_config = r#"
+[relay]
+server = "example.com:443"
+uuid = "00000000-0000-0000-0000-000000000000"
+password = "pass"
+[relay.proxy]
+server = "127.0.0.1:1080"
+username = "user"
+password = "pwd"
+
+[local]
+server = "127.0.0.1:1081"
+"#;
+		let config = test_parse_config(toml_config, ".toml").unwrap();
+		let proxy = config.relay.proxy.unwrap();
+		assert_eq!(proxy.server.0, "127.0.0.1");
+		assert_eq!(proxy.server.1, 1080);
+		assert_eq!(proxy.username.unwrap(), "user");
+		assert_eq!(proxy.password.unwrap(), "pwd");
 	}
 
 	#[test]
