@@ -173,6 +173,9 @@ pub struct ProxyConfig {
 
 	#[educe(Default = None)]
 	pub password: Option<String>,
+
+	#[educe(Default = 2048)]
+	pub udp_buffer_size: usize,
 }
 
 #[derive(Debug, Deserialize, serde::Serialize, Educe)]

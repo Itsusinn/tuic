@@ -190,13 +190,18 @@ impl Connection {
 			);
 
 			let (ctrl, relay_addr) = socks5_handshake(&proxy_cfg).await?;
-			let socket = UdpSocket::bind(SocketAddr::from((Ipv4Addr::UNSPECIFIED, 0)))?;
+			let bind_addr = if relay_addr.is_ipv6() {
+				SocketAddr::from((Ipv6Addr::UNSPECIFIED, 0))
+			} else {
+				SocketAddr::from((Ipv4Addr::UNSPECIFIED, 0))
+			};
+			let socket = UdpSocket::bind(bind_addr)?;
 			socket.set_nonblocking(true)?;
 			let socket = tokio::net::UdpSocket::from_std(socket)?;
 			let ep = QuinnEndpoint::new_with_abstract_socket(
 				EndpointConfig::default(),
 				None,
-				Arc::new(Socks5UdpSocket::new(socket, relay_addr)) as Arc<dyn AsyncUdpSocket>,
+				Arc::new(Socks5UdpSocket::new(socket, relay_addr, proxy_cfg.udp_buffer_size)) as Arc<dyn AsyncUdpSocket>,
 				Arc::new(TokioRuntime),
 			)?;
 			(ep, Some(ctrl))
@@ -349,6 +354,8 @@ struct Endpoint {
 	heartbeat:          Duration,
 	gc_interval:        Duration,
 	gc_lifetime:        Duration,
+	// SOCKS5 control TCP stream for UDP ASSOCIATE: this must be kept alive to
+	// maintain the UDP relay session, since closing it invalidates the relay address.
 	socks5_ctrl:        Option<tokio::net::TcpStream>,
 }
 
@@ -358,7 +365,10 @@ impl Endpoint {
 	async fn connect(&self) -> Result<Connection, Error> {
 		let server_addr = self.server.resolve().await?.next().context("no resolved address")?;
 		// Check if endpoint's local address IP family matches the server's resolved IP
-		// family
+		// family. When using SOCKS5 proxy, rebinding is skipped because the endpoint is
+		// already bound to the IP family of the SOCKS5 relay address. The SOCKS5 proxy
+		// handles the actual connection to the target server, making the target
+		// server's IP family irrelevant to the local socket's binding.
 		let mut need_rebind = false;
 		if self.socks5_ctrl.is_none() && self.ep.local_addr()?.is_ipv4() && !server_addr.ip().is_ipv4() {
 			need_rebind = true;

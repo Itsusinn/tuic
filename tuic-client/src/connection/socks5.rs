@@ -11,16 +11,27 @@ use quinn::{
 	udp::{RecvMeta, Transmit},
 };
 use tokio::{io::ReadBuf, net::UdpSocket};
+use tracing::debug;
 
 #[derive(Debug)]
 pub struct Socks5UdpSocket {
-	socket:     UdpSocket,
-	relay_addr: SocketAddr,
+	socket:      UdpSocket,
+	relay_addr:  SocketAddr,
+	buffer_size: usize,
+	is_ipv6:     bool,
 }
 
 impl Socks5UdpSocket {
-	pub fn new(socket: UdpSocket, relay_addr: SocketAddr) -> Self {
-		Self { socket, relay_addr }
+	pub fn new(socket: UdpSocket, relay_addr: SocketAddr, buffer_size: usize) -> Self {
+		// Ensure minimum buffer size of 1522 bytes (1500 MTU + 22 SOCKS5 header)
+		let buffer_size = buffer_size.max(1522);
+		let is_ipv6 = socket.local_addr().map(|a| a.is_ipv6()).unwrap_or(false);
+		Self {
+			socket,
+			relay_addr,
+			buffer_size,
+			is_ipv6,
+		}
 	}
 }
 
@@ -48,8 +59,13 @@ impl AsyncUdpSocket for Socks5UdpSocket {
 				buf.extend_from_slice(&addr.port().to_be_bytes());
 			}
 			SocketAddr::V6(addr) => {
-				buf.push(4);
-				buf.extend_from_slice(&addr.ip().octets());
+				if let Some(ipv4) = addr.ip().to_ipv4_mapped() {
+					buf.push(1);
+					buf.extend_from_slice(&ipv4.octets());
+				} else {
+					buf.push(4);
+					buf.extend_from_slice(&addr.ip().octets());
+				}
 				buf.extend_from_slice(&addr.port().to_be_bytes());
 			}
 		}
@@ -62,15 +78,33 @@ impl AsyncUdpSocket for Socks5UdpSocket {
 	}
 
 	fn poll_recv(&self, cx: &mut Context<'_>, bufs: &mut [IoSliceMut<'_>], meta: &mut [RecvMeta]) -> Poll<io::Result<usize>> {
-		let mut buf = [0u8; 2048];
+		let mut buf = vec![0u8; self.buffer_size];
 		let mut read_buf = ReadBuf::new(&mut buf);
 
 		match self.socket.poll_recv_from(cx, &mut read_buf) {
-			Poll::Ready(Ok(_from_addr)) => {
+			Poll::Ready(Ok(from_addr)) => {
+				if from_addr != self.relay_addr {
+					debug!("[socks5] dropped UDP packet from unexpected source: {:?}", from_addr);
+					return Poll::Pending;
+				}
 				let data = read_buf.filled();
-				if let Some((src_addr, quic_data)) = unwrap_socks5_udp(data) {
+				if let Some((mut src_addr, quic_data)) = unwrap_socks5_udp(data) {
+					if self.is_ipv6 {
+						if let SocketAddr::V4(v4) = src_addr {
+							src_addr = SocketAddr::new(IpAddr::V6(v4.ip().to_ipv6_mapped()), v4.port());
+						}
+					} else if let SocketAddr::V6(v6) = src_addr {
+						if let Some(v4) = v6.ip().to_ipv4_mapped() {
+							src_addr = SocketAddr::new(IpAddr::V4(v4), v6.port());
+						}
+					}
+
 					let len = quic_data.len();
-					if !bufs.is_empty() && len <= bufs[0].len() {
+					if bufs.is_empty() {
+						Poll::Ready(Err(io::Error::other("no buffers provided")))
+					} else if len > bufs[0].len() {
+						Poll::Ready(Err(io::Error::other("buffer too small")))
+					} else {
 						bufs[0][..len].copy_from_slice(quic_data);
 						meta[0] = RecvMeta {
 							addr: src_addr,
@@ -80,11 +114,10 @@ impl AsyncUdpSocket for Socks5UdpSocket {
 							dst_ip: None,
 						};
 						Poll::Ready(Ok(1))
-					} else {
-						Poll::Ready(Err(io::Error::other("buffer too small or multiple buffers not supported")))
 					}
 				} else {
-					cx.waker().wake_by_ref();
+					// Invalid SOCKS5 UDP packet; drop it and wait for the next readable event.
+					debug!("[socks5] dropped invalid SOCKS5 UDP packet from {:?}", from_addr);
 					Poll::Pending
 				}
 			}
