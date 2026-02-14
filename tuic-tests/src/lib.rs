@@ -339,7 +339,7 @@ pub async fn run_socks5_server(
 									}
 									Socks5Command::UDPAssociate => {
 										info!("[{} SOCKS5 Server] Handling UDP ASSOCIATE request", test_name_clone);
-										
+
 										// Use 127.0.0.1 as the reply address for UDP ASSOCIATE
 										let reply_ip = "127.0.0.1".parse().unwrap();
 										if let Err(e) = run_udp_proxy(proto, &target_addr, None, reply_ip, None).await {

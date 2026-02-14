@@ -238,7 +238,7 @@ impl Connection {
 			if err.is_some() {
 				_ = conn.reset(ERROR_CODE);
 			} else {
-				_ = conn.finish();
+				_ = conn.finish().await;
 			}
 			_ = stream.shutdown().await;
 

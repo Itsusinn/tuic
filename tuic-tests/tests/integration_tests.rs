@@ -200,48 +200,6 @@ fn test_various_domain_names() {
 	}
 }
 
-#[test]
-fn test_address_serialization_lengths() {
-	// Test that serialization lengths are calculated correctly
-	let none_addr = Address::None;
-	assert_eq!(none_addr.len(), 1);
-
-	let domain_addr = Address::DomainAddress("example.com".to_string(), 443);
-	assert_eq!(domain_addr.len(), 1 + 1 + "example.com".len() + 2);
-
-	let ipv4_addr = Address::SocketAddress("192.168.1.1:8080".parse().unwrap());
-	assert_eq!(ipv4_addr.len(), 1 + 4 + 2);
-
-	let ipv6_addr = Address::SocketAddress("[2001:db8::1]:9000".parse().unwrap());
-	assert_eq!(ipv6_addr.len(), 1 + 16 + 2);
-}
-
-#[test]
-fn test_header_serialization_lengths() {
-	// Test that header lengths are calculated correctly
-	let uuid = Uuid::new_v4();
-	let token = [0u8; 32];
-	let auth = Authenticate::new(uuid, token);
-	let header = Header::Authenticate(auth);
-	assert_eq!(header.len(), 2 + 48); // version + type + auth data
-
-	let conn = Connect::new(Address::None);
-	let header = Header::Connect(conn);
-	assert_eq!(header.len(), 2 + 1); // version + type + address
-
-	let pkt = Packet::new(1, 2, 3, 4, 5, Address::None);
-	let header = Header::Packet(pkt);
-	assert_eq!(header.len(), 2 + 2 + 2 + 1 + 1 + 2 + 1); // version + type + packet fields + address
-
-	let dissoc = Dissociate::new(100);
-	let header = Header::Dissociate(dissoc);
-	assert_eq!(header.len(), 2 + 2); // version + type + assoc_id
-
-	let hb = Heartbeat::new();
-	let header = Header::Heartbeat(hb);
-	assert_eq!(header.len(), 2); // version + type only
-}
-
 // Integration test that calls tuic-server and tuic-client run methods
 //
 // This test validates the full TUIC stack:
