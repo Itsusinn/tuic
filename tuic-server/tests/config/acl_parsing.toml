@@ -3,7 +3,7 @@ allow localhost udp/53
 allow localhost udp/53,tcp/80,tcp/443,udp/443
 # which is equivalent to:
 # allow localhost udp/53,tcp/80,443
-# if udp/tcp is omited, match both
+# if udp/tcp is omitted, match both
 allow localhost 443
 reject 10.6.0.0/16
 allow google.com
