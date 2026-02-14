@@ -7,7 +7,7 @@ use std::{
 use eyre::Context;
 use quinn::{
 	Endpoint, EndpointConfig, IdleTimeout, ServerConfig, TokioRuntime, TransportConfig, VarInt,
-	congestion::{CubicConfig, NewRenoConfig},
+	congestion::{Bbr3Config, CubicConfig, NewRenoConfig},
 	crypto::rustls::QuicServerConfig,
 };
 use quinn_congestions::bbr::BbrConfig;
@@ -152,6 +152,11 @@ impl Server {
 				let mut new_reno = NewRenoConfig::default();
 				new_reno.initial_window(ctx.cfg.quic.congestion_control.initial_window);
 				tp_cfg.congestion_controller_factory(Arc::new(new_reno))
+			}
+			CongestionController::Bbr3 => {
+				let mut bbr3_config = Bbr3Config::default();
+				bbr3_config.initial_window(ctx.cfg.quic.congestion_control.initial_window);
+				tp_cfg.congestion_controller_factory(Arc::new(bbr3_config))
 			}
 		};
 

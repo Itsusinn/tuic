@@ -12,7 +12,7 @@ use once_cell::sync::OnceCell;
 use quinn::{
 	ClientConfig, Connection as QuinnConnection, Endpoint as QuinnEndpoint, EndpointConfig, TokioRuntime, TransportConfig,
 	VarInt, ZeroRttAccepted,
-	congestion::{CubicConfig, NewRenoConfig},
+	congestion::{Bbr3Config, CubicConfig, NewRenoConfig},
 	crypto::rustls::QuicClientConfig,
 };
 use quinn_congestions::bbr::BbrConfig;
@@ -176,6 +176,7 @@ impl Connection {
 			CongestionControl::Cubic => tp_cfg.congestion_controller_factory(Arc::new(CubicConfig::default())),
 			CongestionControl::NewReno => tp_cfg.congestion_controller_factory(Arc::new(NewRenoConfig::default())),
 			CongestionControl::Bbr => tp_cfg.congestion_controller_factory(Arc::new(BbrConfig::default())),
+			CongestionControl::Bbr3 => tp_cfg.congestion_controller_factory(Arc::new(Bbr3Config::default())),
 		};
 
 		config.transport_config(Arc::new(tp_cfg));
