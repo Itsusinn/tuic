@@ -44,6 +44,7 @@ impl FromStr for UdpRelayMode {
 pub enum CongestionControl {
 	#[default]
 	Bbr,
+	Bbr3,
 	Cubic,
 	NewReno,
 }
@@ -58,6 +59,8 @@ impl FromStr for CongestionControl {
 			Ok(Self::NewReno)
 		} else if s.eq_ignore_ascii_case("bbr") {
 			Ok(Self::Bbr)
+		} else if s.eq_ignore_ascii_case("bbr3") {
+			Ok(Self::Bbr3)
 		} else {
 			Err("invalid congestion control")
 		}
