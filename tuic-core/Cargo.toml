@@ -30,7 +30,7 @@ serde = { version = "1", default-features = false, features = ["derive", "std"] 
 
 # From tuic-quinn
 tracing = { version = "0.1", default-features = false}
-quinn = { version = "0.11", default-features = false, features = ["futures-io"]}
+quinn = { workspace = true, default-features = false, features = ["futures-io"]}
 tokio = { version = "1", default-features = false, features = ["io-util"] }
 eyre = { version = "0.6" }
 

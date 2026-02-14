@@ -7,9 +7,10 @@ use std::{
 use eyre::Context;
 use quinn::{
 	Endpoint, EndpointConfig, IdleTimeout, ServerConfig, TokioRuntime, TransportConfig, VarInt,
-	congestion::{BbrConfig, CubicConfig, NewRenoConfig},
+	congestion::{CubicConfig, NewRenoConfig},
 	crypto::rustls::QuicServerConfig,
 };
+use quinn_congestions::bbr::BbrConfig;
 use rustls::{
 	ServerConfig as RustlsServerConfig,
 	pki_types::{CertificateDer, PrivateKeyDer, PrivatePkcs8KeyDer},

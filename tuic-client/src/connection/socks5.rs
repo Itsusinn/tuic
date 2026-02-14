@@ -7,15 +7,15 @@ use std::{
 };
 
 use quinn::{
-	AsyncUdpSocket, UdpPoller,
+	AsyncUdpSocket, UdpSender,
 	udp::{RecvMeta, Transmit},
 };
 use tokio::{io::ReadBuf, net::UdpSocket};
 use tracing::debug;
 
-#[derive(Debug)]
+#[derive(Debug,Clone)]
 pub struct Socks5UdpSocket {
-	socket:      UdpSocket,
+	socket:      Arc<UdpSocket>,
 	relay_addr:  SocketAddr,
 	buffer_size: usize,
 	is_ipv6:     bool,
@@ -27,7 +27,7 @@ impl Socks5UdpSocket {
 		let buffer_size = buffer_size.max(1522);
 		let is_ipv6 = socket.local_addr().map(|a| a.is_ipv6()).unwrap_or(false);
 		Self {
-			socket,
+			socket: Arc::new(socket),
 			relay_addr,
 			buffer_size,
 			is_ipv6,
@@ -36,20 +36,10 @@ impl Socks5UdpSocket {
 }
 
 #[derive(Debug)]
-struct Socks5UdpPoller(Arc<Socks5UdpSocket>);
+struct Socks5UdpSender(Arc<Socks5UdpSocket>);
 
-impl UdpPoller for Socks5UdpPoller {
-	fn poll_writable(self: Pin<&mut Self>, cx: &mut Context) -> Poll<io::Result<()>> {
-		self.0.socket.poll_send_ready(cx)
-	}
-}
-
-impl AsyncUdpSocket for Socks5UdpSocket {
-	fn create_io_poller(self: Arc<Self>) -> Pin<Box<dyn UdpPoller>> {
-		Box::pin(Socks5UdpPoller(self))
-	}
-
-	fn try_send(&self, transmit: &Transmit) -> io::Result<()> {
+impl UdpSender for Socks5UdpSender {
+	fn poll_send(self: Pin<&mut Self>, transmit: &Transmit<'_>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
 		let mut buf = Vec::with_capacity(22 + transmit.contents.len());
 		buf.extend_from_slice(&[0, 0, 0]); // RSV, FRAG
 		match transmit.destination {
@@ -71,13 +61,27 @@ impl AsyncUdpSocket for Socks5UdpSocket {
 		}
 		buf.extend_from_slice(transmit.contents);
 
-		match self.socket.try_send_to(&buf, self.relay_addr) {
-			Ok(_) => Ok(()),
-			Err(e) => Err(e),
+		match self.0.socket.try_send_to(&buf, self.0.relay_addr) {
+			Ok(_) => Poll::Ready(Ok(())),
+			Err(ref e) if e.kind() == io::ErrorKind::WouldBlock => {
+				self.0.socket.poll_send_ready(cx)
+			}
+			Err(e) => Poll::Ready(Err(e)),
 		}
 	}
+}
 
-	fn poll_recv(&self, cx: &mut Context<'_>, bufs: &mut [IoSliceMut<'_>], meta: &mut [RecvMeta]) -> Poll<io::Result<usize>> {
+impl AsyncUdpSocket for Socks5UdpSocket {
+	fn create_sender(&self) -> Pin<Box<dyn quinn::UdpSender>> {
+		Box::pin(Socks5UdpSender(Arc::new(self.clone())))
+	}
+
+	fn poll_recv(
+		&mut self,
+		cx: &mut Context<'_>,
+		bufs: &mut [IoSliceMut<'_>],
+		meta: &mut [RecvMeta],
+	) -> Poll<io::Result<usize>> {
 		let mut buf = vec![0u8; self.buffer_size];
 		let mut read_buf = ReadBuf::new(&mut buf);
 
@@ -106,13 +110,11 @@ impl AsyncUdpSocket for Socks5UdpSocket {
 						Poll::Ready(Err(io::Error::other("buffer too small")))
 					} else {
 						bufs[0][..len].copy_from_slice(quic_data);
-						meta[0] = RecvMeta {
-							addr: src_addr,
-							len,
-							stride: len,
-							ecn: None,
-							dst_ip: None,
-						};
+						let mut recv_meta = RecvMeta::default();
+						recv_meta.addr = src_addr;
+						recv_meta.len = len;
+						recv_meta.stride = len;
+						meta[0] = recv_meta;
 						Poll::Ready(Ok(1))
 					}
 				} else {
