@@ -28,7 +28,7 @@ jobs:
       rust-toolchain: "stable"
       packages: "tuic-server,tuic-client"
       target-config-file: ".github/target.toml"
-      rustflags: "-Zthreads=8"
+      rustflags: ""
 
   release:
     name: Release

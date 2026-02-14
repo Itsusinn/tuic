@@ -242,7 +242,7 @@ impl Connection {
 			}
 			_ = stream.shutdown().await;
 
-			let uuid = self.auth.get().ok_or_eyre("Unexpected autherization state")?;
+			let uuid = self.auth.get().ok_or_eyre("Unexpected authorization state")?;
 			restful::traffic_tx(&self.ctx, &uuid, tx);
 			restful::traffic_rx(&self.ctx, &uuid, rx);
 			if let Some(err) = err {
@@ -444,7 +444,7 @@ impl Connection {
 				initial_addrs[0]
 			};
 
-			let uuid = self.auth.get().ok_or_eyre("Unexpected autherization state")?;
+			let uuid = self.auth.get().ok_or_eyre("Unexpected authorization state")?;
 			restful::traffic_tx(&self.ctx, &uuid, pkt.len());
 			if let Some(session) = session.upgrade() {
 				session.send(pkt, socket_addr).await
