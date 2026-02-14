@@ -7,9 +7,7 @@ use std::{
 };
 
 pub use ::quinn;
-use ::quinn::{
-	ClosedStream, Connection as QuinnConnection, ConnectionError, RecvStream, SendDatagramError, SendStream, VarInt,
-};
+use ::quinn::{Connection as QuinnConnection, ConnectionError, RecvStream, SendDatagramError, SendStream, VarInt};
 use bytes::{BufMut, Bytes, BytesMut};
 use thiserror::Error;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, ReadBuf};
@@ -81,6 +79,7 @@ impl<Side> Connection<Side> {
 			header.async_marshal(&mut send).await?;
 			send.write_all(frag).await?;
 			send.finish()?;
+			send.stopped().await?;
 		}
 		Ok(())
 	}
@@ -123,6 +122,7 @@ impl Connection<side::Client> {
 		let mut send = self.conn.open_uni().await?;
 		model.header().async_marshal(&mut send).await?;
 		send.finish()?;
+		send.stopped().await?;
 		Ok(())
 	}
 
@@ -140,6 +140,7 @@ impl Connection<side::Client> {
 		let mut send = self.conn.open_uni().await?;
 		model.header().async_marshal(&mut send).await?;
 		send.finish()?;
+		send.stopped().await?;
 		Ok(())
 	}
 
@@ -392,18 +393,23 @@ impl Connect {
 	/// Immediately closes the `Connect` streams with the given error code.
 	/// Returns the result of closing the send and receive streams,
 	/// respectively.
-	pub fn reset(&mut self, error_code: VarInt) -> (Result<(), ClosedStream>, Result<(), ClosedStream>) {
-		let send_res = self.send.reset(error_code);
-		let recv_res = self.recv.stop(error_code);
-		(send_res, recv_res)
+	pub fn reset(&mut self, error_code: VarInt) -> eyre::Result<()> {
+		self.send.reset(error_code)?;
+		// TODO Stream client bidirectional stream 0 should not have a blocked reader
+		// when all data read is true check https://github.com/quinn-rs/quinn/pull/2495
+		// self.recv.stop(VarInt::from_u32(0))?;
+		Ok(())
 	}
 
 	/// Tx: send FIN mark
 	/// Rx: refuse accepting data
-	pub fn finish(&mut self) -> (Result<(), ClosedStream>, Result<(), ClosedStream>) {
-		let send_res = self.send.finish();
-		let recv_res = self.recv.stop(VarInt::from_u32(0));
-		(send_res, recv_res)
+	pub async fn finish(&mut self) -> eyre::Result<()> {
+		self.send.finish()?;
+		// TODO Stream client bidirectional stream 0 should not have a blocked reader
+		// when all data read is true check https://github.com/quinn-rs/quinn/pull/2495
+		// let recv_res = self.recv.stop(VarInt::from_u32(0));
+
+		Ok(())
 	}
 }
 

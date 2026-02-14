@@ -62,6 +62,32 @@ jobs:
           TARGETS_JSON=$(cat ${{ inputs.target-config-file }} | yj -tj | jq -c '.target')
           echo "targets=$TARGETS_JSON" >> $GITHUB_OUTPUT
 
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: nightly
+          components: rustfmt
+
+      - name: Cargo fmt
+        run: |
+          cargo +nightly fmt --all
+
+      - name: Commit formatting changes
+        if: ${{ github.event_name == 'pull_request' }}
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          git add -A
+          if ! git diff --cached --quiet; then
+            git commit -m "chore: apply cargo fmt"
+            git push origin HEAD:${{ github.head_ref }}
+          fi
+
+      - name: Spell Check Repo
+        uses: crate-ci/typos@v1.43.4
+        env:
+          CLICOLOR: 1
+
   compile:
     needs: prepare
     name: ${{ matrix.release-name || matrix.target || 'Unknown' }}
@@ -107,12 +133,6 @@ jobs:
           targets: ${{ matrix.build-std && 'x86_64-unknown-linux-gnu' || matrix.target }}
           components: ${{ matrix.components || matrix.build-std && 'rustfmt,clippy,rust-src' || 'rustfmt, clippy' }}
 
-      - name: Cache Docker images for cross
-        if: matrix.tool == 'cross'
-        uses: AndreKurait/docker-cache@0.6.0
-        with:
-          key: docker-${{ runner.os }}-${{ matrix.target }}-${{ hashFiles('Cross.toml') }}
-
       - name: Install cross-compilation tools
         if: matrix.tool == 'cross'
         run: |
@@ -136,11 +156,6 @@ jobs:
       #--------------------------------------------------
       # Code Quality Steps
       #--------------------------------------------------
-      - name: Check code formatting
-        uses: clechasseur/rs-cargo@v4
-        with:
-          command: fmt
-          args: --all -- --check
 
       - name: Run linter
         uses: clechasseur/rs-cargo@v4
