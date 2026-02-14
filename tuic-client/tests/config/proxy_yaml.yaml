@@ -1,0 +1,12 @@
+relay:
+  server: "example.com:443"
+  uuid: "00000000-0000-0000-0000-000000000000"
+  password: "password123"
+  proxy:
+    server: "socks5.proxy.com:1080"
+    username: "yaml_user"
+    password: "yaml_pass"
+    udp_buffer_size: 8192
+
+local:
+  server: "127.0.0.1:1080"

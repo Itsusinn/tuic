@@ -10,11 +10,12 @@ use anyhow::Context;
 use crossbeam_utils::atomic::AtomicCell;
 use once_cell::sync::OnceCell;
 use quinn::{
-	AsyncUdpSocket, ClientConfig, Connection as QuinnConnection, Endpoint as QuinnEndpoint, EndpointConfig, TokioRuntime,
-	TransportConfig, VarInt, ZeroRttAccepted,
-	congestion::{BbrConfig, CubicConfig, NewRenoConfig},
+	ClientConfig, Connection as QuinnConnection, Endpoint as QuinnEndpoint, EndpointConfig, TokioRuntime, TransportConfig,
+	VarInt, ZeroRttAccepted,
+	congestion::{CubicConfig, NewRenoConfig},
 	crypto::rustls::QuicClientConfig,
 };
+use quinn_congestions::bbr::BbrConfig;
 use register_count::Counter;
 use rustls::{
 	ClientConfig as RustlsClientConfig,
@@ -182,7 +183,7 @@ impl Connection {
 		// Prepare server address and create the primary endpoint with IPv4 binding
 		let server = ServerAddr::with_sni(cfg.server.0, cfg.server.1, cfg.ip, cfg.ipstack_prefer, cfg.sni);
 
-		let (mut ep, socks5_ctrl) = if let Some(proxy_cfg) = cfg.proxy {
+		let (ep, socks5_ctrl) = if let Some(proxy_cfg) = cfg.proxy {
 			debug!(
 				"[relay] outgoing traffic is using socks5 proxy {}:{}",
 				proxy_cfg.server.0.as_str(),
@@ -201,7 +202,7 @@ impl Connection {
 			let ep = QuinnEndpoint::new_with_abstract_socket(
 				EndpointConfig::default(),
 				None,
-				Arc::new(Socks5UdpSocket::new(socket, relay_addr, proxy_cfg.udp_buffer_size)) as Arc<dyn AsyncUdpSocket>,
+				Box::new(Socks5UdpSocket::new(socket, relay_addr, proxy_cfg.udp_buffer_size)),
 				Arc::new(TokioRuntime),
 			)?;
 			(ep, Some(ctrl))

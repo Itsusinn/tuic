@@ -11,6 +11,11 @@ readme = "README.md"
 license = "GPL-3.0-or-later"
 repository = "https://github.com/Itsusinn/tuic"
 
+[workspace.dependencies]
+quinn = { branch = "bbrv3", git = "https://github.com/Tipuch/quinn.git", default-features = false }
+quinn-proto = { branch = "bbrv3", git = "https://github.com/Tipuch/quinn.git", default-features = false }
+quinn-congestions = { git = "https://github.com/proxy-rs/quinn-congestions.git", default-features = false}
+
 [profile.release]
 opt-level = "z"
 debug = 1

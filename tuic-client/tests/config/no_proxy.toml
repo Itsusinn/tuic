@@ -1,0 +1,8 @@
+[relay]
+server = "example.com:443"
+uuid = "00000000-0000-0000-0000-000000000000"
+password = "pass"
+# No proxy configuration
+
+[local]
+server = "127.0.0.1:1080"

@@ -647,6 +647,70 @@ server = "127.0.0.1:1081"
 	}
 
 	#[test]
+	fn test_proxy_config_json5() {
+		let json5_config = include_str!("../tests/config/proxy_json5.json5");
+
+		let config = test_parse_config(json5_config, ".json5").unwrap();
+		let proxy = config.relay.proxy.unwrap();
+		assert_eq!(proxy.server.0, "127.0.0.1");
+		assert_eq!(proxy.server.1, 1080);
+		assert_eq!(proxy.username.unwrap(), "proxy_user");
+		assert_eq!(proxy.password.unwrap(), "proxy_pass");
+		assert_eq!(proxy.udp_buffer_size, 4096);
+	}
+
+	#[test]
+	fn test_proxy_config_yaml() {
+		let yaml_config = include_str!("../tests/config/proxy_yaml.yaml");
+
+		let config = test_parse_config(yaml_config, ".yaml").unwrap();
+		let proxy = config.relay.proxy.unwrap();
+		assert_eq!(proxy.server.0, "socks5.proxy.com");
+		assert_eq!(proxy.server.1, 1080);
+		assert_eq!(proxy.username.unwrap(), "yaml_user");
+		assert_eq!(proxy.password.unwrap(), "yaml_pass");
+		assert_eq!(proxy.udp_buffer_size, 8192);
+	}
+
+	#[test]
+	fn test_proxy_minimal_config() {
+		let toml_config = include_str!("../tests/config/proxy_minimal.toml");
+
+		let config = test_parse_config(toml_config, ".toml").unwrap();
+		let proxy = config.relay.proxy.unwrap();
+		assert_eq!(proxy.server.0, "proxy.example.com");
+		assert_eq!(proxy.server.1, 1080);
+		// username and password should be None when not provided
+		assert!(proxy.username.is_none());
+		assert!(proxy.password.is_none());
+		// Should use default udp_buffer_size
+		assert_eq!(proxy.udp_buffer_size, 2048);
+	}
+
+	#[test]
+	fn test_proxy_defaults() {
+		let json5_config = include_str!("../tests/config/proxy_defaults.json5");
+
+		let config = test_parse_config(json5_config, ".json5").unwrap();
+		let proxy = config.relay.proxy.unwrap();
+		assert_eq!(proxy.server.0, "127.0.0.1");
+		assert_eq!(proxy.server.1, 1080);
+		assert!(proxy.username.is_none());
+		assert!(proxy.password.is_none());
+		// Default udp_buffer_size should be 2048
+		assert_eq!(proxy.udp_buffer_size, 2048);
+	}
+
+	#[test]
+	fn test_no_proxy_config() {
+		let toml_config = include_str!("../tests/config/no_proxy.toml");
+
+		let config = test_parse_config(toml_config, ".toml").unwrap();
+		// proxy should be None when not configured
+		assert!(config.relay.proxy.is_none());
+	}
+
+	#[test]
 	fn test_ipv6_server_address() {
 		let json5_config = include_str!("../tests/config/ipv6_server_address.json5");
 
