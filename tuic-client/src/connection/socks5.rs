@@ -13,7 +13,7 @@ use quinn::{
 use tokio::{io::ReadBuf, net::UdpSocket};
 use tracing::debug;
 
-#[derive(Debug,Clone)]
+#[derive(Debug, Clone)]
 pub struct Socks5UdpSocket {
 	socket:      Arc<UdpSocket>,
 	relay_addr:  SocketAddr,
@@ -63,9 +63,7 @@ impl UdpSender for Socks5UdpSender {
 
 		match self.0.socket.try_send_to(&buf, self.0.relay_addr) {
 			Ok(_) => Poll::Ready(Ok(())),
-			Err(ref e) if e.kind() == io::ErrorKind::WouldBlock => {
-				self.0.socket.poll_send_ready(cx)
-			}
+			Err(ref e) if e.kind() == io::ErrorKind::WouldBlock => self.0.socket.poll_send_ready(cx),
 			Err(e) => Poll::Ready(Err(e)),
 		}
 	}
