@@ -7,6 +7,7 @@ use serial_test::serial;
 use tokio::time::timeout;
 use tracing::{error, info};
 use tuic_core::{Address, Authenticate, Connect, Dissociate, Header, Heartbeat, Packet, StackPrefer};
+use tuic_server::config::ExperimentalConfig;
 use tuic_tests::{
 	run_socks5_server, run_tcp_echo_server, run_udp_echo_server, test_tcp_through_socks5, test_udp_through_socks5,
 };
@@ -246,25 +247,14 @@ async fn test_server_client_integration() -> eyre::Result<()> {
 			acme_email:  "admin@example.com".to_string(),
 		},
 		data_dir: std::env::temp_dir(),
-		restful: None,
 		quic: tuic_server::config::QuicConfig::default(),
 		udp_relay_ipv6: true,
 		zero_rtt_handshake: false,
 		dual_stack: false,
-		auth_timeout: Duration::from_secs(3),
-		task_negotiation_timeout: Duration::from_secs(3),
-		gc_interval: Duration::from_secs(10),
-		gc_lifetime: Duration::from_secs(30),
-		max_external_packet_size: 1500,
-		stream_timeout: Duration::from_secs(60),
-		outbound: tuic_server::config::OutboundConfig::default(),
-		// Allow localhost connections for testing - by default ACL blocks localhost
-		acl: vec![tuic_server::acl::AclRule {
-			outbound: "allow".to_string(),
-			addr:     tuic_server::acl::AclAddress::Localhost,
-			ports:    None,
-			hijack:   None,
-		}],
+		experimental: ExperimentalConfig {
+			drop_loopback: false,
+			..Default::default()
+		},
 		..Default::default()
 	};
 
@@ -299,8 +289,6 @@ async fn test_server_client_integration() -> eyre::Result<()> {
 			zero_rtt_handshake: false,
 			disable_sni: true,
 			disable_native_certs: true,
-			send_window: 8 * 1024 * 1024 * 2,
-			receive_window: 8 * 1024 * 1024,
 			gso: false,
 			pmtu: false,
 			skip_cert_verify: true,

@@ -395,9 +395,7 @@ impl Connect {
 	/// respectively.
 	pub fn reset(&mut self, error_code: VarInt) -> eyre::Result<()> {
 		self.send.reset(error_code)?;
-		// TODO Stream client bidirectional stream 0 should not have a blocked reader
-		// when all data read is true check https://github.com/quinn-rs/quinn/pull/2495
-		// self.recv.stop(VarInt::from_u32(0))?;
+		self.recv.stop(error_code)?;
 		Ok(())
 	}
 
@@ -405,10 +403,7 @@ impl Connect {
 	/// Rx: refuse accepting data
 	pub async fn finish(&mut self) -> eyre::Result<()> {
 		self.send.finish()?;
-		// TODO Stream client bidirectional stream 0 should not have a blocked reader
-		// when all data read is true check https://github.com/quinn-rs/quinn/pull/2495
-		// let recv_res = self.recv.stop(VarInt::from_u32(0));
-
+		self.recv.stop(VarInt::from_u32(0))?;
 		Ok(())
 	}
 }
