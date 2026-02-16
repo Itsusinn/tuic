@@ -23,6 +23,7 @@ Compared to origin, this fork's new features:
 - AWS-LC-RS crypto provider for improved performance
 - More active `max_concurrent_streams` strategy
 - Rust edition 2024
+- BBR3 congestion control algorithm support
 
 **Server Features:**
 - ACL (Access Control List) support with configurable outbound rules

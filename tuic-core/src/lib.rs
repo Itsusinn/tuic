@@ -1,5 +1,3 @@
-#![doc = include_str!("../README.md")]
-
 mod protocol;
 
 pub use self::protocol::{Address, Authenticate, Connect, Dissociate, Header, Heartbeat, Packet, VERSION};

@@ -209,7 +209,7 @@ maximum_clients_per_user = 0
 [quic]
 # Congestion control configuration
 [quic.congestion_control]
-# Congestion control algorithm: bbr, cubic, new_reno
+# Congestion control algorithm: bbr, bbr3, cubic, new_reno
 controller = "bbr"
 # Initial congestion window size in bytes
 initial_window = 1048576

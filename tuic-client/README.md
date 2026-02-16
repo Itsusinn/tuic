@@ -63,7 +63,7 @@ ipstack_prefer = "v4first"
 # UDP relay mode: "native" or "quic"
 udp_relay_mode = "native"
 
-# Congestion control algorithm: "cubic", "new_reno", or "bbr"
+# Congestion control algorithm: "cubic", "new_reno", "bbr", "bbr3"
 congestion_control = "cubic"
 
 # ALPN protocols (e.g., ["h3", "h2"])
