@@ -15,6 +15,15 @@ static GLOBAL: Jemalloc = Jemalloc;
 
 #[tokio::main]
 async fn main() -> eyre::Result<()> {
+	#[cfg(feature = "aws-lc-rs")]
+	{
+		_ = rustls::crypto::aws_lc_rs::default_provider().install_default();
+	}
+
+	#[cfg(feature = "ring")]
+	{
+		_ = rustls::crypto::ring::default_provider().install_default();
+	}
 	let cli = Cli::parse();
 	let env_state = EnvState::from_system();
 
