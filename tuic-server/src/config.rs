@@ -12,7 +12,7 @@ use figment::{
 	providers::{Format, Serialized, Toml, Yaml},
 };
 use figment_json5::Json5;
-use rand::{Rng, distr::Alphanumeric, rng};
+use rand::{distr::Alphanumeric, rng, RngExt};
 use serde::{Deserialize, Serialize};
 use tracing::{level_filters::LevelFilter, warn};
 use uuid::Uuid;
