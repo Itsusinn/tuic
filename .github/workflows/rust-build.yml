@@ -87,7 +87,7 @@ jobs:
           fi
 
       - name: Spell Check Repo
-        uses: crate-ci/typos@v1.43.4
+        uses: crate-ci/typos@v1.44.0
         env:
           CLICOLOR: 1
 
@@ -211,7 +211,7 @@ jobs:
           done
 
       - name: Upload binary artifacts
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: ${{ matrix.release-name || matrix.target }}-binaries
           path: artifacts/
