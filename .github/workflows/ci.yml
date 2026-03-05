@@ -23,7 +23,7 @@ concurrency:
 jobs:
   build:
     name: Build
-    uses: ./.github/workflows/rust-build.yml
+    uses: rust-proxy/workflows/.github/workflows/rust-build.yml@main
     with:
       rust-toolchain: "stable"
       packages: "tuic-server,tuic-client"
@@ -33,14 +33,14 @@ jobs:
   release:
     name: Release
     needs: [build]
-    uses: ./.github/workflows/release-publish.yml
+    uses: rust-proxy/workflows/.github/workflows/release-publish.yml@main
     with:
       cliff-config: '.github/cliff.toml'
 
   docker:
     name: Docker
     needs: [build]
-    uses: ./.github/workflows/docker-publish.yml
+    uses: rust-proxy/workflows/.github/workflows/docker-publish.yml@main
     secrets:
       dockerhub-username: ${{ secrets.DOCKERHUB_USERNAME }}
       dockerhub-token: ${{ secrets.DOCKERHUB_TOKEN }}
