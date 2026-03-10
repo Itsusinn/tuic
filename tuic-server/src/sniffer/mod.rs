@@ -42,3 +42,23 @@ pub async fn sniff<R: AsyncRead + Unpin>(
 		buffer.extend_from_slice(&temp_buf[..n]);
 	}
 }
+
+/// Non-destructive sniff using Peekable wrapper. This will peek into the stream
+/// and populate `buffer` with the peeked bytes for later forwarding if needed.
+pub async fn sniff_peek<R: AsyncRead + Unpin>(
+	stream: &mut R,
+	buffer: &mut Vec<u8>,
+) -> std::io::Result<SniffResult> {
+	let mut peek = crate::io::Peekable::new(stream, MAX_SNIFF_BYTES);
+	let _ = peek.peek(1024).await?;
+	let buf = peek.buffered();
+	if let Some(sni) = tls::parse_sni(buf) {
+		return Ok(SniffResult::Tls(sni));
+	}
+	if let Some(host) = http::parse_host(buf) {
+		return Ok(SniffResult::Http(host));
+	}
+	// copy buffered bytes into buffer for forwarding
+	buffer.extend_from_slice(buf);
+	Ok(SniffResult::Unknown)
+}
