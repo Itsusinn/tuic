@@ -21,8 +21,7 @@ use crate::{
 	config::OutboundRule,
 	error::Error,
 	io::{copy_io, copy_io_with_initial},
-	restful,
-	sniffer,
+	restful, sniffer,
 	utils::{StackPrefer, UdpRelayMode},
 };
 
@@ -226,7 +225,7 @@ impl Connection {
 				Address::DomainAddress(d, _) => Some(d.as_str()),
 				_ => None,
 			};
-			
+
 			if let Some(sniffed) = &domain_sniffed {
 				domain = Some(sniffed.as_str());
 			}

@@ -327,7 +327,7 @@ pub struct RestfulConfig {
 #[serde(default)]
 pub struct ExperimentalConfig {
 	#[educe(Default = false)]
-	pub sniffer: bool,
+	pub sniffer:       bool,
 	#[educe(Default = true)]
 	pub drop_loopback: bool,
 	#[educe(Default = true)]

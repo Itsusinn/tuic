@@ -13,11 +13,7 @@ where
 	copy_io_with_initial(a, b, &[]).await
 }
 
-pub async fn copy_io_with_initial<A, B>(
-	a: &mut A,
-	b: &mut B,
-	initial_a2b: &[u8],
-) -> (usize, usize, Option<std::io::Error>)
+pub async fn copy_io_with_initial<A, B>(a: &mut A, b: &mut B, initial_a2b: &[u8]) -> (usize, usize, Option<std::io::Error>)
 where
 	A: AsyncRead + AsyncWrite + Unpin + ?Sized,
 	B: AsyncRead + AsyncWrite + Unpin + ?Sized,

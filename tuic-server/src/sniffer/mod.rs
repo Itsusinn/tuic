@@ -1,5 +1,5 @@
-pub mod tls;
 pub mod http;
+pub mod tls;
 
 use tokio::io::{AsyncRead, AsyncReadExt};
 
@@ -13,10 +13,7 @@ pub enum SniffResult {
 
 const MAX_SNIFF_BYTES: usize = 4096;
 
-pub async fn sniff<R: AsyncRead + Unpin>(
-	stream: &mut R,
-	buffer: &mut Vec<u8>,
-) -> std::io::Result<SniffResult> {
+pub async fn sniff<R: AsyncRead + Unpin>(stream: &mut R, buffer: &mut Vec<u8>) -> std::io::Result<SniffResult> {
 	let mut temp_buf = [0u8; 1024];
 
 	loop {
@@ -26,7 +23,7 @@ pub async fn sniff<R: AsyncRead + Unpin>(
 		if let Some(host) = http::parse_host(buffer) {
 			return Ok(SniffResult::Http(host));
 		}
-		
+
 		// If we've reached max bytes and still can't identify, give up
 		if buffer.len() >= MAX_SNIFF_BYTES {
 			return Ok(SniffResult::Unknown);
@@ -38,17 +35,14 @@ pub async fn sniff<R: AsyncRead + Unpin>(
 			// EOF
 			return Ok(SniffResult::Unknown);
 		}
-		
+
 		buffer.extend_from_slice(&temp_buf[..n]);
 	}
 }
 
 /// Non-destructive sniff using Peekable wrapper. This will peek into the stream
 /// and populate `buffer` with the peeked bytes for later forwarding if needed.
-pub async fn sniff_peek<R: AsyncRead + Unpin>(
-	stream: &mut R,
-	buffer: &mut Vec<u8>,
-) -> std::io::Result<SniffResult> {
+pub async fn sniff_peek<R: AsyncRead + Unpin>(stream: &mut R, buffer: &mut Vec<u8>) -> std::io::Result<SniffResult> {
 	let mut peek = crate::io::Peekable::new(stream, MAX_SNIFF_BYTES);
 	let _ = peek.peek(1024).await?;
 	let buf = peek.buffered();
