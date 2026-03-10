@@ -1,5 +1,8 @@
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
+pub mod peekable;
+pub use peekable::Peekable;
+
 const BUFFER_SIZE: usize = 16 * 1024;
 
 pub async fn copy_io<A, B>(a: &mut A, b: &mut B) -> (usize, usize, Option<std::io::Error>)
