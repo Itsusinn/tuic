@@ -14,7 +14,7 @@ mod tests {
 
 		// peek 3 bytes
 		let s = reader.peek(3).await.unwrap();
-		assert_eq!(s, b"hel");
+		assert_eq!(s, &b"hel"[..]);
 
 		// subsequent read should still get full data
 		let mut buf = [0u8; 5];
