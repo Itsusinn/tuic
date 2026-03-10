@@ -126,8 +126,25 @@ impl AclRule {
 		match &self.addr {
 			AclAddress::Ip(ip_str) => ip_str.parse::<IpAddr>() == Ok(ip),
 			AclAddress::Cidr(cidr_str) => cidr_str.parse::<ip_network::IpNetwork>().is_ok_and(|net| net.contains(ip)),
-			AclAddress::Domain(domain) => Self::match_domain(domain, ip).await,
-			AclAddress::WildcardDomain(pattern) => Self::match_wildcard_domain(pattern, ip).await,
+			AclAddress::Domain(domain) => {
+				if domain.eq_ignore_ascii_case("localhost") {
+					Self::is_loopback(ip)
+				} else {
+					false
+				}
+			}
+			AclAddress::WildcardDomain(pattern) => {
+				let stripped = pattern
+					.strip_prefix("*.")
+					.or_else(|| pattern.strip_prefix("suffix:"))
+					.unwrap_or(pattern);
+
+				if stripped.eq_ignore_ascii_case("localhost") {
+					Self::is_loopback(ip)
+				} else {
+					false
+				}
+			}
 			AclAddress::Localhost => Self::is_loopback(ip),
 			AclAddress::Private => is_private_ip(&ip),
 			AclAddress::Any => true,
@@ -139,35 +156,6 @@ impl AclRule {
 		match &self.ports {
 			None => true,
 			Some(ports) => ports.entries.iter().any(|entry| entry.matches(port, is_tcp)),
-		}
-	}
-
-	/// Match a domain against an IP address
-	async fn match_domain(domain: &str, ip: IpAddr) -> bool {
-		if domain.eq_ignore_ascii_case("localhost") {
-			return Self::is_loopback(ip);
-		}
-
-		tokio::net::lookup_host((domain, 0))
-			.await
-			.ok()
-			.is_some_and(|mut iter| iter.any(|sa| sa.ip() == ip))
-	}
-
-	/// Match a wildcard domain against an IP address
-	async fn match_wildcard_domain(pattern: &str, ip: IpAddr) -> bool {
-		let stripped = pattern
-			.strip_prefix("*.")
-			.or_else(|| pattern.strip_prefix("suffix:"))
-			.unwrap_or(pattern);
-
-		if stripped.eq_ignore_ascii_case("localhost") {
-			Self::is_loopback(ip)
-		} else {
-			tokio::net::lookup_host((stripped, 0))
-				.await
-				.ok()
-				.is_some_and(|mut iter| iter.any(|sa| sa.ip() == ip))
 		}
 	}
 
