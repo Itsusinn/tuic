@@ -202,7 +202,7 @@ impl Connection {
 			if self.ctx.cfg.experimental.sniffer {
 				match tokio::time::timeout(
 					std::time::Duration::from_millis(500),
-					sniffer::sniff(&mut conn, &mut initial_payload),
+					sniffer::sniff_peek(&mut conn, &mut initial_payload),
 				)
 				.await
 				{
