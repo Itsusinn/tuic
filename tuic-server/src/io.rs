@@ -7,6 +7,18 @@ where
 	A: AsyncRead + AsyncWrite + Unpin + ?Sized,
 	B: AsyncRead + AsyncWrite + Unpin + ?Sized,
 {
+	copy_io_with_initial(a, b, &[]).await
+}
+
+pub async fn copy_io_with_initial<A, B>(
+	a: &mut A,
+	b: &mut B,
+	initial_a2b: &[u8],
+) -> (usize, usize, Option<std::io::Error>)
+where
+	A: AsyncRead + AsyncWrite + Unpin + ?Sized,
+	B: AsyncRead + AsyncWrite + Unpin + ?Sized,
+{
 	let mut a2b = unsafe { Box::new_uninit_slice(BUFFER_SIZE).assume_init() };
 	let mut b2a = unsafe { Box::new_uninit_slice(BUFFER_SIZE).assume_init() };
 
@@ -17,6 +29,13 @@ where
 	let mut b_eof = false;
 
 	let mut last_err = None;
+
+	if !initial_a2b.is_empty() {
+		a2b_num += initial_a2b.len();
+		if let Err(err) = b.write_all(initial_a2b).await {
+			return (a2b_num, b2a_num, Some(err));
+		}
+	}
 
 	loop {
 		tokio::select! {

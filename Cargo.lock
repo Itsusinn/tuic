@@ -3142,6 +3142,7 @@ dependencies = [
  "eyre",
  "figment",
  "figment-json5",
+ "httparse",
  "humantime",
  "humantime-serde",
  "instant-acme",
