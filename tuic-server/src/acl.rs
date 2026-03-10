@@ -17,11 +17,11 @@ pub struct AclRule {
 	/// The outbound name to use for this rule
 	pub outbound: String,
 	/// The target address (IP, CIDR, domain, wildcard domain)
-	pub addr: AclAddress,
+	pub addr:     AclAddress,
 	/// Optional port specifications
-	pub ports: Option<AclPorts>,
+	pub ports:    Option<AclPorts>,
 	/// Optional hijack IP address for redirection
-	pub hijack: Option<String>,
+	pub hijack:   Option<String>,
 }
 
 fn format_optional_parts(ports: &Option<AclPorts>, hijack: &Option<String>) -> String {
@@ -78,7 +78,7 @@ fn format_port_list(entries: &[AclPortEntry]) -> String {
 #[display("{}{}", format_protocol(protocol), port_spec)]
 pub struct AclPortEntry {
 	/// Protocol (TCP, UDP, or both if None)
-	pub protocol: Option<AclProtocol>,
+	pub protocol:  Option<AclProtocol>,
 	/// Port specification (single port or range)
 	pub port_spec: AclPortSpec,
 }
@@ -457,9 +457,9 @@ impl<'de> Deserialize<'de> for AclRule {
 		#[derive(Deserialize)]
 		struct AclRuleHelper {
 			outbound: String,
-			addr: String,
-			ports: Option<String>,
-			hijack: Option<String>,
+			addr:     String,
+			ports:    Option<String>,
+			hijack:   Option<String>,
 		}
 
 		let helper = AclRuleHelper::deserialize(deserializer)?;
@@ -550,10 +550,10 @@ mod tests {
 	#[tokio::test]
 	async fn ip_exact_match() {
 		let rule = AclRule {
-			addr: AclAddress::Ip("203.0.113.7".into()),
-			ports: None,
+			addr:     AclAddress::Ip("203.0.113.7".into()),
+			ports:    None,
 			outbound: "default".to_string(),
-			hijack: None,
+			hijack:   None,
 		};
 
 		assert!(rule.matching(v4("203.0.113.7", 12345), 12345, true).await);
@@ -564,10 +564,10 @@ mod tests {
 	#[tokio::test]
 	async fn cidr_match() {
 		let rule = AclRule {
-			addr: AclAddress::Cidr("10.0.0.0/8".into()),
-			ports: None,
+			addr:     AclAddress::Cidr("10.0.0.0/8".into()),
+			ports:    None,
 			outbound: "default".to_string(),
-			hijack: None,
+			hijack:   None,
 		};
 
 		assert!(rule.matching(v4("10.1.2.3", 0), 0, false).await);
@@ -578,10 +578,10 @@ mod tests {
 	#[tokio::test]
 	async fn domain_match_localhost() {
 		let rule = AclRule {
-			addr: AclAddress::Domain("localhost".into()),
-			ports: None,
+			addr:     AclAddress::Domain("localhost".into()),
+			ports:    None,
 			outbound: "default".to_string(),
-			hijack: None,
+			hijack:   None,
 		};
 
 		assert!(rule.matching(v4("127.0.0.1", 0), 0, true).await);
@@ -592,10 +592,10 @@ mod tests {
 	#[tokio::test]
 	async fn wildcard_domain_match_suffix_localhost() {
 		let rule = AclRule {
-			addr: AclAddress::WildcardDomain("suffix:localhost".into()),
-			ports: None,
+			addr:     AclAddress::WildcardDomain("suffix:localhost".into()),
+			ports:    None,
 			outbound: "default".to_string(),
-			hijack: None,
+			hijack:   None,
 		};
 
 		assert!(rule.matching(v4("127.0.0.1", 0), 0, true).await);
@@ -606,10 +606,10 @@ mod tests {
 	#[tokio::test]
 	async fn localhost_match() {
 		let rule = AclRule {
-			addr: AclAddress::Localhost,
-			ports: None,
+			addr:     AclAddress::Localhost,
+			ports:    None,
 			outbound: "default".to_string(),
-			hijack: None,
+			hijack:   None,
 		};
 
 		assert!(rule.matching(v4("127.0.0.1", 0), 0, true).await);
@@ -620,10 +620,10 @@ mod tests {
 	#[tokio::test]
 	async fn private_match_ipv4() {
 		let rule = AclRule {
-			addr: AclAddress::Private,
-			ports: None,
+			addr:     AclAddress::Private,
+			ports:    None,
 			outbound: "default".to_string(),
-			hijack: None,
+			hijack:   None,
 		};
 
 		// Test 10.0.0.0/8 range
@@ -657,10 +657,10 @@ mod tests {
 	#[tokio::test]
 	async fn private_match_ipv6() {
 		let rule = AclRule {
-			addr: AclAddress::Private,
-			ports: None,
+			addr:     AclAddress::Private,
+			ports:    None,
 			outbound: "default".to_string(),
-			hijack: None,
+			hijack:   None,
 		};
 
 		// Test fc00::/7 (Unique Local Address)
@@ -698,10 +698,10 @@ mod tests {
 	#[tokio::test]
 	async fn any_match() {
 		let rule = AclRule {
-			addr: AclAddress::Any,
-			ports: None,
+			addr:     AclAddress::Any,
+			ports:    None,
 			outbound: "default".to_string(),
-			hijack: None,
+			hijack:   None,
 		};
 
 		assert!(rule.matching(v4("203.0.113.1", 0), 0, true).await);
@@ -711,10 +711,10 @@ mod tests {
 	#[tokio::test]
 	async fn ipv6_cidr_match() {
 		let rule = AclRule {
-			addr: AclAddress::Cidr("2001:db8::/32".into()),
-			ports: None,
+			addr:     AclAddress::Cidr("2001:db8::/32".into()),
+			ports:    None,
 			outbound: "default".to_string(),
-			hijack: None,
+			hijack:   None,
 		};
 
 		assert!(rule.matching(v6("2001:db8::1", 80), 80, true).await);
@@ -727,10 +727,10 @@ mod tests {
 	#[tokio::test]
 	async fn cidr_slash_32() {
 		let rule = AclRule {
-			addr: AclAddress::Cidr("192.168.1.100/32".into()),
-			ports: None,
+			addr:     AclAddress::Cidr("192.168.1.100/32".into()),
+			ports:    None,
 			outbound: "default".to_string(),
-			hijack: None,
+			hijack:   None,
 		};
 
 		assert!(rule.matching(v4("192.168.1.100", 80), 80, true).await);
@@ -741,10 +741,10 @@ mod tests {
 	#[tokio::test]
 	async fn cidr_slash_0() {
 		let rule = AclRule {
-			addr: AclAddress::Cidr("0.0.0.0/0".into()),
-			ports: None,
+			addr:     AclAddress::Cidr("0.0.0.0/0".into()),
+			ports:    None,
 			outbound: "default".to_string(),
-			hijack: None,
+			hijack:   None,
 		};
 
 		assert!(rule.matching(v4("1.2.3.4", 80), 80, true).await);
@@ -756,10 +756,10 @@ mod tests {
 	#[tokio::test]
 	async fn invalid_ip_address() {
 		let rule = AclRule {
-			addr: AclAddress::Ip("not.an.ip.address".into()),
-			ports: None,
+			addr:     AclAddress::Ip("not.an.ip.address".into()),
+			ports:    None,
 			outbound: "default".to_string(),
-			hijack: None,
+			hijack:   None,
 		};
 
 		assert!(!rule.matching(v4("1.2.3.4", 80), 80, true).await);
@@ -769,10 +769,10 @@ mod tests {
 	#[tokio::test]
 	async fn invalid_cidr() {
 		let rule = AclRule {
-			addr: AclAddress::Cidr("invalid/cidr".into()),
-			ports: None,
+			addr:     AclAddress::Cidr("invalid/cidr".into()),
+			ports:    None,
 			outbound: "default".to_string(),
-			hijack: None,
+			hijack:   None,
 		};
 
 		assert!(!rule.matching(v4("10.0.0.1", 80), 80, true).await);
@@ -782,10 +782,10 @@ mod tests {
 	#[tokio::test]
 	async fn loopback_addresses() {
 		let rule = AclRule {
-			addr: AclAddress::Localhost,
-			ports: None,
+			addr:     AclAddress::Localhost,
+			ports:    None,
 			outbound: "default".to_string(),
-			hijack: None,
+			hijack:   None,
 		};
 
 		assert!(rule.matching(v4("127.0.0.1", 80), 80, true).await);
@@ -803,10 +803,10 @@ mod tests {
 	#[tokio::test]
 	async fn ports_none_matches_everything() {
 		let rule = AclRule {
-			addr: AclAddress::Any,
-			ports: None,
+			addr:     AclAddress::Any,
+			ports:    None,
 			outbound: "default".to_string(),
-			hijack: None,
+			hijack:   None,
 		};
 
 		for port in [0u16, 22, 80, 443, 65535] {
@@ -819,16 +819,16 @@ mod tests {
 	async fn single_port_without_protocol() {
 		let ports = AclPorts {
 			entries: vec![AclPortEntry {
-				protocol: None,
+				protocol:  None,
 				port_spec: AclPortSpec::Single(8080),
 			}],
 		};
 
 		let rule = AclRule {
-			addr: AclAddress::Any,
-			ports: Some(ports),
+			addr:     AclAddress::Any,
+			ports:    Some(ports),
 			outbound: "default".to_string(),
-			hijack: None,
+			hijack:   None,
 		};
 
 		assert!(rule.matching(v4("10.0.0.1", 8080), 8080, true).await);
@@ -842,21 +842,21 @@ mod tests {
 		let ports = AclPorts {
 			entries: vec![
 				AclPortEntry {
-					protocol: Some(AclProtocol::Tcp),
+					protocol:  Some(AclProtocol::Tcp),
 					port_spec: AclPortSpec::Range(1000, 1005),
 				},
 				AclPortEntry {
-					protocol: Some(AclProtocol::Udp),
+					protocol:  Some(AclProtocol::Udp),
 					port_spec: AclPortSpec::Range(2000, 2002),
 				},
 			],
 		};
 
 		let rule = AclRule {
-			addr: AclAddress::Any,
-			ports: Some(ports),
+			addr:     AclAddress::Any,
+			ports:    Some(ports),
 			outbound: "default".to_string(),
-			hijack: None,
+			hijack:   None,
 		};
 
 		assert!(rule.matching(v4("8.8.8.8", 1003), 1003, true).await);
@@ -869,16 +869,16 @@ mod tests {
 	async fn port_range_boundary() {
 		let ports = AclPorts {
 			entries: vec![AclPortEntry {
-				protocol: None,
+				protocol:  None,
 				port_spec: AclPortSpec::Range(100, 200),
 			}],
 		};
 
 		let rule = AclRule {
-			addr: AclAddress::Any,
-			ports: Some(ports),
+			addr:     AclAddress::Any,
+			ports:    Some(ports),
 			outbound: "default".to_string(),
-			hijack: None,
+			hijack:   None,
 		};
 
 		assert!(rule.matching(v4("1.1.1.1", 100), 100, true).await);
@@ -892,16 +892,16 @@ mod tests {
 	async fn edge_case_port_zero() {
 		let ports = AclPorts {
 			entries: vec![AclPortEntry {
-				protocol: None,
+				protocol:  None,
 				port_spec: AclPortSpec::Single(0),
 			}],
 		};
 
 		let rule = AclRule {
-			addr: AclAddress::Any,
-			ports: Some(ports),
+			addr:     AclAddress::Any,
+			ports:    Some(ports),
 			outbound: "default".to_string(),
-			hijack: None,
+			hijack:   None,
 		};
 
 		assert!(rule.matching(v4("1.2.3.4", 0), 0, true).await);
@@ -912,16 +912,16 @@ mod tests {
 	async fn edge_case_port_max() {
 		let ports = AclPorts {
 			entries: vec![AclPortEntry {
-				protocol: None,
+				protocol:  None,
 				port_spec: AclPortSpec::Single(65535),
 			}],
 		};
 
 		let rule = AclRule {
-			addr: AclAddress::Any,
-			ports: Some(ports),
+			addr:     AclAddress::Any,
+			ports:    Some(ports),
 			outbound: "default".to_string(),
-			hijack: None,
+			hijack:   None,
 		};
 
 		assert!(rule.matching(v4("1.2.3.4", 65535), 65535, true).await);
@@ -932,16 +932,16 @@ mod tests {
 	async fn address_and_port_combination() {
 		let ports = AclPorts {
 			entries: vec![AclPortEntry {
-				protocol: Some(AclProtocol::Tcp),
+				protocol:  Some(AclProtocol::Tcp),
 				port_spec: AclPortSpec::Single(22),
 			}],
 		};
 
 		let rule = AclRule {
-			addr: AclAddress::Ip("192.0.2.10".into()),
-			ports: Some(ports),
+			addr:     AclAddress::Ip("192.0.2.10".into()),
+			ports:    Some(ports),
 			outbound: "default".to_string(),
-			hijack: None,
+			hijack:   None,
 		};
 
 		assert!(rule.matching(v4("192.0.2.10", 22), 22, true).await);
@@ -954,16 +954,16 @@ mod tests {
 	async fn ports_defined_but_protocol_mismatch() {
 		let ports = AclPorts {
 			entries: vec![AclPortEntry {
-				protocol: Some(AclProtocol::Tcp),
+				protocol:  Some(AclProtocol::Tcp),
 				port_spec: AclPortSpec::Single(443),
 			}],
 		};
 
 		let rule = AclRule {
-			addr: AclAddress::Any,
-			ports: Some(ports),
+			addr:     AclAddress::Any,
+			ports:    Some(ports),
 			outbound: "default".to_string(),
-			hijack: None,
+			hijack:   None,
 		};
 
 		assert!(!rule.matching(v4("1.1.1.1", 443), 443, false).await);
@@ -974,16 +974,16 @@ mod tests {
 	async fn empty_allowed_port_set_is_rejected() {
 		let ports = AclPorts {
 			entries: vec![AclPortEntry {
-				protocol: Some(AclProtocol::Tcp),
+				protocol:  Some(AclProtocol::Tcp),
 				port_spec: AclPortSpec::Single(9999),
 			}],
 		};
 
 		let rule = AclRule {
-			addr: AclAddress::Any,
-			ports: Some(ports),
+			addr:     AclAddress::Any,
+			ports:    Some(ports),
 			outbound: "default".to_string(),
-			hijack: None,
+			hijack:   None,
 		};
 
 		assert!(!rule.matching(v4("8.8.8.8", 9999), 9999, false).await);
@@ -994,25 +994,25 @@ mod tests {
 		let ports = AclPorts {
 			entries: vec![
 				AclPortEntry {
-					protocol: Some(AclProtocol::Tcp),
+					protocol:  Some(AclProtocol::Tcp),
 					port_spec: AclPortSpec::Single(80),
 				},
 				AclPortEntry {
-					protocol: Some(AclProtocol::Tcp),
+					protocol:  Some(AclProtocol::Tcp),
 					port_spec: AclPortSpec::Single(443),
 				},
 				AclPortEntry {
-					protocol: Some(AclProtocol::Udp),
+					protocol:  Some(AclProtocol::Udp),
 					port_spec: AclPortSpec::Range(5000, 5100),
 				},
 			],
 		};
 
 		let rule = AclRule {
-			addr: AclAddress::Any,
-			ports: Some(ports),
+			addr:     AclAddress::Any,
+			ports:    Some(ports),
 			outbound: "default".to_string(),
-			hijack: None,
+			hijack:   None,
 		};
 
 		assert!(rule.matching(v4("1.2.3.4", 80), 80, true).await);
@@ -1183,9 +1183,9 @@ block 10.0.0.0/8 udp/53
 	async fn display_acl_rule() {
 		let rule = AclRule {
 			outbound: "allow".to_string(),
-			addr: AclAddress::Ip("192.168.1.1".to_string()),
-			ports: None,
-			hijack: None,
+			addr:     AclAddress::Ip("192.168.1.1".to_string()),
+			ports:    None,
+			hijack:   None,
 		};
 
 		assert_eq!(rule.to_string(), "allow 192.168.1.1");
@@ -1195,14 +1195,14 @@ block 10.0.0.0/8 udp/53
 	async fn display_acl_rule_with_ports() {
 		let rule = AclRule {
 			outbound: "allow".to_string(),
-			addr: AclAddress::Any,
-			ports: Some(AclPorts {
+			addr:     AclAddress::Any,
+			ports:    Some(AclPorts {
 				entries: vec![AclPortEntry {
-					protocol: Some(AclProtocol::Tcp),
+					protocol:  Some(AclProtocol::Tcp),
 					port_spec: AclPortSpec::Single(443),
 				}],
 			}),
-			hijack: None,
+			hijack:   None,
 		};
 
 		assert_eq!(rule.to_string(), "allow * tcp/443");
@@ -1212,9 +1212,9 @@ block 10.0.0.0/8 udp/53
 	async fn display_acl_rule_with_hijack() {
 		let rule = AclRule {
 			outbound: "redirect".to_string(),
-			addr: AclAddress::Ip("8.8.8.8".to_string()),
-			ports: None,
-			hijack: Some("10.0.0.1".to_string()),
+			addr:     AclAddress::Ip("8.8.8.8".to_string()),
+			ports:    None,
+			hijack:   Some("10.0.0.1".to_string()),
 		};
 
 		assert_eq!(rule.to_string(), "redirect 8.8.8.8 10.0.0.1");
@@ -1223,7 +1223,7 @@ block 10.0.0.0/8 udp/53
 	#[tokio::test]
 	async fn display_port_entry() {
 		let entry = AclPortEntry {
-			protocol: Some(AclProtocol::Tcp),
+			protocol:  Some(AclProtocol::Tcp),
 			port_spec: AclPortSpec::Single(80),
 		};
 
@@ -1233,7 +1233,7 @@ block 10.0.0.0/8 udp/53
 	#[tokio::test]
 	async fn display_port_entry_no_protocol() {
 		let entry = AclPortEntry {
-			protocol: None,
+			protocol:  None,
 			port_spec: AclPortSpec::Range(1000, 2000),
 		};
 
@@ -1245,11 +1245,11 @@ block 10.0.0.0/8 udp/53
 		let ports = AclPorts {
 			entries: vec![
 				AclPortEntry {
-					protocol: Some(AclProtocol::Tcp),
+					protocol:  Some(AclProtocol::Tcp),
 					port_spec: AclPortSpec::Single(80),
 				},
 				AclPortEntry {
-					protocol: Some(AclProtocol::Udp),
+					protocol:  Some(AclProtocol::Udp),
 					port_spec: AclPortSpec::Single(53),
 				},
 			],
