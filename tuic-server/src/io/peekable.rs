@@ -52,7 +52,9 @@ impl<T: AsyncRead + Unpin> Peekable<T> {
 	/// buffered slice.
 	pub async fn peek(&mut self, need: usize) -> io::Result<&[u8]> {
 		if self.buf.len().saturating_sub(self.pos) >= need {
-			return Ok(self.buffered());
+			let avail = self.buf.len().saturating_sub(self.pos);
+			let take = avail.min(need);
+			return Ok(&self.buf[self.pos..self.pos + take]);
 		}
 		// read until have need or reach max_buf
 		let mut tmp = [0u8; 1024];
@@ -69,7 +71,10 @@ impl<T: AsyncRead + Unpin> Peekable<T> {
 				break;
 			}
 		}
-		Ok(self.buffered())
+		let avail = self.buf.len().saturating_sub(self.pos);
+		let take = avail.min(need);
+		Ok(&self.buf[self.pos..self.pos + take])
+
 	}
 }
 
