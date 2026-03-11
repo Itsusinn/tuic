@@ -20,7 +20,7 @@ use super::{Connection, ERROR_CODE, UdpSession};
 use crate::{
 	config::OutboundRule,
 	error::Error,
-	io::{copy_io, copy_io_with_initial},
+	io::{copy_io_with_initial},
 	restful, sniffer,
 	utils::{StackPrefer, UdpRelayMode},
 };
