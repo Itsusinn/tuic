@@ -4,8 +4,7 @@ use std::{
 	task::{Context, Poll},
 };
 
-use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
-use tokio::io::AsyncReadExt;
+use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, ReadBuf};
 
 /// A wrapper that allows peeking into the stream without permanently consuming
 /// bytes. After peek, subsequent reads will still return the peeked bytes

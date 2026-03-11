@@ -10,7 +10,13 @@ use tokio::{
 #[tokio::test]
 async fn curl_sniffer_integration() {
 	// Skip test if curl not found
-	if Command::new("curl").arg("--version").stdout(Stdio::null()).status().await.is_err() {
+	if Command::new("curl")
+		.arg("--version")
+		.stdout(Stdio::null())
+		.status()
+		.await
+		.is_err()
+	{
 		eprintln!("curl not found; skipping test");
 		return;
 	}
