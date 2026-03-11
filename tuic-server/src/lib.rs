@@ -17,6 +17,7 @@ pub mod error;
 pub mod io;
 pub mod restful;
 pub mod server;
+pub mod sniffer;
 pub mod tls;
 pub mod utils;
 

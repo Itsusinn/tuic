@@ -20,8 +20,8 @@ use super::{Connection, ERROR_CODE, UdpSession};
 use crate::{
 	config::OutboundRule,
 	error::Error,
-	io::copy_io,
-	restful,
+	io::copy_io_with_initial,
+	restful, sniffer,
 	utils::{StackPrefer, UdpRelayMode},
 };
 
@@ -195,16 +195,41 @@ impl Connection {
 		);
 
 		let process = async {
+			let mut initial_payload = Vec::new();
+			let mut domain_sniffed = None;
+
+			if self.ctx.cfg.experimental.sniffer {
+				match tokio::time::timeout(
+					std::time::Duration::from_millis(500),
+					sniffer::sniff_peek(&mut conn, &mut initial_payload),
+				)
+				.await
+				{
+					Ok(Ok(sniffer::SniffResult::Tls(sni))) => {
+						domain_sniffed = Some(sni);
+					}
+					Ok(Ok(sniffer::SniffResult::Http(host))) => {
+						domain_sniffed = Some(host);
+					}
+					_ => {} // Fallback to normal behavior on timeout or failure
+				}
+			}
+
 			// First resolve using default outbound to get candidate IPs
 			let default_outbound = &self.ctx.cfg.outbound.default;
 			let initial_addrs = self.resolve_and_filter_addresses(conn.addr(), default_outbound, None).await?;
 
 			// Decide ACL based on resolved addresses
 			let port = conn.addr().port();
-			let domain = match conn.addr() {
+			let mut domain = match conn.addr() {
 				Address::DomainAddress(d, _) => Some(d.as_str()),
 				_ => None,
 			};
+
+			if let Some(sniffed) = &domain_sniffed {
+				domain = Some(sniffed.as_str());
+			}
+
 			let (outbound_name, hijack, drop) = self.decide_acl_for_addrs(&initial_addrs, port, true, domain).await;
 
 			if drop {
@@ -234,7 +259,7 @@ impl Connection {
 
 			// a -> b tx
 			// a <- b rx
-			let (tx, rx, err) = copy_io(&mut conn, &mut stream).await;
+			let (tx, rx, err) = copy_io_with_initial(&mut conn, &mut stream, &initial_payload).await;
 			if err.is_some() {
 				_ = conn.reset(ERROR_CODE);
 			} else {
