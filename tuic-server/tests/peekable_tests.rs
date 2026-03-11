@@ -5,7 +5,7 @@ mod tests {
 
 	#[tokio::test]
 	async fn test_peekable_basic() {
-		let (mut a, mut b) = duplex(1024);
+		let (mut a, b) = duplex(1024);
 		// write some bytes from 'a' side
 		a.write_all(b"hello").await.unwrap();
 
