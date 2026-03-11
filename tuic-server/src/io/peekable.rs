@@ -74,7 +74,6 @@ impl<T: AsyncRead + Unpin> Peekable<T> {
 		let avail = self.buf.len().saturating_sub(self.pos);
 		let take = avail.min(need);
 		Ok(&self.buf[self.pos..self.pos + take])
-
 	}
 }
 
