@@ -29,7 +29,7 @@ async fn curl_sniffer_integration() {
 		let host = req
 			.lines()
 			.find(|l| l.to_ascii_lowercase().starts_with("host:"))
-			.map(|l| l.splitn(2, ':').nth(1).unwrap_or("").trim().to_string())
+			.map(|l| l.split_once(':').map(|x| x.1).unwrap_or("").trim().to_string())
 			.unwrap_or_default();
 		let _ = tx.send(host);
 		let resp = b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nOK";
@@ -40,12 +40,13 @@ async fn curl_sniffer_integration() {
 	// 127.0.0.1:1080 as SOCKS5 We'll call curl via --socks5-hostname to force
 	// hostname to be sent through proxy and let sniffer detect Host header
 	let url = format!("http://example.test:{}/ping", addr.port());
-	let mut cmd = Command::new("curl");
+	let cmd = Command::new("curl");
+	let mut cmd = cmd;
 	cmd.arg("--socks5-hostname").arg("127.0.0.1:1080");
 	cmd.arg("-sS").arg("-o").arg("/dev/null").arg("-w").arg("%{http_code}");
 	cmd.arg(&url);
 	cmd.stdout(Stdio::piped());
-	let mut child = cmd.spawn().expect("failed to spawn curl");
+	let child = cmd.spawn().expect("failed to spawn curl");
 	let output = child.wait_with_output().await.expect("curl run failed");
 	let code = String::from_utf8_lossy(&output.stdout);
 	assert_eq!(code, "200");
