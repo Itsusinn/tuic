@@ -14,7 +14,7 @@ pub fn parse_host(data: &[u8]) -> Option<String> {
 		b"PATCH ",
 	];
 
-	let is_http = methods.iter().any(|m| data.starts_with(*m));
+	let is_http = methods.iter().any(|m| data.starts_with(m));
 	if !is_http {
 		return None;
 	}
