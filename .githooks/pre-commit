@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+# Cross-platform pre-commit hook: run cargo +nightly fmt and stage changes
+set -e
+echo "Running cargo +nightly fmt --all"
+if command -v cargo >/dev/null 2>&1; then
+  cargo +nightly fmt --all || true
+else
+  echo "cargo not found, skipping fmt"
+fi
+# Stage any formatting changes
+if [ -n "$(git status --porcelain)" ]; then
+  echo "Formatting changed files, staging them"
+  git add -A
+fi
+exit 0
