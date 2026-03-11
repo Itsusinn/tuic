@@ -49,7 +49,7 @@ async fn curl_sniffer_integration() {
 	let url = format!("http://127.0.0.1:{}/ping", addr.port());
 	let cmd = Command::new("curl");
 	let mut cmd = cmd;
-	cmd.arg("--socks5-hostname").arg(socks5_addr.to_string());
+	cmd.arg("--socks5").arg(socks5_addr.to_string());
 	cmd.arg("-sS").arg("-o").arg("/dev/null").arg("-w").arg("%{http_code}");
 	cmd.arg(&url);
 	cmd.stdout(Stdio::piped());
