@@ -367,8 +367,8 @@ async fn provision_certificate_attempt(hostname: &str, cert_path: &Path, key_pat
 						.add_challenge(token.clone(), key_auth.as_str().to_string())
 						.await;
 
-					// Start the HTTP server; cancel token is dropped after poll_ready, stopping the
-					// server
+					// Start the HTTP challenge server; it will be stopped explicitly via
+					// `challenge_cancel.cancel()` after `poll_ready` completes
 					let challenge_cancel = start_challenge_server(challenge_server.clone())
 						.await
 						.context("Failed to start HTTP challenge server")?;
@@ -381,10 +381,16 @@ async fn provision_certificate_attempt(hostname: &str, cert_path: &Path, key_pat
 
 					info!("HTTP-01 challenge set as ready for {}", hostname);
 
-					let status = order
+					let status = match order
 						.poll_ready(&RetryPolicy::default())
 						.await
-						.context("Failed to poll order status")?;
+					{
+						Ok(status) => status,
+						Err(e) => {
+							challenge_cancel.cancel();
+							return Err(e).context("Failed to poll order status");
+						}
+					};
 
 					challenge_cancel.cancel();
 
