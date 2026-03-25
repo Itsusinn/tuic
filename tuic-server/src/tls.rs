@@ -20,6 +20,7 @@ use rustls::{
 };
 use sha2::{Digest, Sha256};
 use tokio::{fs, sync::RwLock as TokioRwLock};
+use tokio_util::sync::CancellationToken;
 use tracing::{error, info, warn};
 use x509_parser::{parse_x509_certificate, pem::parse_x509_pem};
 
@@ -178,7 +179,7 @@ impl ChallengeServer {
 }
 
 /// Start HTTP challenge server on port 80
-pub async fn start_challenge_server(challenge_server: ChallengeServer) -> Result<()> {
+pub async fn start_challenge_server(challenge_server: ChallengeServer) -> Result<CancellationToken> {
 	let app = Router::new()
 		.route("/.well-known/acme-challenge/{token}", get(handle_challenge))
 		.with_state(challenge_server);
@@ -189,13 +190,19 @@ pub async fn start_challenge_server(challenge_server: ChallengeServer) -> Result
 
 	info!("Starting HTTP challenge server on port 80");
 
+	let token = CancellationToken::new();
+	let child = token.child_token();
+
 	tokio::spawn(async move {
-		if let Err(e) = axum::serve(listener, app).await {
+		let serve = axum::serve(listener, app).with_graceful_shutdown(async move {
+			child.cancelled().await;
+		});
+		if let Err(e) = serve.await {
 			error!("HTTP challenge server error: {}", e);
 		}
 	});
 
-	Ok(())
+	Ok(token)
 }
 
 /// Handle ACME challenge requests
@@ -360,8 +367,9 @@ async fn provision_certificate_attempt(hostname: &str, cert_path: &Path, key_pat
 						.add_challenge(token.clone(), key_auth.as_str().to_string())
 						.await;
 
-					// Start the HTTP server
-					start_challenge_server(challenge_server.clone())
+					// Start the HTTP server; cancel token is dropped after poll_ready, stopping the
+					// server
+					let challenge_cancel = start_challenge_server(challenge_server.clone())
 						.await
 						.context("Failed to start HTTP challenge server")?;
 
@@ -373,11 +381,39 @@ async fn provision_certificate_attempt(hostname: &str, cert_path: &Path, key_pat
 
 					info!("HTTP-01 challenge set as ready for {}", hostname);
 
-					// Wait a bit for the challenge to be validated
-					tokio::time::sleep(Duration::from_secs(5)).await;
+					let status = order
+						.poll_ready(&RetryPolicy::default())
+						.await
+						.context("Failed to poll order status")?;
 
-					// Clean up the challenge token
-					challenge_server.remove_challenge(&token).await;
+					challenge_cancel.cancel();
+
+					if status != OrderStatus::Ready {
+						return Err(eyre::eyre!("Order not ready, status: {:?}", status));
+					}
+
+					// Finalize the order
+					let private_key_pem = order.finalize().await.context("Failed to finalize order")?;
+
+					let cert_chain_pem = order
+						.poll_certificate(&RetryPolicy::default())
+						.await
+						.context("Failed to get certificate")?;
+
+					// Save certificate and private key to files
+					fs::write(cert_path, &cert_chain_pem)
+						.await
+						.context("Failed to write certificate file")?;
+
+					fs::write(key_path, &private_key_pem)
+						.await
+						.context("Failed to write private key file")?;
+
+					info!("Successfully provisioned and saved ACME certificate for {}", hostname);
+					info!("Certificate saved to: {}", cert_path.display());
+					info!("Private key saved to: {}", key_path.display());
+
+					return Ok(());
 				} else if has_http01 {
 					// HTTP-01 is available but port 80 is not accessible
 					let challenge = authz
@@ -572,7 +608,7 @@ pub async fn start_certificate_renewal_task(hostname: String, cert_path: PathBuf
 				Ok(true) => {
 					info!("Certificate for {} is expiring soon, attempting renewal", hostname);
 
-					match provision_acme_certificate(&hostname, &cert_path, &key_path, 3, &acme_email).await {
+					match provision_acme_certificate(&hostname, &cert_path, &key_path, 5, &acme_email).await {
 						Ok(()) => {
 							info!("Successfully renewed certificate for {}", hostname);
 						}

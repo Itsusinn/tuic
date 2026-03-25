@@ -58,7 +58,7 @@ impl Server {
 				info!("No valid ACME certificate found, will provision new one");
 
 				// Attempt ACME certificate provisioning
-				match provision_acme_certificate(hostname.as_str(), &cert_path, &key_path, 2, acme_email.as_str()).await {
+				match provision_acme_certificate(hostname.as_str(), &cert_path, &key_path, 5, acme_email.as_str()).await {
 					Ok(()) => {
 						warn!("Successfully provisioned ACME certificate for {}", hostname);
 

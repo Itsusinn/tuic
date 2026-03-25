@@ -37,6 +37,7 @@ register-count = { version = "0.1.0", default-features = false, features = ["std
 
 # Tokio/Async
 tokio = { version = "1", default-features = false, features = ["io-util", "macros", "net", "parking_lot", "rt-multi-thread", "time", "fs", "signal"] }
+tokio-util = { version = "0.7", default-features = false }
 
 # TLS
 rustls = { version = "0.23", default-features = false }
