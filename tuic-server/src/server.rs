@@ -58,7 +58,10 @@ impl Server {
 				info!("No valid ACME certificate found, will provision new one");
 
 				// Attempt ACME certificate provisioning
-				match provision_acme_certificate(hostname.as_str(), &cert_path, &key_path, 5, acme_email.as_str()).await {
+				let max_retries = 5;
+				match provision_acme_certificate(hostname.as_str(), &cert_path, &key_path, max_retries, acme_email.as_str())
+					.await
+				{
 					Ok(()) => {
 						warn!("Successfully provisioned ACME certificate for {}", hostname);
 
@@ -79,7 +82,7 @@ impl Server {
 							.with_cert_resolver(cert_resolver);
 					}
 					Err(e) => {
-						warn!("ACME certificate provisioning failed after 2 attempts: {}", e);
+						warn!("ACME certificate provisioning failed after {} attempts: {}", max_retries, e);
 						warn!("Falling back to self-signed certificate");
 
 						let cert = rcgen::generate_simple_self_signed(vec![hostname.clone()]).unwrap();

@@ -381,10 +381,7 @@ async fn provision_certificate_attempt(hostname: &str, cert_path: &Path, key_pat
 
 					info!("HTTP-01 challenge set as ready for {}", hostname);
 
-					let status = match order
-						.poll_ready(&RetryPolicy::default())
-						.await
-					{
+					let status = match order.poll_ready(&RetryPolicy::default()).await {
 						Ok(status) => status,
 						Err(e) => {
 							challenge_cancel.cancel();
