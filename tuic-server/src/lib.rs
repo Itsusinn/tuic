@@ -10,6 +10,7 @@ use moka::future::Cache;
 use uuid::Uuid;
 
 pub mod acl;
+pub mod acme;
 pub mod compat;
 pub mod config;
 pub mod connection;
