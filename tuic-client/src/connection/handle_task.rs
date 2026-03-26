@@ -11,9 +11,7 @@ use tuic_core::{
 };
 
 use super::Connection;
-use crate::{
-	error::Error, forward::UDP_SESSIONS as FWD_UDP_SESSIONS, socks5::UDP_SESSIONS as SOCKS5_UDP_SESSIONS, utils::UdpRelayMode,
-};
+use crate::{error::Error, utils::UdpRelayMode};
 
 impl Connection {
 	pub async fn authenticate(self, zero_rtt_accepted: Option<ZeroRttAccepted>) {
@@ -100,7 +98,7 @@ impl Connection {
 		}
 	}
 
-	pub async fn handle_packet(pkt: Packet) {
+	pub async fn handle_packet(&self, pkt: Packet) {
 		let assoc_id = pkt.assoc_id();
 		let pkt_id = pkt.pkt_id();
 
@@ -128,7 +126,7 @@ impl Connection {
 					Address::SocketAddress(addr) => Socks5Address::SocketAddress(addr),
 				};
 
-				let session = SOCKS5_UDP_SESSIONS.get().unwrap().read().await.get(&assoc_id).cloned();
+				let session = self.socks5_udp_sessions.read().await.get(&assoc_id).cloned();
 
 				if let Some(session) = session {
 					if let Err(err) = session.send(pkt, addr).await {
@@ -138,7 +136,7 @@ impl Connection {
 						);
 					}
 				} else {
-					let fwd_session = FWD_UDP_SESSIONS.get().unwrap().read().await.get(&assoc_id).cloned();
+					let fwd_session = self.fwd_udp_sessions.read().await.get(&assoc_id).cloned();
 
 					if let Some(session) = fwd_session {
 						if let Err(err) = session.send(pkt).await {

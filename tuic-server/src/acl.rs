@@ -284,18 +284,12 @@ fn parse_port_entry(pair: pest::iterators::Pair<Rule>) -> eyre::Result<AclPortEn
 
 /// Parse ports from pest pair
 fn parse_ports(pair: pest::iterators::Pair<Rule>) -> eyre::Result<Option<AclPorts>> {
-	let inner = pair
-		.into_inner()
-		.next()
-		.ok_or_else(|| eyre::eyre!("Expected inner pair"))?;
+	let inner = pair.into_inner().next().ok_or_else(|| eyre::eyre!("Expected inner pair"))?;
 
 	match inner.as_rule() {
 		Rule::any_port => Ok(None),
 		Rule::port_list => {
-			let entries = inner
-				.into_inner()
-				.map(parse_port_entry)
-				.collect::<Result<Vec<_>, _>>()?;
+			let entries = inner.into_inner().map(parse_port_entry).collect::<Result<Vec<_>, _>>()?;
 
 			Ok(Some(AclPorts { entries }))
 		}
@@ -321,8 +315,15 @@ pub(crate) fn parse_acl_rule(rule: &str) -> eyre::Result<AclRule> {
 		match pair.as_rule() {
 			Rule::outbound => outbound = pair.as_str().to_string(),
 			// Address variants appear directly (address is a silent choice rule)
-			Rule::localhost_kw | Rule::suffix_localhost | Rule::private_kw | Rule::any_addr | Rule::wildcard_domain
-			| Rule::cidr | Rule::ipv4 | Rule::ipv6 | Rule::domain => addr = parse_address_variant(pair)?,
+			Rule::localhost_kw
+			| Rule::suffix_localhost
+			| Rule::private_kw
+			| Rule::any_addr
+			| Rule::wildcard_domain
+			| Rule::cidr
+			| Rule::ipv4
+			| Rule::ipv6
+			| Rule::domain => addr = parse_address_variant(pair)?,
 			Rule::ports => ports = parse_ports(pair)?,
 			Rule::hijack => hijack = Some(pair.as_str().to_string()),
 			Rule::EOI => {}

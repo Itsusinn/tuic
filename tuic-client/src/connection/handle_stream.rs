@@ -49,7 +49,7 @@ impl Connection {
 			Err(err) => Err(Error::Model(err)),
 			Ok(Task::Packet(pkt)) => match self.udp_relay_mode {
 				UdpRelayMode::Quic => {
-					Self::handle_packet(pkt).await;
+					self.handle_packet(pkt).await;
 					Ok(())
 				}
 				UdpRelayMode::Native => Err(Error::WrongPacketSource),
@@ -84,7 +84,7 @@ impl Connection {
 			Err(err) => Err(Error::Model(err)),
 			Ok(Task::Packet(pkt)) => match self.udp_relay_mode {
 				UdpRelayMode::Native => {
-					Self::handle_packet(pkt).await;
+					self.handle_packet(pkt).await;
 					Ok(())
 				}
 				UdpRelayMode::Quic => Err(Error::WrongPacketSource),

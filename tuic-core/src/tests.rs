@@ -405,3 +405,408 @@ fn test_marshal_unmarshal_address_none() {
 		_ => panic!("Expected Packet header"),
 	}
 }
+
+// ========== Model tests ==========
+
+#[cfg(feature = "model")]
+mod model_tests {
+	use std::time::Duration;
+
+	use uuid::Uuid;
+
+	use crate::{
+		Address,
+		model::{Connection, KeyingMaterialExporter},
+	};
+
+	/// A mock keying material exporter for testing
+	struct MockExporter;
+
+	impl KeyingMaterialExporter for MockExporter {
+		fn export_keying_material(&self, label: &[u8], context: &[u8]) -> [u8; 32] {
+			let mut result = [0u8; 32];
+			// Simple deterministic hash for testing
+			for (i, b) in label.iter().chain(context.iter()).enumerate() {
+				result[i % 32] ^= b;
+			}
+			result
+		}
+	}
+
+	#[test]
+	fn test_connection_creation() {
+		let conn = Connection::<Vec<u8>>::new();
+		assert_eq!(conn.task_connect_count(), 0);
+		assert_eq!(conn.task_associate_count(), 0);
+	}
+
+	#[test]
+	fn test_send_authenticate() {
+		let conn = Connection::<Vec<u8>>::new();
+		let uuid = Uuid::new_v4();
+		let password = "test_password";
+		let exporter = MockExporter;
+
+		let auth_tx = conn.send_authenticate(uuid, password, &exporter);
+		let header = auth_tx.header();
+		assert_eq!(header.type_code(), 0x00); // Authenticate
+	}
+
+	#[test]
+	fn test_recv_authenticate_valid() {
+		let conn = Connection::<Vec<u8>>::new();
+		let uuid = Uuid::new_v4();
+		let password = "test_password";
+		let exporter = MockExporter;
+
+		let token = exporter.export_keying_material(uuid.as_ref(), password.as_ref());
+		let header = crate::Authenticate::new(uuid, token);
+
+		let auth_rx = conn.recv_authenticate(header);
+		assert_eq!(auth_rx.uuid(), uuid);
+		assert!(auth_rx.is_valid(password, &exporter));
+	}
+
+	#[test]
+	fn test_recv_authenticate_invalid() {
+		let conn = Connection::<Vec<u8>>::new();
+		let uuid = Uuid::new_v4();
+		let exporter = MockExporter;
+
+		let token = [0u8; 32]; // wrong token
+		let header = crate::Authenticate::new(uuid, token);
+
+		let auth_rx = conn.recv_authenticate(header);
+		assert_eq!(auth_rx.uuid(), uuid);
+		assert!(!auth_rx.is_valid("test_password", &exporter));
+	}
+
+	#[test]
+	fn test_send_recv_connect_task_counting() {
+		let conn = Connection::<Vec<u8>>::new();
+		assert_eq!(conn.task_connect_count(), 0);
+
+		let addr = Address::DomainAddress("example.com".to_string(), 443);
+		let connect_tx = conn.send_connect(addr.clone());
+		assert_eq!(conn.task_connect_count(), 1);
+
+		let addr2 = Address::DomainAddress("test.com".to_string(), 80);
+		let connect_tx2 = conn.send_connect(addr2);
+		assert_eq!(conn.task_connect_count(), 2);
+
+		drop(connect_tx);
+		assert_eq!(conn.task_connect_count(), 1);
+
+		drop(connect_tx2);
+		assert_eq!(conn.task_connect_count(), 0);
+	}
+
+	#[test]
+	fn test_recv_connect() {
+		let conn = Connection::<Vec<u8>>::new();
+		let addr = Address::DomainAddress("example.com".to_string(), 443);
+		let header = crate::Connect::new(addr.clone());
+
+		let connect_rx = conn.recv_connect(header);
+		assert_eq!(connect_rx.addr(), &addr);
+		assert_eq!(conn.task_connect_count(), 1);
+
+		drop(connect_rx);
+		assert_eq!(conn.task_connect_count(), 0);
+	}
+
+	#[test]
+	fn test_send_recv_dissociate() {
+		let conn = Connection::<Vec<u8>>::new();
+
+		// First create a UDP session by sending a packet
+		let _pkt = conn.send_packet(42, Address::DomainAddress("test.com".to_string(), 53), 1200);
+		assert_eq!(conn.task_associate_count(), 1);
+
+		// Dissociate
+		let dissoc_tx = conn.send_dissociate(42);
+		assert_eq!(dissoc_tx.header().type_code(), 0x03);
+		assert_eq!(conn.task_associate_count(), 0);
+	}
+
+	#[test]
+	fn test_recv_dissociate() {
+		let conn = Connection::<Vec<u8>>::new();
+
+		// Create a session via recv_packet_unrestricted
+		let header = crate::Packet::new(99, 0, 1, 0, 5, Address::DomainAddress("test.com".to_string(), 80));
+		let _pkt = conn.recv_packet_unrestricted(header);
+		assert_eq!(conn.task_associate_count(), 1);
+
+		let dissoc_header = crate::Dissociate::new(99);
+		let _dissoc_rx = conn.recv_dissociate(dissoc_header);
+		assert_eq!(conn.task_associate_count(), 0);
+	}
+
+	#[test]
+	fn test_send_heartbeat() {
+		let conn = Connection::<Vec<u8>>::new();
+		let hb = conn.send_heartbeat();
+		assert_eq!(hb.header().type_code(), 0x04);
+	}
+
+	#[test]
+	fn test_recv_heartbeat() {
+		let conn = Connection::<Vec<u8>>::new();
+		let header = crate::Heartbeat::new();
+		let _hb = conn.recv_heartbeat(header);
+		// Just ensure it doesn't panic
+	}
+
+	#[test]
+	fn test_packet_fragmentation_single() {
+		let conn = Connection::<Vec<u8>>::new();
+		let pkt = conn.send_packet(1, Address::DomainAddress("test.com".to_string(), 53), 1200);
+
+		let payload = vec![0u8; 100];
+		let fragments: Vec<_> = pkt.into_fragments(payload).collect();
+
+		assert_eq!(fragments.len(), 1);
+		let (header, data) = &fragments[0];
+		assert_eq!(header.type_code(), 0x02); // Packet
+		assert_eq!(data.len(), 100);
+	}
+
+	#[test]
+	fn test_packet_fragmentation_multiple() {
+		let conn = Connection::<Vec<u8>>::new();
+		// Use a very small max_pkt_size to force fragmentation
+		let pkt = conn.send_packet(1, Address::DomainAddress("test.com".to_string(), 53), 50);
+
+		let payload = vec![0xAB; 200];
+		let fragments: Vec<_> = pkt.into_fragments(payload).collect();
+
+		assert!(fragments.len() > 1);
+
+		// First fragment should have address, rest should have None
+		let (first_header, _) = &fragments[0];
+		match first_header {
+			crate::Header::Packet(p) => {
+				assert!(!p.addr().is_none());
+				assert_eq!(p.frag_id(), 0);
+				assert_eq!(p.frag_total(), fragments.len() as u8);
+			}
+			_ => panic!("Expected Packet header"),
+		}
+
+		// Subsequent fragments should have Address::None
+		for (i, (header, _)) in fragments.iter().enumerate().skip(1) {
+			match header {
+				crate::Header::Packet(p) => {
+					assert!(p.addr().is_none());
+					assert_eq!(p.frag_id(), i as u8);
+				}
+				_ => panic!("Expected Packet header"),
+			}
+		}
+
+		// Total payload size should match
+		let total_size: usize = fragments.iter().map(|(_, data)| data.len()).sum();
+		assert_eq!(total_size, 200);
+	}
+
+	#[test]
+	fn test_packet_assembly_single_fragment() {
+		let conn = Connection::<Vec<u8>>::new();
+		let payload = b"hello world";
+
+		// Receive a single-fragment packet
+		let header = crate::Packet::new(
+			1,
+			0,
+			1,
+			0,
+			payload.len() as u16,
+			Address::DomainAddress("test.com".to_string(), 53),
+		);
+		let pkt_rx = conn.recv_packet_unrestricted(header);
+
+		let result = pkt_rx.assemble(payload.to_vec()).unwrap();
+		assert!(result.is_some());
+
+		let assembled = result.unwrap();
+		let mut buf = Vec::new();
+		let (addr, assoc_id) = assembled.assemble(&mut buf);
+		assert_eq!(buf, payload);
+		assert_eq!(assoc_id, 1);
+		assert_eq!(addr, Address::DomainAddress("test.com".to_string(), 53));
+	}
+
+	#[test]
+	fn test_packet_assembly_multi_fragment() {
+		let conn = Connection::<Vec<u8>>::new();
+
+		// Fragment 0 (first, has address)
+		let header0 = crate::Packet::new(1, 0, 3, 0, 5, Address::DomainAddress("test.com".to_string(), 53));
+		let pkt0 = conn.recv_packet_unrestricted(header0);
+		let result0 = pkt0.assemble(vec![1, 2, 3, 4, 5]).unwrap();
+		assert!(result0.is_none()); // not complete yet
+
+		// Fragment 1 (middle, no address)
+		let header1 = crate::Packet::new(1, 0, 3, 1, 5, Address::None);
+		let pkt1 = conn.recv_packet_unrestricted(header1);
+		let result1 = pkt1.assemble(vec![6, 7, 8, 9, 10]).unwrap();
+		assert!(result1.is_none()); // not complete yet
+
+		// Fragment 2 (last, no address)
+		let header2 = crate::Packet::new(1, 0, 3, 2, 3, Address::None);
+		let pkt2 = conn.recv_packet_unrestricted(header2);
+		let result2 = pkt2.assemble(vec![11, 12, 13]).unwrap();
+		assert!(result2.is_some()); // now complete
+
+		let assembled = result2.unwrap();
+		let mut buf = Vec::new();
+		let (addr, assoc_id) = assembled.assemble(&mut buf);
+		assert_eq!(buf, vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13]);
+		assert_eq!(assoc_id, 1);
+		assert_eq!(addr, Address::DomainAddress("test.com".to_string(), 53));
+	}
+
+	#[test]
+	fn test_packet_assembly_invalid_frag_id() {
+		let conn = Connection::<Vec<u8>>::new();
+
+		// frag_id >= frag_total should fail
+		let header = crate::Packet::new(1, 0, 2, 5, 5, Address::DomainAddress("test.com".to_string(), 53));
+		let pkt = conn.recv_packet_unrestricted(header);
+		let result = pkt.assemble(vec![1, 2, 3, 4, 5]);
+		assert!(result.is_err());
+	}
+
+	#[test]
+	fn test_packet_assembly_duplicate_fragment() {
+		let conn = Connection::<Vec<u8>>::new();
+
+		// Send first fragment
+		let header0 = crate::Packet::new(1, 0, 2, 0, 5, Address::DomainAddress("test.com".to_string(), 53));
+		let pkt0 = conn.recv_packet_unrestricted(header0);
+		pkt0.assemble(vec![1, 2, 3, 4, 5]).unwrap();
+
+		// Send duplicate fragment 0
+		let header0_dup = crate::Packet::new(1, 0, 2, 0, 5, Address::DomainAddress("test.com".to_string(), 53));
+		let pkt0_dup = conn.recv_packet_unrestricted(header0_dup);
+		let result = pkt0_dup.assemble(vec![1, 2, 3, 4, 5]);
+		assert!(result.is_err());
+	}
+
+	#[test]
+	fn test_packet_assembly_first_frag_no_address() {
+		let conn = Connection::<Vec<u8>>::new();
+
+		// First fragment (frag_id=0) must have an address
+		let header = crate::Packet::new(1, 0, 2, 0, 5, Address::None);
+		let pkt = conn.recv_packet_unrestricted(header);
+		let result = pkt.assemble(vec![1, 2, 3, 4, 5]);
+		assert!(result.is_err());
+	}
+
+	#[test]
+	fn test_packet_assembly_non_first_frag_with_address() {
+		let conn = Connection::<Vec<u8>>::new();
+
+		// First send fragment 0
+		let header0 = crate::Packet::new(1, 0, 2, 0, 5, Address::DomainAddress("test.com".to_string(), 53));
+		let pkt0 = conn.recv_packet_unrestricted(header0);
+		pkt0.assemble(vec![1, 2, 3, 4, 5]).unwrap();
+
+		// Non-first fragment should NOT have an address
+		let header1 = crate::Packet::new(1, 0, 2, 1, 5, Address::DomainAddress("other.com".to_string(), 80));
+		let pkt1 = conn.recv_packet_unrestricted(header1);
+		let result = pkt1.assemble(vec![6, 7, 8, 9, 10]);
+		assert!(result.is_err());
+	}
+
+	#[test]
+	fn test_recv_packet_unknown_session() {
+		let conn = Connection::<Vec<u8>>::new();
+
+		// recv_packet returns None for unknown assoc_id
+		let header = crate::Packet::new(999, 0, 1, 0, 5, Address::DomainAddress("test.com".to_string(), 53));
+		let result = conn.recv_packet(header);
+		assert!(result.is_none());
+	}
+
+	#[test]
+	fn test_recv_packet_known_session() {
+		let conn = Connection::<Vec<u8>>::new();
+
+		// Create a session first via send_packet
+		let _pkt = conn.send_packet(42, Address::DomainAddress("test.com".to_string(), 53), 1200);
+
+		// Now recv_packet should find the session
+		let header = crate::Packet::new(42, 0, 1, 0, 5, Address::DomainAddress("reply.com".to_string(), 53));
+		let result = conn.recv_packet(header);
+		assert!(result.is_some());
+	}
+
+	#[test]
+	fn test_collect_garbage() {
+		let conn = Connection::<Vec<u8>>::new();
+
+		// Create session and receive a partial packet
+		let header = crate::Packet::new(1, 0, 2, 0, 5, Address::DomainAddress("test.com".to_string(), 53));
+		let pkt = conn.recv_packet_unrestricted(header);
+		pkt.assemble(vec![1, 2, 3, 4, 5]).unwrap();
+
+		// Wait a tiny bit so elapsed > 0
+		std::thread::sleep(Duration::from_millis(10));
+
+		// Garbage collect with very short timeout should remove incomplete packets
+		conn.collect_garbage(Duration::from_nanos(1));
+
+		// The session still exists, so recv_packet should find it.
+		// But the old packet buffer for pkt_id=0 should be gone (GC'd).
+		// Sending a new complete single-fragment packet should succeed.
+		let header_new = crate::Packet::new(1, 1, 1, 0, 3, Address::DomainAddress("new.com".to_string(), 80));
+		let pkt_new = conn.recv_packet(header_new);
+		assert!(pkt_new.is_some());
+		let result = pkt_new.unwrap().assemble(vec![10, 20, 30]).unwrap();
+		assert!(result.is_some()); // single fragment completes immediately
+	}
+
+	#[test]
+	fn test_multiple_udp_sessions() {
+		let conn = Connection::<Vec<u8>>::new();
+
+		// Create multiple sessions
+		let _p1 = conn.send_packet(1, Address::DomainAddress("a.com".to_string(), 53), 1200);
+		let _p2 = conn.send_packet(2, Address::DomainAddress("b.com".to_string(), 53), 1200);
+		let _p3 = conn.send_packet(3, Address::DomainAddress("c.com".to_string(), 53), 1200);
+
+		assert_eq!(conn.task_associate_count(), 3);
+
+		conn.send_dissociate(1);
+		assert_eq!(conn.task_associate_count(), 2);
+
+		conn.send_dissociate(2);
+		conn.send_dissociate(3);
+		assert_eq!(conn.task_associate_count(), 0);
+	}
+
+	#[test]
+	fn test_connection_clone() {
+		let conn = Connection::<Vec<u8>>::new();
+		let conn2 = conn.clone();
+
+		let _pkt = conn.send_packet(1, Address::DomainAddress("test.com".to_string(), 53), 1200);
+		assert_eq!(conn.task_associate_count(), 1);
+		assert_eq!(conn2.task_associate_count(), 1); // shared state
+	}
+
+	#[test]
+	fn test_fragments_exact_size_iterator() {
+		let conn = Connection::<Vec<u8>>::new();
+		let pkt = conn.send_packet(1, Address::DomainAddress("test.com".to_string(), 53), 50);
+
+		let payload = vec![0xAB; 200];
+		let fragments = pkt.into_fragments(payload);
+		let expected_len = fragments.len();
+		let actual: Vec<_> = fragments.collect();
+		assert_eq!(actual.len(), expected_len);
+	}
+}
