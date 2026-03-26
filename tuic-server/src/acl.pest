@@ -3,94 +3,84 @@
 // Example: allow 192.168.1.0/24 tcp/443,udp/53 10.0.0.1
 
 WHITESPACE = _{ " " | "\t" }
-COMMENT = _{ "#" ~ (!NEWLINE ~ ANY)* }
+COMMENT    = _{ "#" ~ (!NEWLINE ~ ANY)* }
 
-// Main rule structure
+// === Top-level ===
+
 acl_rule = { SOI ~ outbound ~ address? ~ ports? ~ hijack? ~ EOI }
 
-// Outbound identifier (first part)
-outbound = @{ (ASCII_ALPHANUMERIC | "_" | "-")+ }
+// === Identifiers ===
 
-// Address patterns
-address = { 
-    localhost_kw 
+outbound = @{ (ASCII_ALPHANUMERIC | "_" | "-")+ }
+hijack   = @{ (ASCII_ALPHANUMERIC | "." | ":" | "-")+ }
+
+// === Address variants (silent choice — inner variant appears directly) ===
+
+address = _{
+    localhost_kw
     | private_kw
     | suffix_localhost
-    | wildcard_domain 
-    | cidr 
-    | ipv6 
-    | ipv4 
-    | domain 
-    | any_addr 
+    | wildcard_domain
+    | cidr
+    | ipv6
+    | ipv4
+    | domain
+    | any_addr
 }
 
-// Special keywords
-localhost_kw = { "localhost" }
-private_kw = { "private" }
+// Keywords
+localhost_kw     = { "localhost" }
+private_kw       = { "private" }
 suffix_localhost = { "suffix:localhost" }
-any_addr = { "*" }
+any_addr         = { "*" }
 
 // IP addresses
-ipv4 = @{ 
-    ASCII_DIGIT{1,3} ~ "." ~ 
-    ASCII_DIGIT{1,3} ~ "." ~ 
-    ASCII_DIGIT{1,3} ~ "." ~ 
-    ASCII_DIGIT{1,3} 
+ipv4 = @{
+    ASCII_DIGIT{1,3} ~ "." ~
+    ASCII_DIGIT{1,3} ~ "." ~
+    ASCII_DIGIT{1,3} ~ "." ~
+    ASCII_DIGIT{1,3}
 }
 
 ipv6 = @{
-    (ASCII_HEX_DIGIT | ":")+ ~ 
+    (ASCII_HEX_DIGIT | ":")+ ~
     &(WHITESPACE | EOI)
 }
 
 // CIDR notation
-cidr = @{ 
-    (ipv4_cidr | ipv6_cidr)
-}
+cidr = @{ ipv4_cidr | ipv6_cidr }
 
-ipv4_cidr = @{
-    ASCII_DIGIT{1,3} ~ "." ~ 
-    ASCII_DIGIT{1,3} ~ "." ~ 
-    ASCII_DIGIT{1,3} ~ "." ~ 
+ipv4_cidr = _{
+    ASCII_DIGIT{1,3} ~ "." ~
+    ASCII_DIGIT{1,3} ~ "." ~
+    ASCII_DIGIT{1,3} ~ "." ~
     ASCII_DIGIT{1,3} ~ "/" ~ ASCII_DIGIT{1,3}
 }
 
-ipv6_cidr = @{
+ipv6_cidr = _{
     (ASCII_HEX_DIGIT | ":")+ ~ "/" ~ ASCII_DIGIT{1,3}
 }
 
-// Domain patterns
-wildcard_domain = @{ 
-    ("*." | "suffix:") ~ domain_chars
-}
+// Domains
+wildcard_domain = @{ ("*." | "suffix:") ~ domain_chars }
+domain          = @{ domain_chars }
+domain_chars    = _{ (ASCII_ALPHANUMERIC | "-" | ".")+ }
 
-domain = @{ 
-    domain_chars
-}
+// === Ports ===
 
-domain_chars = @{
-    (ASCII_ALPHANUMERIC | "-" | ".")+ 
-}
-
-// Port specifications
-ports = { port_list | any_port }
-any_port = { "*" }
+ports     = { port_list | any_port }
+any_port  = { "*" }
 port_list = { port_entry ~ ("," ~ port_entry)* }
 
-port_entry = { protocol_port | port_spec }
+// Port entry variants (silent choice — inner variant appears directly)
+port_entry = _{ protocol_port | port_range | single_port }
 
 protocol_port = { protocol ~ "/" ~ port_spec }
+protocol      = _{ tcp | udp }
+tcp           = { ^"tcp" }
+udp           = { ^"udp" }
 
-protocol = { tcp | udp }
-tcp = { "tcp" | "TCP" }
-udp = { "udp" | "UDP" }
-
-port_spec = { port_range | single_port }
-
-port_range = @{ ASCII_DIGIT{1,5} ~ "-" ~ ASCII_DIGIT{1,5} }
+// Port spec variants (silent choice — inner variant appears directly)
+port_spec   = _{ port_range | single_port }
+port_range  = ${ single_port ~ "-" ~ single_port }
 single_port = @{ ASCII_DIGIT{1,5} }
-
-// Hijack address (optional fourth part)
-hijack = @{ 
-    (ASCII_ALPHANUMERIC | "." | ":" | "-")+ 
-}
