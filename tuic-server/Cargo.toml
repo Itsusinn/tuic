@@ -44,7 +44,7 @@ axum-server = "0.8"
 rustls = { version = "0.23", default-features = false }
 rustls-pemfile = { version = "2", default-features = false, features = ["std"]}
 rcgen = { version = "0.14", default-features = false, features = ["crypto", "pem"] }
-rustls-acme = { git = "https://github.com/FlorianUekermann/rustls-acme", default-features = false, features = ["tower", "webpki-roots"] }
+rustls-acme = { git = "https://github.com/rust-proxy/rustls-acme", branch = "feat/ip", default-features = false, features = ["tower", "webpki-roots"] }
 tokio-stream = "0.1"
 x509-parser = "0.18"
 aws-lc-rs = { version = "1", default-features = false, optional = true, features = ["prebuilt-nasm"] }

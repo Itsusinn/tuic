@@ -2484,7 +2484,7 @@ dependencies = [
 [[package]]
 name = "rustls-acme"
 version = "0.15.1"
-source = "git+https://github.com/FlorianUekermann/rustls-acme#379075278faf009b3699f3f38dab4c8bffe775d2"
+source = "git+https://github.com/rust-proxy/rustls-acme?branch=feat%2Fip#27c0b4ebfe1e0ec4711e8e63eface99b8b6bf2c8"
 dependencies = [
  "async-io",
  "async-trait",
