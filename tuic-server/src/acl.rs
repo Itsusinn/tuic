@@ -199,19 +199,117 @@ impl AclPortEntry {
 // Parsing Functions
 // ============================================================================
 
+/// Parse an address variant pair into AclAddress.
+/// With `address` as a silent choice rule, the inner variant (ipv4, cidr,
+/// domain, etc.) appears directly in the parse tree.
+fn parse_address_variant(pair: pest::iterators::Pair<Rule>) -> eyre::Result<AclAddress> {
+	Ok(match pair.as_rule() {
+		Rule::localhost_kw | Rule::suffix_localhost => AclAddress::Localhost,
+		Rule::private_kw => AclAddress::Private,
+		Rule::any_addr => AclAddress::Any,
+		Rule::wildcard_domain => AclAddress::WildcardDomain(pair.as_str().to_string()),
+		Rule::cidr => AclAddress::Cidr(pair.as_str().to_string()),
+		Rule::ipv4 | Rule::ipv6 => AclAddress::Ip(pair.as_str().to_string()),
+		Rule::domain => AclAddress::Domain(pair.as_str().to_string()),
+		_ => return Err(eyre::eyre!("Unknown address type: {:?}", pair.as_rule())),
+	})
+}
+
+/// Parse a port value pair (single_port or port_range) into AclPortSpec.
+/// With `port_spec` as a silent choice rule, the inner variant appears
+/// directly in the parse tree.
+fn parse_port_value(pair: pest::iterators::Pair<Rule>) -> eyre::Result<AclPortSpec> {
+	match pair.as_rule() {
+		Rule::single_port => {
+			let port = pair
+				.as_str()
+				.parse::<u16>()
+				.map_err(|_| eyre::eyre!("Invalid port: {}", pair.as_str()))?;
+			Ok(AclPortSpec::Single(port))
+		}
+		Rule::port_range => {
+			let mut parts = pair.into_inner();
+			let start = parts
+				.next()
+				.ok_or_else(|| eyre::eyre!("Missing start port"))?
+				.as_str()
+				.parse::<u16>()
+				.map_err(|e| eyre::eyre!("Invalid start port: {}", e))?;
+			let end = parts
+				.next()
+				.ok_or_else(|| eyre::eyre!("Missing end port"))?
+				.as_str()
+				.parse::<u16>()
+				.map_err(|e| eyre::eyre!("Invalid end port: {}", e))?;
+
+			if start > end {
+				return Err(eyre::eyre!("Invalid port range: {} > {}", start, end));
+			}
+
+			Ok(AclPortSpec::Range(start, end))
+		}
+		_ => Err(eyre::eyre!("Unknown port spec type: {:?}", pair.as_rule())),
+	}
+}
+
+/// Parse a port entry pair into AclPortEntry.
+/// With `port_entry` as a silent choice rule, the inner variant
+/// (protocol_port, port_range, or single_port) appears directly.
+fn parse_port_entry(pair: pest::iterators::Pair<Rule>) -> eyre::Result<AclPortEntry> {
+	match pair.as_rule() {
+		Rule::protocol_port => {
+			let mut inner = pair.into_inner();
+			let protocol_pair = inner.next().ok_or_else(|| eyre::eyre!("Missing protocol"))?;
+			let port_pair = inner.next().ok_or_else(|| eyre::eyre!("Missing port spec"))?;
+
+			let protocol = match protocol_pair.as_rule() {
+				Rule::tcp => Some(AclProtocol::Tcp),
+				Rule::udp => Some(AclProtocol::Udp),
+				_ => None,
+			};
+
+			let port_spec = parse_port_value(port_pair)?;
+			Ok(AclPortEntry { protocol, port_spec })
+		}
+		Rule::single_port | Rule::port_range => {
+			let port_spec = parse_port_value(pair)?;
+			Ok(AclPortEntry {
+				protocol: None,
+				port_spec,
+			})
+		}
+		_ => Err(eyre::eyre!("Unknown port entry type: {:?}", pair.as_rule())),
+	}
+}
+
+/// Parse ports from pest pair
+fn parse_ports(pair: pest::iterators::Pair<Rule>) -> eyre::Result<Option<AclPorts>> {
+	let inner = pair
+		.into_inner()
+		.next()
+		.ok_or_else(|| eyre::eyre!("Expected inner pair"))?;
+
+	match inner.as_rule() {
+		Rule::any_port => Ok(None),
+		Rule::port_list => {
+			let entries = inner
+				.into_inner()
+				.map(parse_port_entry)
+				.collect::<Result<Vec<_>, _>>()?;
+
+			Ok(Some(AclPorts { entries }))
+		}
+		_ => Err(eyre::eyre!("Unknown ports type: {:?}", inner.as_rule())),
+	}
+}
+
 /// Parse a single ACL rule from string format
 pub(crate) fn parse_acl_rule(rule: &str) -> eyre::Result<AclRule> {
 	if rule.starts_with('#') || rule.is_empty() {
 		return Err(eyre::eyre!("Comment or empty line"));
 	}
 
-	parse_with_pest(rule)
-}
-
-/// Parse ACL rule using pest parser
-fn parse_with_pest(rule: &str) -> eyre::Result<AclRule> {
 	let mut pairs = AclParser::parse(Rule::acl_rule, rule).map_err(|e| eyre::eyre!("Parse error: {}", e))?;
-
 	let rule_pair = pairs.next().ok_or_else(|| eyre::eyre!("Empty rule"))?;
 
 	let mut outbound = String::new();
@@ -222,8 +320,10 @@ fn parse_with_pest(rule: &str) -> eyre::Result<AclRule> {
 	for pair in rule_pair.into_inner() {
 		match pair.as_rule() {
 			Rule::outbound => outbound = pair.as_str().to_string(),
-			Rule::address => addr = parse_address_from_pair(pair)?,
-			Rule::ports => ports = parse_ports_from_pair(pair)?,
+			// Address variants appear directly (address is a silent choice rule)
+			Rule::localhost_kw | Rule::suffix_localhost | Rule::private_kw | Rule::any_addr | Rule::wildcard_domain
+			| Rule::cidr | Rule::ipv4 | Rule::ipv6 | Rule::domain => addr = parse_address_variant(pair)?,
+			Rule::ports => ports = parse_ports(pair)?,
 			Rule::hijack => hijack = Some(pair.as_str().to_string()),
 			Rule::EOI => {}
 			_ => {}
@@ -236,113 +336,6 @@ fn parse_with_pest(rule: &str) -> eyre::Result<AclRule> {
 		ports,
 		hijack,
 	})
-}
-
-/// Parse address from pest pair
-fn parse_address_from_pair(pair: pest::iterators::Pair<Rule>) -> eyre::Result<AclAddress> {
-	let inner = pair.into_inner().next().ok_or_else(|| eyre::eyre!("Empty address"))?;
-
-	Ok(match inner.as_rule() {
-		Rule::localhost_kw | Rule::suffix_localhost => AclAddress::Localhost,
-		Rule::private_kw => AclAddress::Private,
-		Rule::any_addr => AclAddress::Any,
-		Rule::wildcard_domain => AclAddress::WildcardDomain(inner.as_str().to_string()),
-		Rule::cidr => AclAddress::Cidr(inner.as_str().to_string()),
-		Rule::ipv4 | Rule::ipv6 => AclAddress::Ip(inner.as_str().to_string()),
-		Rule::domain => AclAddress::Domain(inner.as_str().to_string()),
-		_ => return Err(eyre::eyre!("Unknown address type: {:?}", inner.as_rule())),
-	})
-}
-
-/// Parse ports from pest pair
-fn parse_ports_from_pair(pair: pest::iterators::Pair<Rule>) -> eyre::Result<Option<AclPorts>> {
-	let inner = pair.into_inner().next().ok_or_else(|| eyre::eyre!("Empty ports"))?;
-
-	match inner.as_rule() {
-		Rule::any_port => Ok(None),
-		Rule::port_list => {
-			let entries = inner
-				.into_inner()
-				.filter(|p| p.as_rule() == Rule::port_entry)
-				.map(parse_port_entry_from_pair)
-				.collect::<Result<Vec<_>, _>>()?;
-
-			Ok(Some(AclPorts { entries }))
-		}
-		_ => Err(eyre::eyre!("Unknown ports type: {:?}", inner.as_rule())),
-	}
-}
-
-/// Parse single port entry from pest pair
-fn parse_port_entry_from_pair(pair: pest::iterators::Pair<Rule>) -> eyre::Result<AclPortEntry> {
-	let inner = pair.into_inner().next().ok_or_else(|| eyre::eyre!("Empty port entry"))?;
-
-	match inner.as_rule() {
-		Rule::protocol_port => {
-			let mut inner_pairs = inner.into_inner();
-			let protocol_pair = inner_pairs.next().ok_or_else(|| eyre::eyre!("Missing protocol"))?;
-			let port_spec_pair = inner_pairs.next().ok_or_else(|| eyre::eyre!("Missing port spec"))?;
-
-			let protocol = match protocol_pair
-				.into_inner()
-				.next()
-				.ok_or_else(|| eyre::eyre!("Empty protocol"))?
-				.as_rule()
-			{
-				Rule::tcp => Some(AclProtocol::Tcp),
-				Rule::udp => Some(AclProtocol::Udp),
-				_ => None,
-			};
-
-			let port_spec = parse_port_spec_from_pair(port_spec_pair)?;
-			Ok(AclPortEntry { protocol, port_spec })
-		}
-		Rule::port_spec => {
-			let port_spec = parse_port_spec_from_pair(inner)?;
-			Ok(AclPortEntry {
-				protocol: None,
-				port_spec,
-			})
-		}
-		_ => Err(eyre::eyre!("Unknown port entry type: {:?}", inner.as_rule())),
-	}
-}
-
-/// Parse port specification from pest pair
-fn parse_port_spec_from_pair(pair: pest::iterators::Pair<Rule>) -> eyre::Result<AclPortSpec> {
-	let inner = pair.into_inner().next().ok_or_else(|| eyre::eyre!("Empty port spec"))?;
-
-	match inner.as_rule() {
-		Rule::single_port => {
-			let port = inner
-				.as_str()
-				.parse::<u16>()
-				.map_err(|_| eyre::eyre!("Invalid port: {}", inner.as_str()))?;
-			Ok(AclPortSpec::Single(port))
-		}
-		Rule::port_range => {
-			let range_str = inner.as_str();
-			let parts: Vec<&str> = range_str.split('-').collect();
-
-			if parts.len() != 2 {
-				return Err(eyre::eyre!("Invalid port range: {}", range_str));
-			}
-
-			let start = parts[0]
-				.parse::<u16>()
-				.map_err(|_| eyre::eyre!("Invalid start port: {}", parts[0]))?;
-			let end = parts[1]
-				.parse::<u16>()
-				.map_err(|_| eyre::eyre!("Invalid end port: {}", parts[1]))?;
-
-			if start > end {
-				return Err(eyre::eyre!("Invalid port range: {} > {}", start, end));
-			}
-
-			Ok(AclPortSpec::Range(start, end))
-		}
-		_ => Err(eyre::eyre!("Unknown port spec type: {:?}", inner.as_rule())),
-	}
 }
 
 /// Parse a multiline string into ACL rules
@@ -375,7 +368,7 @@ impl<'de> Deserialize<'de> for AclAddress {
 			.next()
 			.ok_or_else(|| de::Error::custom("No address found"))?;
 
-		parse_address_from_pair(pair).map_err(|e| de::Error::custom(e.to_string()))
+		parse_address_variant(pair).map_err(|e| de::Error::custom(e.to_string()))
 	}
 }
 
@@ -391,7 +384,7 @@ impl<'de> Deserialize<'de> for AclPorts {
 
 		let pair = pairs.into_iter().next().ok_or_else(|| de::Error::custom("No ports found"))?;
 
-		parse_ports_from_pair(pair)
+		parse_ports(pair)
 			.map_err(|e| de::Error::custom(e.to_string()))?
 			.ok_or_else(|| de::Error::custom("Failed to parse ports"))
 	}
@@ -412,7 +405,7 @@ impl<'de> Deserialize<'de> for AclPortEntry {
 			.next()
 			.ok_or_else(|| de::Error::custom("No port entry found"))?;
 
-		parse_port_entry_from_pair(pair).map_err(|e| de::Error::custom(e.to_string()))
+		parse_port_entry(pair).map_err(|e| de::Error::custom(e.to_string()))
 	}
 }
 
@@ -445,7 +438,7 @@ impl<'de> Deserialize<'de> for AclPortSpec {
 			.next()
 			.ok_or_else(|| de::Error::custom("No port spec found"))?;
 
-		parse_port_spec_from_pair(pair).map_err(|e| de::Error::custom(e.to_string()))
+		parse_port_value(pair).map_err(|e| de::Error::custom(e.to_string()))
 	}
 }
 
