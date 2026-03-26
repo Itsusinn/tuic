@@ -53,6 +53,7 @@ async fn main() -> eyre::Result<()> {
 				))),
 		)
 		.try_init()?;
+
 	tokio::select! {
 		res = tuic_server::run(cfg) => {
 			if let Err(err) = res {
