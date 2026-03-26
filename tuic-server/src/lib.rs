@@ -7,6 +7,7 @@ use std::{
 };
 
 use moka::future::Cache;
+use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
 pub mod acl;
@@ -28,6 +29,7 @@ pub struct AppContext {
 	pub online_counter: HashMap<Uuid, AtomicUsize>,
 	pub online_clients: Cache<Uuid, Arc<Cache<usize, compat::QuicClient>>>,
 	pub traffic_stats:  HashMap<Uuid, (AtomicUsize, AtomicUsize)>,
+	pub cancel:         CancellationToken,
 }
 
 /// Run the TUIC server with the given configuration
@@ -47,8 +49,13 @@ pub async fn run(cfg: Config) -> eyre::Result<()> {
 		online_clients: Cache::new(cfg.users.len() as u64),
 		traffic_stats,
 		cfg,
+		cancel: CancellationToken::new(),
 	});
 	let server = server::Server::init(ctx.clone()).await?;
-	server.start().await;
+	tokio::spawn(async move {
+		server.start().await;
+	});
+	tokio::signal::ctrl_c().await?;
+	ctx.cancel.cancel();
 	Ok(())
 }
