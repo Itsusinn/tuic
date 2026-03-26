@@ -40,10 +40,9 @@ impl Server {
 
 		if ctx.cfg.tls.auto_ssl && is_valid_domain(hostname.as_str()) {
 			warn!("Attempting automatic SSL certificate provisioning for domain: {}", hostname);
-			let cache_dir = ctx.cfg.data_dir
-				.join("acme");
+			let cache_dir = ctx.cfg.data_dir.join("acme");
 
-			match start_acme(hostname.as_str(), acme_email.as_str(), &cache_dir).await {
+			match start_acme(ctx.clone(), hostname.as_str(), acme_email.as_str(), &cache_dir).await {
 				Ok(resolver) => {
 					info!("ACME certificate management active for {}", hostname);
 					crypto = RustlsServerConfig::builder_with_protocol_versions(&[&rustls::version::TLS13])

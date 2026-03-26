@@ -265,4 +265,3 @@ mod tests {
 		assert!(resolver_result.is_err());
 	}
 }
-
