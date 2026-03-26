@@ -1,21 +1,17 @@
 use std::{
-	collections::HashMap,
 	io::Error as IoError,
 	net::{IpAddr, SocketAddr, UdpSocket as StdUdpSocket},
 	sync::Arc,
 };
 
 use bytes::Bytes;
-use once_cell::sync::OnceCell;
 use socket2::{Domain, Protocol, SockAddr, Socket, Type};
 use socks5_proto::Address;
 use socks5_server::AssociatedUdpSocket;
-use tokio::{net::UdpSocket, sync::RwLock as AsyncRwLock};
+use tokio::net::UdpSocket;
 use tracing::{debug, warn};
 
 use crate::error::Error;
-
-pub static UDP_SESSIONS: OnceCell<AsyncRwLock<HashMap<u16, UdpSession>>> = OnceCell::new();
 
 #[derive(Clone)]
 pub struct UdpSession {

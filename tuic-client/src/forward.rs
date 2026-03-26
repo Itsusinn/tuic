@@ -1,38 +1,33 @@
 use std::{
 	collections::HashMap,
 	net::{SocketAddr, TcpListener as StdTcpListener},
-	sync::{
-		Arc,
-		atomic::{AtomicU16, Ordering},
-	},
+	sync::{Arc, atomic::Ordering},
 	time::Duration,
 };
 
 use bytes::Bytes;
-use once_cell::sync::OnceCell;
 use socket2::{Domain, Protocol, SockAddr, Socket, Type};
 use tokio::{
 	io,
 	io::AsyncWriteExt,
 	net::{TcpListener, UdpSocket},
-	sync::RwLock as AsyncRwLock,
 };
 use tracing::{debug, info, warn};
 use tuic_core::Address as TuicAddress;
 
 use crate::{
 	config::{TcpForward, UdpForward},
-	connection::Connection as TuicConnection,
 	error::Error,
 };
 
 // Global UDP forward session registry
-pub static UDP_SESSIONS: OnceCell<AsyncRwLock<HashMap<u16, ForwardUdpSession>>> = OnceCell::new();
-static NEXT_ASSOC_ID: AtomicU16 = AtomicU16::new(0);
-
-fn next_assoc_id() -> u16 {
-	// Use high bit set to avoid collision with SOCKS5-generated assoc IDs
-	0x8000 | (NEXT_ASSOC_ID.fetch_add(1, Ordering::Relaxed) & 0x7fff)
+pub async fn start(ctx: Arc<crate::AppContext>, tcp: Vec<TcpForward>, udp: Vec<UdpForward>) {
+	for entry in tcp {
+		tokio::spawn(run_tcp_forwarder(entry, ctx.clone()));
+	}
+	for entry in udp {
+		tokio::spawn(run_udp_forwarder(entry, ctx.clone()));
+	}
 }
 
 #[derive(Clone)]
@@ -64,19 +59,7 @@ impl ForwardUdpSession {
 	}
 }
 
-pub async fn start(tcp: Vec<TcpForward>, udp: Vec<UdpForward>) {
-	// Init UDP session map
-	let _ = UDP_SESSIONS.set(AsyncRwLock::new(HashMap::new()));
-
-	for entry in tcp {
-		tokio::spawn(run_tcp_forwarder(entry));
-	}
-	for entry in udp {
-		tokio::spawn(run_udp_forwarder(entry));
-	}
-}
-
-async fn run_tcp_forwarder(entry: TcpForward) {
+async fn run_tcp_forwarder(entry: TcpForward, ctx: Arc<crate::AppContext>) {
 	match create_tcp_listener(entry.listen) {
 		Ok(listener) => {
 			warn!(
@@ -88,10 +71,11 @@ async fn run_tcp_forwarder(entry: TcpForward) {
 				match listener.accept().await {
 					Ok((mut inbound, peer)) => {
 						let remote = entry.remote.clone();
+						let ctx = ctx.clone();
 						tokio::spawn(async move {
 							info!("[forward-tcp] [{peer}] connected", peer = peer);
 							let fut = async {
-								let conn = TuicConnection::get_conn().await?;
+								let conn = ctx.get_conn().await?;
 								let remote_addr = TuicAddress::DomainAddress(remote.0, remote.1);
 								let mut relay = conn.connect(remote_addr).await?;
 								match io::copy_bidirectional(&mut inbound, &mut relay).await {
@@ -140,7 +124,7 @@ fn create_tcp_listener(addr: SocketAddr) -> Result<TcpListener, Error> {
 	TcpListener::from_std(StdTcpListener::from(socket)).map_err(|err| Error::Socket("failed to create tcp forward socket", err))
 }
 
-async fn run_udp_forwarder(entry: UdpForward) {
+async fn run_udp_forwarder(entry: UdpForward, ctx: Arc<crate::AppContext>) {
 	let socket = match UdpSocket::bind(entry.listen).await {
 		Ok(s) => s,
 		Err(err) => {
@@ -167,20 +151,21 @@ async fn run_udp_forwarder(entry: UdpForward) {
 				let assoc_id = match src_map.get(&src_addr).cloned() {
 					Some(id) => id,
 					None => {
-						let id = next_assoc_id();
+						let id = 0x8000 | (ctx.next_fwd_assoc_id.fetch_add(1, Ordering::Relaxed) & 0x7fff);
 						// register session
 						let session = ForwardUdpSession::new(socket.clone(), src_addr, id);
-						UDP_SESSIONS.get().unwrap().write().await.insert(id, session);
+						ctx.fwd_udp_sessions.write().await.insert(id, session);
 						src_map.insert(src_addr, id);
 						// Spawn timeout watcher
-						tokio::spawn(expire_after(id, entry.timeout));
+						tokio::spawn(expire_after(id, entry.timeout, ctx.clone()));
 						id
 					}
 				};
 
 				let remote = entry.remote.clone();
+				let ctx = ctx.clone();
 				tokio::spawn(async move {
-					match TuicConnection::get_conn().await {
+					match ctx.get_conn().await {
 						Ok(conn) => {
 							let remote_addr = TuicAddress::DomainAddress(remote.0, remote.1);
 							if let Err(err) = conn.packet(pkt, remote_addr, assoc_id).await {
@@ -196,16 +181,15 @@ async fn run_udp_forwarder(entry: UdpForward) {
 	}
 }
 
-async fn expire_after(assoc_id: u16, timeout: Duration) {
+async fn expire_after(assoc_id: u16, timeout: Duration, ctx: Arc<crate::AppContext>) {
 	tokio::time::sleep(timeout).await;
-	if let Some(session) = UDP_SESSIONS.get() {
-		let mut w = session.write().await;
-		if let Some(_s) = w.remove(&assoc_id) {
-			debug!("[forward-udp] [{assoc:#06x}] timeout; dissociate", assoc = assoc_id);
-			if let Ok(conn) = TuicConnection::get_conn().await {
-				if let Err(err) = conn.dissociate(assoc_id).await {
-					warn!("[forward-udp] [{assoc:#06x}] dissociate error: {err}", assoc = assoc_id);
-				}
+	let mut w = ctx.fwd_udp_sessions.write().await;
+	if let Some(_s) = w.remove(&assoc_id) {
+		debug!("[forward-udp] [{assoc:#06x}] timeout; dissociate", assoc = assoc_id);
+		drop(w);
+		if let Ok(conn) = ctx.get_conn().await {
+			if let Err(err) = conn.dissociate(assoc_id).await {
+				warn!("[forward-udp] [{assoc:#06x}] dissociate error: {err}", assoc = assoc_id);
 			}
 		}
 	}
