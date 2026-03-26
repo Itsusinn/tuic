@@ -113,8 +113,6 @@ os = "windows-latest"
 target = "x86_64-pc-windows-msvc"
 release-name = "x86_64-windows"
 postfix = ".exe"
-nasm = true
-
 
 # 32-bit Windows
 [[target]]

@@ -52,10 +52,6 @@ pub async fn run(cfg: Config) -> eyre::Result<()> {
 		cancel: CancellationToken::new(),
 	});
 	let server = server::Server::init(ctx.clone()).await?;
-	tokio::spawn(async move {
-		server.start().await;
-	});
-	tokio::signal::ctrl_c().await?;
-	ctx.cancel.cancel();
+	server.start().await;
 	Ok(())
 }
