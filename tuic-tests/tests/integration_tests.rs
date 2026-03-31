@@ -213,7 +213,7 @@ fn test_various_domain_names() {
 //
 // IMPORTANT: The server ACL must be configured to allow localhost connections
 // for the test to work, since all echo servers run on 127.0.0.1
-#[tokio::test]
+#[tokio::test(flavor = "current_thread")]
 #[serial]
 #[tracing_test::traced_test]
 async fn test_server_client_integration() -> eyre::Result<()> {
@@ -523,7 +523,7 @@ async fn test_server_client_integration() -> eyre::Result<()> {
 //
 // This addresses the error that occurs when using IPv6 addresses like
 // "[::1]:443"
-#[tokio::test]
+#[tokio::test(flavor = "current_thread")]
 #[serial]
 #[tracing_test::traced_test]
 async fn test_ipv6_server_client_integration() -> eyre::Result<()> {
@@ -740,7 +740,7 @@ async fn test_ipv6_server_client_integration() -> eyre::Result<()> {
 // - Proper handling of proxy configuration fields (server, username, password,
 //   udp_buffer_size)
 // - Configuration parsing for different proxy scenarios
-#[tokio::test]
+#[tokio::test(flavor = "current_thread")]
 #[serial]
 #[tracing_test::traced_test]
 async fn test_client_proxy_configuration() -> eyre::Result<()> {
