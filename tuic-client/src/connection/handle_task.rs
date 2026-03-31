@@ -128,7 +128,7 @@ impl Connection {
 
 				let session = self.socks5_udp_sessions.read().await.get(&assoc_id).cloned();
 
-				debug!("[relay] [packet] [{assoc_id:#06x}] Checking session map.");
+				info!("[relay] [packet] [{assoc_id:#06x}] Checking session map.");
 
 				if let Some(session) = session {
 					if let Err(err) = session.send(pkt, addr).await {

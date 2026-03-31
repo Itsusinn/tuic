@@ -6,7 +6,7 @@ use socks5_server::{
 	connection::{associate, bind, connect},
 };
 use tokio::io::{self, AsyncWriteExt};
-use tracing::{debug, warn};
+use tracing::{debug, info, warn};
 use tuic_core::Address as TuicAddress;
 
 use super::{Server, udp_session::UdpSession};
@@ -23,7 +23,7 @@ impl Server {
 		let peer_addr = assoc.peer_addr().unwrap();
 		let local_ip = assoc.local_addr().unwrap().ip();
 
-		debug!(
+		info!(
 			"[socks5] [{peer_addr}] [associate] [{assoc_id:#06x}] starting UDP associate, local_ip: {local_ip}, dual_stack: \
 			 {:?}",
 			dual_stack
@@ -42,7 +42,7 @@ impl Server {
 		match UdpSession::new(assoc_id, peer_addr, local_ip, dual_stack, max_pkt_size) {
 			Ok(session) => {
 				let local_addr = session.local_addr().unwrap();
-				debug!("[socks5] [{peer_addr}] [associate] [{assoc_id:#06x}] bound to {local_addr}");
+				info!("[socks5] [{peer_addr}] [associate] [{assoc_id:#06x}] bound to {local_addr}");
 
 				let mut assoc = match assoc.reply(Reply::Succeeded, Address::SocketAddress(local_addr)).await {
 					Ok(assoc) => assoc,
