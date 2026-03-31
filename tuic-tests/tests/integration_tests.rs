@@ -223,6 +223,12 @@ async fn test_server_client_integration() -> eyre::Result<()> {
 	#[cfg(feature = "ring")]
 	let _ = rustls::crypto::ring::default_provider().install_default();
 
+	// Initialize tracing subscriber to capture client/server logs at DEBUG level
+	let _ = tracing_subscriber::fmt()
+		.with_max_level(tracing::Level::DEBUG)
+		.with_test_writer()
+		.try_init();
+
 	// Create a minimal server configuration for testing
 	// IMPORTANT: We need to configure ACL to allow localhost connections for
 	// testing

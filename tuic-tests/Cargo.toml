@@ -30,5 +30,6 @@ fast-socks5 = { version = "1" }
 rustls = { version = "0.23", default-features = false }
 tracing-test = { version = "0.2" }
 tracing = "0.1"
+tracing-subscriber = "0.3"
 serial_test = "3"
 aws-lc-rs = { version = "1", default-features = false, optional = true, features = ["prebuilt-nasm"] }
