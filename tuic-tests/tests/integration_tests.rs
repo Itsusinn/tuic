@@ -391,8 +391,12 @@ async fn test_server_client_integration() -> eyre::Result<()> {
 		// Test UDP connection through SOCKS5
 		let test_data = b"Hello, UDP through TUIC!";
 		let client_bind_addr = std::net::SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), 0);
-		let success = test_udp_through_socks5("127.0.0.1:1080", echo_addr, test_data, "UDP Test", client_bind_addr).await;
-		assert!(success, "[UDP Test] UDP relay through SOCKS5 failed");
+		let result = test_udp_through_socks5("127.0.0.1:1080", echo_addr, test_data, "UDP Test", client_bind_addr).await;
+		assert!(
+			result.is_ok(),
+			"[UDP Test] UDP relay through SOCKS5 failed: {:?}",
+			result.err()
+		);
 
 		// Clean up
 		echo_task.abort();
