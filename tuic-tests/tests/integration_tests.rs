@@ -697,8 +697,12 @@ async fn test_ipv6_server_client_integration() -> eyre::Result<()> {
 		// Test UDP connection through SOCKS5 on IPv6
 		let test_data = b"Hello, IPv6 UDP through TUIC!";
 		let client_bind_addr = std::net::SocketAddr::new(IpAddr::V6(Ipv6Addr::UNSPECIFIED), 0);
-		let success = test_udp_through_socks5("[::1]:1081", echo_addr, test_data, "IPv6 UDP Test", client_bind_addr).await;
-		assert!(success, "[IPv6 UDP Test] UDP relay through SOCKS5 failed");
+		let result = test_udp_through_socks5("[::1]:1081", echo_addr, test_data, "IPv6 UDP Test", client_bind_addr).await;
+		assert!(
+			result.is_ok(),
+			"[IPv6 UDP Test] UDP relay through SOCKS5 failed: {:?}",
+			result.err()
+		);
 
 		echo_task.abort();
 		info!("[IPv6 UDP Test] UDP test completed\n");
