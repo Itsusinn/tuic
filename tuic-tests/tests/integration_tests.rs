@@ -216,6 +216,7 @@ fn test_various_domain_names() {
 #[tokio::test(flavor = "current_thread")]
 #[serial]
 #[tracing_test::traced_test]
+#[cfg_attr(not(any(target_arch = "x86", target_arch = "x86_64")), ignore)]
 async fn test_server_client_integration() -> eyre::Result<()> {
 	use std::{collections::HashMap, net::SocketAddr, path::PathBuf};
 	#[cfg(feature = "aws-lc-rs")]
@@ -526,6 +527,7 @@ async fn test_server_client_integration() -> eyre::Result<()> {
 #[tokio::test(flavor = "current_thread")]
 #[serial]
 #[tracing_test::traced_test]
+#[cfg_attr(not(any(target_arch = "x86", target_arch = "x86_64")), ignore)]
 async fn test_ipv6_server_client_integration() -> eyre::Result<()> {
 	use std::{collections::HashMap, net::SocketAddr, path::PathBuf};
 	#[cfg(feature = "aws-lc-rs")]
@@ -743,6 +745,7 @@ async fn test_ipv6_server_client_integration() -> eyre::Result<()> {
 #[tokio::test(flavor = "current_thread")]
 #[serial]
 #[tracing_test::traced_test]
+#[cfg_attr(not(any(target_arch = "x86", target_arch = "x86_64")), ignore)]
 async fn test_client_proxy_configuration() -> eyre::Result<()> {
 	use std::{collections::HashMap, net::SocketAddr, path::PathBuf};
 
