@@ -120,6 +120,7 @@ impl Server {
 			}
 			Err(err) => {
 				warn!("[socks5] [{peer_addr}] [associate] [{assoc_id:#06x}] failed setting up UDP associate session: {err}");
+				eprintln!("[socks5] [{peer_addr}] [associate] [{assoc_id:#06x}] ERROR: {err}");
 
 				match assoc.reply(Reply::GeneralFailure, Address::unspecified()).await {
 					Ok(mut assoc) => {
