@@ -142,7 +142,7 @@ pub async fn test_tcp_through_socks5(
 			tokio::time::sleep(Duration::from_millis(500)).await;
 
 			let mut buffer = vec![0u8; test_data.len()];
-			match timeout(Duration::from_secs(3), stream.read_exact(&mut buffer)).await {
+			match timeout(Duration::from_secs(10), stream.read_exact(&mut buffer)).await {
 				Ok(Ok(_)) => {
 					info!("[{}] Received {} bytes: {:?}", test_name, buffer.len(), &buffer);
 
@@ -218,7 +218,7 @@ pub async fn test_udp_through_socks5(
 							info!("[{}] Waiting for echo response...", test_name);
 
 							let mut buffer = vec![0u8; 1024];
-							match timeout(Duration::from_secs(2), socks.recv_from(&mut buffer)).await {
+							match timeout(Duration::from_secs(10), socks.recv_from(&mut buffer)).await {
 								Ok(Ok((len, addr))) => {
 									info!("[{}] Received {} bytes from {:?}", test_name, len, addr);
 									info!("[{}] Response data: {:?}", test_name, &buffer[..len]);

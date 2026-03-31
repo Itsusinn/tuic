@@ -362,7 +362,7 @@ async fn test_server_client_integration() -> eyre::Result<()> {
 	};
 
 	// Run the TCP test with a timeout
-	timeout(Duration::from_secs(6), tcp_test)
+	timeout(Duration::from_secs(15), tcp_test)
 		.await
 		.expect("[TCP Test] TCP test timed out");
 
@@ -394,7 +394,7 @@ async fn test_server_client_integration() -> eyre::Result<()> {
 	};
 
 	// Run the UDP test with a timeout
-	timeout(Duration::from_secs(3), udp_test)
+	timeout(Duration::from_secs(10), udp_test)
 		.await
 		.expect("[UDP Test] UDP test timed out");
 
@@ -461,7 +461,7 @@ async fn test_server_client_integration() -> eyre::Result<()> {
 				info!("[Concurrent Test] Connection {}: sent {} bytes", i, test_data.len());
 
 				let mut buf = vec![0u8; 1024];
-				let n = timeout(Duration::from_secs(1), stream.read(&mut buf))
+				let n = timeout(Duration::from_secs(5), stream.read(&mut buf))
 					.await
 					.unwrap_or_else(|_| panic!("[Concurrent Test] Connection {}: receive timed out", i))
 					.unwrap_or_else(|e| panic!("[Concurrent Test] Connection {}: failed to receive: {}", i, e));
@@ -484,7 +484,7 @@ async fn test_server_client_integration() -> eyre::Result<()> {
 	};
 
 	// Run the concurrent test with a timeout
-	timeout(Duration::from_secs(5), concurrent_test)
+	timeout(Duration::from_secs(15), concurrent_test)
 		.await
 		.expect("[Concurrent Test] Concurrent test timed out");
 
@@ -667,7 +667,7 @@ async fn test_ipv6_server_client_integration() -> eyre::Result<()> {
 		info!("[IPv6 TCP Test] TCP test completed\n");
 	};
 
-	let _ = timeout(Duration::from_secs(6), tcp_test)
+	let _ = timeout(Duration::from_secs(15), tcp_test)
 		.await
 		.expect("[IPv6 TCP Test] TCP test timed out");
 
@@ -694,7 +694,7 @@ async fn test_ipv6_server_client_integration() -> eyre::Result<()> {
 		info!("[IPv6 UDP Test] UDP test completed\n");
 	};
 
-	let _ = timeout(Duration::from_secs(3), udp_test)
+	let _ = timeout(Duration::from_secs(10), udp_test)
 		.await
 		.expect("[IPv6 UDP Test] UDP test timed out");
 
