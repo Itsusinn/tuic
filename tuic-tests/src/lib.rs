@@ -106,7 +106,7 @@ pub async fn test_tcp_through_socks5(
 	target_addr: std::net::SocketAddr,
 	test_data: &[u8],
 	test_name: &str,
-) -> bool {
+) -> Result<bool, String> {
 	use fast_socks5::client::{Config, Socks5Stream};
 	use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
@@ -135,52 +135,53 @@ pub async fn test_tcp_through_socks5(
 
 			if let Err(e) = stream.write_all(test_data).await {
 				error!("[{}] Failed to send data: {}", test_name, e);
-				return false;
+				return Err(format!("Failed to send data: {}", e));
 			}
 
 			info!("[{}] Data sent successfully", test_name);
 			tokio::time::sleep(Duration::from_millis(500)).await;
 
 			let mut buffer = vec![0u8; test_data.len()];
-			match timeout(Duration::from_secs(3), stream.read_exact(&mut buffer)).await {
+			match timeout(Duration::from_secs(10), stream.read_exact(&mut buffer)).await {
 				Ok(Ok(_)) => {
 					info!("[{}] Received {} bytes: {:?}", test_name, buffer.len(), &buffer);
 
 					if buffer.as_slice() == test_data {
 						info!("[{}] ✓ TCP echo test PASSED - data matches!", test_name);
-						true
+						Ok(true)
 					} else {
 						error!("[{}] ✗ TCP echo test FAILED - data mismatch!", test_name);
 						error!("[{}] Expected: {:?}", test_name, test_data);
 						error!("[{}] Got: {:?}", test_name, &buffer);
-						false
+						Err("Data mismatch".to_string())
 					}
 				}
 				Ok(Err(e)) => {
 					error!("[{}] Failed to read response: {}", test_name, e);
-					false
+					Err(format!("Failed to read response: {}", e))
 				}
 				Err(_) => {
 					error!("[{}] Timeout waiting for response", test_name);
-					false
+					Err("Timeout waiting for TCP response".to_string())
 				}
 			}
 		}
 		Err(e) => {
 			error!("[{}] Failed to connect to SOCKS5 proxy: {}", test_name, e);
-			false
+			Err(format!("Failed to connect to SOCKS5 proxy: {}", e))
 		}
 	}
 }
 
 // Helper function to test UDP connection through SOCKS5
+// Returns Ok(true) on success, Err with detailed message on failure
 pub async fn test_udp_through_socks5(
 	socks5_addr: &str,
 	target_addr: std::net::SocketAddr,
 	test_data: &[u8],
 	test_name: &str,
 	bind_addr: std::net::SocketAddr,
-) -> bool {
+) -> Result<bool, String> {
 	use fast_socks5::client::Socks5Datagram;
 	use tokio::net::TcpStream;
 
@@ -218,46 +219,46 @@ pub async fn test_udp_through_socks5(
 							info!("[{}] Waiting for echo response...", test_name);
 
 							let mut buffer = vec![0u8; 1024];
-							match timeout(Duration::from_secs(2), socks.recv_from(&mut buffer)).await {
+							match timeout(Duration::from_secs(10), socks.recv_from(&mut buffer)).await {
 								Ok(Ok((len, addr))) => {
 									info!("[{}] Received {} bytes from {:?}", test_name, len, addr);
 									info!("[{}] Response data: {:?}", test_name, &buffer[..len]);
 
 									if &buffer[..len] == test_data {
 										info!("[{}] ✓ UDP echo test PASSED - data matches!", test_name);
-										true
+										Ok(true)
 									} else {
 										error!("[{}] ✗ UDP echo test FAILED - data mismatch!", test_name);
 										error!("[{}] Expected: {:?}", test_name, test_data);
 										error!("[{}] Got: {:?}", test_name, &buffer[..len]);
-										false
+										Err("Data mismatch".to_string())
 									}
 								}
 								Ok(Err(e)) => {
 									error!("[{}] Failed to receive response: {}", test_name, e);
-									false
+									Err(format!("Failed to receive response: {}", e))
 								}
 								Err(_) => {
 									error!("[{}] Timeout waiting for response", test_name);
-									false
+									Err("Timeout waiting for response".to_string())
 								}
 							}
 						}
 						Err(e) => {
 							error!("[{}] Failed to send data: {}", test_name, e);
-							false
+							Err(format!("Failed to send data: {}", e))
 						}
 					}
 				}
 				Err(e) => {
 					error!("[{}] Failed to bind UDP through SOCKS5: {:?}", test_name, e);
-					false
+					Err(format!("Failed to bind UDP through SOCKS5: {:?}", e))
 				}
 			}
 		}
 		Err(e) => {
 			error!("[{}] Failed to connect to SOCKS5 proxy: {:?}", test_name, e);
-			false
+			Err(format!("Failed to connect to SOCKS5 proxy: {:?}", e))
 		}
 	}
 }

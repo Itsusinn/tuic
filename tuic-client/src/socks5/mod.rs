@@ -1,5 +1,4 @@
 use std::{
-	collections::HashMap,
 	net::{SocketAddr, TcpListener as StdTcpListener},
 	sync::{
 		Arc,
@@ -7,23 +6,20 @@ use std::{
 	},
 };
 
-use once_cell::sync::OnceCell;
 use socket2::{Domain, Protocol, SockAddr, Socket, Type};
 use socks5_server::{
 	Auth, Connection, Server as Socks5Server,
 	auth::{NoAuth, Password},
 };
-use tokio::{net::TcpListener, sync::RwLock as AsyncRwLock};
+use tokio::net::TcpListener;
 use tracing::{debug, info, warn};
 
-use crate::{config::Local, error::Error};
+use crate::error::Error;
 
 mod handle_task;
 mod udp_session;
 
-pub use self::udp_session::UDP_SESSIONS;
-
-static SERVER: OnceCell<Server> = OnceCell::new();
+pub use self::udp_session::UdpSession;
 
 pub struct Server {
 	inner:         Socks5Server,
@@ -33,27 +29,7 @@ pub struct Server {
 }
 
 impl Server {
-	pub fn set_config(cfg: Local) -> Result<(), Error> {
-		SERVER
-			.set(Self::new(
-				cfg.server,
-				cfg.dual_stack,
-				cfg.max_packet_size,
-				cfg.username,
-				cfg.password,
-			)?)
-			.map_err(|_| "failed initializing socks5 server")
-			.unwrap();
-
-		UDP_SESSIONS
-			.set(AsyncRwLock::new(HashMap::new()))
-			.map_err(|_| "failed initializing socks5 UDP session pool")
-			.unwrap();
-
-		Ok(())
-	}
-
-	fn new(
+	pub fn new(
 		addr: SocketAddr,
 		dual_stack: Option<bool>,
 		max_pkt_size: usize,
@@ -111,8 +87,8 @@ impl Server {
 		})
 	}
 
-	pub async fn start() {
-		let server = SERVER.get().unwrap();
+	pub async fn start(ctx: Arc<crate::AppContext>) {
+		let server = ctx.socks5.clone();
 
 		warn!("[socks5] server started, listening on {}", server.inner.local_addr().unwrap());
 
@@ -121,12 +97,14 @@ impl Server {
 				Ok((conn, addr)) => {
 					debug!("[socks5] [{addr}] connection established");
 
+					let server = server.clone();
+					let ctx = ctx.clone();
 					tokio::spawn(async move {
 						match conn.handshake().await {
 							Ok(Connection::Associate(associate, _)) => {
 								let assoc_id = server.next_assoc_id.fetch_add(1, Ordering::Relaxed);
 								info!("[socks5] [{addr}] [associate] [{assoc_id:#06x}]");
-								Self::handle_associate(associate, assoc_id, server.dual_stack, server.max_pkt_size).await;
+								Self::handle_associate(associate, assoc_id, server.dual_stack, server.max_pkt_size, ctx).await;
 							}
 							Ok(Connection::Bind(bind, _)) => {
 								info!("[socks5] [{addr}] [bind]");
@@ -134,7 +112,7 @@ impl Server {
 							}
 							Ok(Connection::Connect(connect, target_addr)) => {
 								info!("[socks5] [{addr}] [connect] {target_addr}");
-								Self::handle_connect(connect, target_addr).await;
+								Self::handle_connect(connect, target_addr, ctx).await;
 							}
 							Err(err) => warn!("[socks5] [{addr}] handshake error: {err}"),
 						};

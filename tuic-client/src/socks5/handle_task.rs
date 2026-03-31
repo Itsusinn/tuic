@@ -1,14 +1,16 @@
+use std::sync::Arc;
+
 use socks5_proto::{Address, Reply};
 use socks5_server::{
 	Associate, Bind, Connect,
 	connection::{associate, bind, connect},
 };
 use tokio::io::{self, AsyncWriteExt};
-use tracing::{debug, warn};
+use tracing::{debug, info, warn};
 use tuic_core::Address as TuicAddress;
 
-use super::{Server, UDP_SESSIONS, udp_session::UdpSession};
-use crate::connection::{Connection as TuicConnection, ERROR_CODE};
+use super::{Server, udp_session::UdpSession};
+use crate::connection::ERROR_CODE;
 
 impl Server {
 	pub async fn handle_associate(
@@ -16,14 +18,31 @@ impl Server {
 		assoc_id: u16,
 		dual_stack: Option<bool>,
 		max_pkt_size: usize,
+		ctx: Arc<crate::AppContext>,
 	) {
 		let peer_addr = assoc.peer_addr().unwrap();
 		let local_ip = assoc.local_addr().unwrap().ip();
 
+		info!(
+			"[socks5] [{peer_addr}] [associate] [{assoc_id:#06x}] starting UDP associate, local_ip: {local_ip}, dual_stack: \
+			 {:?}",
+			dual_stack
+		);
+
+		// Check for existing session with same ID
+		{
+			let sessions = ctx.socks5_udp_sessions.read().await;
+			if sessions.contains_key(&assoc_id) {
+				warn!(
+					"[socks5] [{peer_addr}] [associate] [{assoc_id:#06x}] session ID already exists! This may cause conflicts"
+				);
+			}
+		}
+
 		match UdpSession::new(assoc_id, peer_addr, local_ip, dual_stack, max_pkt_size) {
 			Ok(session) => {
 				let local_addr = session.local_addr().unwrap();
-				debug!("[socks5] [{peer_addr}] [associate] [{assoc_id:#06x}] bound to {local_addr}");
+				info!("[socks5] [{peer_addr}] [associate] [{assoc_id:#06x}] bound to {local_addr}");
 
 				let mut assoc = match assoc.reply(Reply::Succeeded, Address::SocketAddress(local_addr)).await {
 					Ok(assoc) => assoc,
@@ -33,8 +52,11 @@ impl Server {
 					}
 				};
 
-				UDP_SESSIONS.get().unwrap().write().await.insert(assoc_id, session.clone());
+				{
+					ctx.socks5_udp_sessions.write().await.insert(assoc_id, session.clone());
+				}
 
+				let ctx_loop = ctx.clone();
 				let handle_local_incoming_pkt = async move {
 					loop {
 						let (pkt, target_addr) = match session.recv().await {
@@ -47,13 +69,14 @@ impl Server {
 							}
 						};
 
+						let ctx_fwd = ctx_loop.clone();
 						let forward = async move {
 							let target_addr = match target_addr {
 								Address::DomainAddress(domain, port) => TuicAddress::DomainAddress(domain, port),
 								Address::SocketAddress(addr) => TuicAddress::SocketAddress(addr),
 							};
 
-							match TuicConnection::get_conn().await {
+							match ctx_fwd.get_conn().await {
 								Ok(conn) => conn.packet(pkt, target_addr, assoc_id).await,
 								Err(err) => Err(err)?,
 							}
@@ -85,9 +108,11 @@ impl Server {
 
 				debug!("[socks5] [{peer_addr}] [associate] [{assoc_id:#06x}] stopped associating");
 
-				UDP_SESSIONS.get().unwrap().write().await.remove(&assoc_id).unwrap();
+				{
+					ctx.socks5_udp_sessions.write().await.remove(&assoc_id).unwrap();
+				}
 
-				if let Ok(conn) = TuicConnection::get_conn().await
+				if let Ok(conn) = ctx.get_conn().await
 					&& let Err(err) = conn.dissociate(assoc_id).await
 				{
 					warn!("[socks5] [{peer_addr}] [associate] [{assoc_id:#06x}] failed stopping UDP relaying session: {err}")
@@ -120,14 +145,14 @@ impl Server {
 		}
 	}
 
-	pub async fn handle_connect(conn: Connect<connect::NeedReply>, addr: Address) {
+	pub async fn handle_connect(conn: Connect<connect::NeedReply>, addr: Address, ctx: Arc<crate::AppContext>) {
 		let peer_addr = conn.peer_addr().unwrap();
 		let target_addr = match addr {
 			Address::DomainAddress(domain, port) => TuicAddress::DomainAddress(domain, port),
 			Address::SocketAddress(addr) => TuicAddress::SocketAddress(addr),
 		};
 
-		let relay = match TuicConnection::get_conn().await {
+		let relay = match ctx.get_conn().await {
 			Ok(conn) => conn.connect(target_addr.clone()).await,
 			Err(err) => Err(err),
 		};

@@ -1,14 +1,14 @@
 // Standard library imports for networking, synchronization, and timing
 use std::{
+	collections::HashMap,
 	net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, UdpSocket},
-	sync::{Arc, atomic::AtomicU32},
+	sync::{Arc, Mutex, atomic::AtomicU32},
 	time::Duration,
 };
 
 // Error handling and utility crates
 use anyhow::Context;
 use crossbeam_utils::atomic::AtomicCell;
-use once_cell::sync::OnceCell;
 use quinn::{
 	ClientConfig, Connection as QuinnConnection, Endpoint as QuinnEndpoint, EndpointConfig, TokioRuntime, TransportConfig,
 	VarInt, ZeroRttAccepted,
@@ -21,10 +21,7 @@ use rustls::{
 	ClientConfig as RustlsClientConfig,
 	pki_types::{CertificateDer, ServerName, UnixTime},
 };
-use tokio::{
-	sync::{OnceCell as AsyncOnceCell, RwLock as AsyncRwLock},
-	time,
-};
+use tokio::{sync::RwLock as AsyncRwLock, time};
 use tracing::{debug, info, warn};
 // Importing custom QUIC connection model and side marker
 use tuic_core::quinn::{Connection as Model, side};
@@ -42,15 +39,22 @@ mod socks5;
 
 use self::socks5::Socks5UdpSocket;
 
-// Global state for endpoint, connection, and timeout
-static ENDPOINT: OnceCell<AsyncRwLock<Endpoint>> = OnceCell::new();
-static CONNECTION: AsyncOnceCell<AsyncRwLock<Connection>> = AsyncOnceCell::const_new();
-static TIMEOUT: AtomicCell<Duration> = AtomicCell::new(Duration::from_secs(8));
+/// Convenience type aliases for the two UDP session maps
+type Socks5Sessions = Arc<AsyncRwLock<HashMap<u16, crate::socks5::UdpSession>>>;
+type FwdSessions = Arc<AsyncRwLock<HashMap<u16, crate::forward::ForwardUdpSession>>>;
 
 /// Default error code for QUIC connection
 pub const ERROR_CODE: VarInt = VarInt::from_u32(0);
 /// Default maximum concurrent streams
 const DEFAULT_CONCURRENT_STREAMS: u32 = 512;
+
+/// Manages the QUIC endpoint and the current connection.
+/// Holds no global state — create one per `run()` invocation.
+pub struct ConnectionManager {
+	endpoint:   Arc<AsyncRwLock<Endpoint>>,
+	connection: Arc<Mutex<Option<Arc<AsyncRwLock<Connection>>>>>,
+	timeout:    AtomicCell<Duration>,
+}
 
 /// Represents a client QUIC connection, including stream counters and
 /// configuration
@@ -74,11 +78,16 @@ pub struct Connection {
 	max_concurrent_uni_streams: Arc<AtomicU32>,
 	/// Max concurrent bidirectional streams
 	max_concurrent_bi_streams: Arc<AtomicU32>,
+	/// SOCKS5 UDP session map (shared with AppContext)
+	pub(crate) socks5_udp_sessions: Socks5Sessions,
+	/// Forward UDP session map (shared with AppContext)
+	pub(crate) fwd_udp_sessions: FwdSessions,
 }
 
-impl Connection {
-	/// Initialize the global endpoint and connection configuration
-	pub async fn set_config(cfg: Relay) -> Result<(), Error> {
+impl ConnectionManager {
+	/// Build a `ConnectionManager` from relay config, constructing the QUIC
+	/// endpoint.
+	pub async fn build(cfg: Relay) -> Result<Self, Error> {
 		// Load certificates for TLS
 		let certs = utils::load_certs(cfg.certificates, cfg.disable_native_certs)?;
 
@@ -215,7 +224,6 @@ impl Connection {
 
 		ep.set_default_client_config(config);
 
-		// Store endpoint and configuration globally
 		let ep = Endpoint {
 			ep,
 			server,
@@ -229,38 +237,62 @@ impl Connection {
 			socks5_ctrl,
 		};
 
-		ENDPOINT
-			.set(AsyncRwLock::new(ep))
-			.map_err(|_| "endpoint already initialized")
-			.unwrap();
-
-		TIMEOUT.store(cfg.timeout);
-
-		Ok(())
+		Ok(Self {
+			endpoint:   Arc::new(AsyncRwLock::new(ep)),
+			connection: Arc::new(Mutex::new(None)),
+			timeout:    AtomicCell::new(cfg.timeout),
+		})
 	}
 
 	/// Get a connection, establishing a new one if needed
-	pub async fn get_conn() -> Result<Connection, Error> {
-		let try_init_conn = async { ENDPOINT.get().unwrap().read().await.connect().await.map(AsyncRwLock::new) };
+	pub async fn get_conn(
+		&self,
+		socks5_udp_sessions: Socks5Sessions,
+		fwd_udp_sessions: FwdSessions,
+	) -> Result<Connection, Error> {
+		let endpoint = self.endpoint.clone();
+		let connection = self.connection.clone();
+		let timeout_duration = self.timeout.load();
 
-		let try_get_conn = async {
-			let mut conn = CONNECTION.get_or_try_init(|| try_init_conn).await?.write().await;
+		let try_get_conn = async move {
+			// Check if there's an existing connection
+			let existing = connection.lock().unwrap().clone();
+			let conn_arc = if let Some(arc) = existing {
+				arc
+			} else {
+				let new_conn = endpoint
+					.read()
+					.await
+					.connect(socks5_udp_sessions.clone(), fwd_udp_sessions.clone())
+					.await?;
+				let arc = Arc::new(AsyncRwLock::new(new_conn));
+				*connection.lock().unwrap() = Some(arc.clone());
+				arc
+			};
+
+			let mut conn = conn_arc.write().await;
 
 			if conn.is_closed() {
-				let new_conn = ENDPOINT.get().unwrap().read().await.connect().await?;
+				let new_conn = endpoint
+					.read()
+					.await
+					.connect(socks5_udp_sessions.clone(), fwd_udp_sessions.clone())
+					.await?;
 				*conn = new_conn;
 			}
 
 			Ok::<_, Error>(conn.clone())
 		};
 
-		let conn = time::timeout(TIMEOUT.load(), try_get_conn)
+		let conn = time::timeout(timeout_duration, try_get_conn)
 			.await
 			.map_err(|_| Error::Timeout)??;
 
 		Ok(conn)
 	}
+}
 
+impl Connection {
 	/// Create a new Connection instance and spawn background tasks
 	#[allow(clippy::too_many_arguments)]
 	fn new(
@@ -272,6 +304,8 @@ impl Connection {
 		heartbeat: Duration,
 		gc_interval: Duration,
 		gc_lifetime: Duration,
+		socks5_udp_sessions: Socks5Sessions,
+		fwd_udp_sessions: FwdSessions,
 	) -> Self {
 		let conn = Self {
 			conn: conn.clone(),
@@ -283,6 +317,8 @@ impl Connection {
 			remote_bi_stream_cnt: Counter::new(),
 			max_concurrent_uni_streams: Arc::new(AtomicU32::new(DEFAULT_CONCURRENT_STREAMS)),
 			max_concurrent_bi_streams: Arc::new(AtomicU32::new(DEFAULT_CONCURRENT_STREAMS)),
+			socks5_udp_sessions,
+			fwd_udp_sessions,
 		};
 
 		tokio::spawn(conn.clone().init(zero_rtt_accepted, heartbeat, gc_interval, gc_lifetime));
@@ -364,7 +400,7 @@ struct Endpoint {
 impl Endpoint {
 	/// Establish a new QUIC connection to the server, rebinding if necessary
 	/// for IP family
-	async fn connect(&self) -> Result<Connection, Error> {
+	async fn connect(&self, socks5_udp_sessions: Socks5Sessions, fwd_udp_sessions: FwdSessions) -> Result<Connection, Error> {
 		let server_addr = self.server.resolve().await?.next().context("no resolved address")?;
 		// Check if endpoint's local address IP family matches the server's resolved IP
 		// family. When using SOCKS5 proxy, rebinding is skipped because the endpoint is
@@ -424,6 +460,8 @@ impl Endpoint {
 				self.heartbeat,
 				self.gc_interval,
 				self.gc_lifetime,
+				socks5_udp_sessions,
+				fwd_udp_sessions,
 			)),
 			Err(err) => Err(err),
 		}

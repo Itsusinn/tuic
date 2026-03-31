@@ -94,3 +94,92 @@ impl ServerAddr {
 		}
 	}
 }
+
+#[cfg(test)]
+mod tests {
+	use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
+
+	use super::*;
+
+	#[test]
+	fn test_server_addr_basic() {
+		let addr = ServerAddr::new("example.com".to_string(), 443, None, StackPrefer::V4only);
+		assert_eq!(addr.server_name(), "example.com");
+	}
+
+	#[test]
+	fn test_server_addr_with_sni() {
+		let addr = ServerAddr::with_sni(
+			"example.com".to_string(),
+			443,
+			None,
+			StackPrefer::V4only,
+			Some("sni.example.com".to_string()),
+		);
+		assert_eq!(addr.server_name(), "sni.example.com");
+	}
+
+	#[test]
+	fn test_server_addr_sni_none_fallback() {
+		let addr = ServerAddr::with_sni("example.com".to_string(), 443, None, StackPrefer::V4only, None);
+		assert_eq!(addr.server_name(), "example.com");
+	}
+
+	#[test]
+	fn test_server_addr_ipv6_bracket_stripping() {
+		let addr = ServerAddr::new("[::1]".to_string(), 443, None, StackPrefer::V6only);
+		assert_eq!(addr.server_name(), "::1");
+	}
+
+	#[test]
+	fn test_server_addr_ipv6_no_brackets() {
+		let addr = ServerAddr::new("::1".to_string(), 443, None, StackPrefer::V6only);
+		assert_eq!(addr.server_name(), "::1");
+	}
+
+	#[test]
+	fn test_server_addr_with_sni_and_brackets() {
+		let addr = ServerAddr::with_sni(
+			"[::1]".to_string(),
+			443,
+			None,
+			StackPrefer::V6only,
+			Some("custom-sni.com".to_string()),
+		);
+		// SNI takes precedence over domain
+		assert_eq!(addr.server_name(), "custom-sni.com");
+		// But the domain itself should have brackets stripped
+		assert_eq!(addr.domain, "::1");
+	}
+
+	#[tokio::test]
+	async fn test_resolve_with_explicit_ip() {
+		let ip = IpAddr::V4(Ipv4Addr::new(1, 2, 3, 4));
+		let addr = ServerAddr::new("ignored-domain.com".to_string(), 8080, Some(ip), StackPrefer::V4only);
+
+		let resolved: Vec<SocketAddr> = addr.resolve().await.unwrap().collect();
+		assert_eq!(resolved.len(), 1);
+		assert_eq!(resolved[0], SocketAddr::from(([1, 2, 3, 4], 8080)));
+	}
+
+	#[tokio::test]
+	async fn test_resolve_with_explicit_ipv6() {
+		let ip = IpAddr::V6(Ipv6Addr::LOCALHOST);
+		let addr = ServerAddr::new("ignored.com".to_string(), 9090, Some(ip), StackPrefer::V6only);
+
+		let resolved: Vec<SocketAddr> = addr.resolve().await.unwrap().collect();
+		assert_eq!(resolved.len(), 1);
+		assert_eq!(resolved[0], SocketAddr::from((Ipv6Addr::LOCALHOST, 9090)));
+	}
+
+	#[tokio::test]
+	async fn test_resolve_localhost() {
+		let addr = ServerAddr::new("localhost".to_string(), 80, None, StackPrefer::V4only);
+		let resolved: Vec<SocketAddr> = addr.resolve().await.unwrap().collect();
+		// With V4only, should only return IPv4 addresses
+		for a in &resolved {
+			assert!(a.is_ipv4());
+		}
+		assert!(!resolved.is_empty());
+	}
+}
