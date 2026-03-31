@@ -46,13 +46,13 @@ impl UdpSession {
 
 		let socket = Socket::new(domain, Type::DGRAM, Some(Protocol::UDP)).map_err(|err| {
 			warn!("[socks5] [{ctrl_addr}] [associate] [{assoc_id:#06x}] failed to create socket: {err}");
-			eprintln!("[socks5] [{ctrl_addr}] [associate] [{assoc_id:#06x}] SOCKET CREATE ERROR: {err}");
 			Error::Socket("failed to create socks5 server UDP associate socket", err)
 		})?;
 
 		debug!("[socks5] [{ctrl_addr}] [associate] [{assoc_id:#06x}] socket created successfully");
 
-		if let Some(dual_stack) = dual_stack {
+		// Only set IPV6_V6ONLY option for IPv6 sockets
+		if let (Some(dual_stack), IpAddr::V6(_)) = (dual_stack, local_ip) {
 			socket.set_only_v6(!dual_stack).map_err(|err| {
 				warn!("[socks5] [{ctrl_addr}] [associate] [{assoc_id:#06x}] failed to set dual-stack: {err}");
 				Error::Socket("socks5 server UDP associate dual-stack socket setting error", err)
@@ -70,7 +70,6 @@ impl UdpSession {
 
 		socket.bind(&SockAddr::from(bind_addr)).map_err(|err| {
 			warn!("[socks5] [{ctrl_addr}] [associate] [{assoc_id:#06x}] failed to bind to {bind_addr}: {err}");
-			eprintln!("[socks5] [{ctrl_addr}] [associate] [{assoc_id:#06x}] BIND ERROR {bind_addr}: {err}");
 			Error::Socket("failed to bind socks5 server UDP associate socket", err)
 		})?;
 
