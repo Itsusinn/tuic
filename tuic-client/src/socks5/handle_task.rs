@@ -24,7 +24,8 @@ impl Server {
 		let local_ip = assoc.local_addr().unwrap().ip();
 
 		debug!(
-			"[socks5] [{peer_addr}] [associate] [{assoc_id:#06x}] starting UDP associate, local_ip: {local_ip}, dual_stack: {:?}",
+			"[socks5] [{peer_addr}] [associate] [{assoc_id:#06x}] starting UDP associate, local_ip: {local_ip}, dual_stack: \
+			 {:?}",
 			dual_stack
 		);
 
