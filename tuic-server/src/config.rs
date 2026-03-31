@@ -13,7 +13,7 @@ use figment::{
 };
 use figment_json5::Json5;
 use rand::{RngExt, distr::Alphanumeric, rng};
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 use tracing::{level_filters::LevelFilter, warn};
 use uuid::Uuid;
 
@@ -267,13 +267,13 @@ pub struct OutboundRule {
 
 	/// Optional IPv4 address to bind to for direct connections (only used when
 	/// kind == "direct").
-	#[serde(default)]
-	pub bind_ipv4: Option<Ipv4Addr>,
+	#[serde(default, deserialize_with = "deserialize_single_or_vec")]
+	pub bind_ipv4: Vec<Ipv4Addr>,
 
 	/// Optional IPv6 address to bind to for direct connections (only used when
 	/// kind == "direct").
-	#[serde(default)]
-	pub bind_ipv6: Option<Ipv6Addr>,
+	#[serde(default, deserialize_with = "deserialize_single_or_vec")]
+	pub bind_ipv6: Vec<Ipv6Addr>,
 
 	/// Optional device/interface name to bind to (only used when kind ==
 	/// "direct").
@@ -330,6 +330,24 @@ pub struct ExperimentalConfig {
 	pub drop_loopback: bool,
 	#[educe(Default = true)]
 	pub drop_private:  bool,
+}
+
+fn deserialize_single_or_vec<'de, D, T>(deserializer: D) -> Result<Vec<T>, D::Error>
+where
+	D: Deserializer<'de>,
+	T: Deserialize<'de>,
+{
+	#[derive(Deserialize)]
+	#[serde(untagged)]
+	enum SingleOrVec<T> {
+		Single(T),
+		Vec(Vec<T>),
+	}
+
+	match SingleOrVec::deserialize(deserializer)? {
+		SingleOrVec::Single(value) => Ok(vec![value]),
+		SingleOrVec::Vec(values) => Ok(values),
+	}
 }
 
 fn generate_random_alphanumeric_string(min: usize, max: usize) -> String {
@@ -906,7 +924,7 @@ mod tests {
 		let prefer_v4 = result.outbound.named.get("prefer_v4").unwrap();
 		assert_eq!(prefer_v4.kind, "direct");
 		assert_eq!(prefer_v4.ip_mode, Some(StackPrefer::V4first));
-		assert_eq!(prefer_v4.bind_ipv4, Some("2.4.6.8".parse().unwrap()));
+		assert_eq!(prefer_v4.bind_ipv4, vec!["2.4.6.8".parse::<Ipv4Addr>().unwrap()]);
 		assert_eq!(prefer_v4.bind_device, Some("eth233".to_string()));
 
 		let socks5 = result.outbound.named.get("through_socks5").unwrap();
@@ -914,6 +932,26 @@ mod tests {
 		assert_eq!(socks5.addr, Some("127.0.0.1:1080".to_string()));
 		assert_eq!(socks5.username, Some("optional".to_string()));
 		assert_eq!(socks5.password, Some("optional".to_string()));
+	}
+
+	#[tokio::test]
+	async fn test_outbound_valid_with_multiple_bind_ips() {
+		let config = include_str!("../tests/config/outbound_valid_with_multiple_bind_ips.toml");
+
+		let result = test_parse_config(config, ".toml").await.unwrap();
+
+		let prefer_v4 = result.outbound.named.get("prefer_v4").unwrap();
+		assert_eq!(
+			prefer_v4.bind_ipv4,
+			vec!["2.4.6.8".parse::<Ipv4Addr>().unwrap(), "2.4.6.9".parse::<Ipv4Addr>().unwrap()]
+		);
+		assert_eq!(
+			prefer_v4.bind_ipv6,
+			vec![
+				"0:0:0:0:0:ffff:0204:0608".parse::<Ipv6Addr>().unwrap(),
+				"0:0:0:0:0:ffff:0204:0609".parse::<Ipv6Addr>().unwrap()
+			]
+		);
 	}
 
 	#[tokio::test]

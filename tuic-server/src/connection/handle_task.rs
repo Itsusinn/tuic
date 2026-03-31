@@ -6,6 +6,7 @@ use std::{
 
 use bytes::Bytes;
 use eyre::{OptionExt, eyre};
+use rand::prelude::IndexedRandom;
 use tokio::{
 	io::{AsyncReadExt, AsyncWriteExt},
 	net::{self, TcpSocket, TcpStream},
@@ -152,10 +153,11 @@ impl Connection {
 	}
 
 	fn get_bind_ip(&self, is_ipv6: bool, outbound: &OutboundRule) -> Option<IpAddr> {
+		let mut rng = rand::rng();
 		if is_ipv6 {
-			outbound.bind_ipv6.map(IpAddr::from)
+			outbound.bind_ipv6.choose(&mut rng).copied().map(IpAddr::from)
 		} else {
-			outbound.bind_ipv4.map(IpAddr::from)
+			outbound.bind_ipv4.choose(&mut rng).copied().map(IpAddr::from)
 		}
 	}
 

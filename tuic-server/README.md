@@ -262,6 +262,10 @@ ip_mode = "v4first"
 # Local addresses to bind for direct connections
 bind_ipv4 = "1.2.3.4"
 bind_ipv6 = "0:0:0:0:0:ffff:0102:0304"
+# Multiple bind IPs are also supported; one matching the target address family
+# is selected randomly for each connection.
+# bind_ipv4 = ["1.2.3.4", "1.2.3.5"]
+# bind_ipv6 = ["0:0:0:0:0:ffff:0102:0304", "0:0:0:0:0:ffff:0102:0305"]
 # Network interface to bind for direct connections
 bind_device = "eth1234"
 
