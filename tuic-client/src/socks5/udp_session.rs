@@ -9,7 +9,7 @@ use socket2::{Domain, Protocol, SockAddr, Socket, Type};
 use socks5_proto::Address;
 use socks5_server::AssociatedUdpSocket;
 use tokio::net::UdpSocket;
-use tracing::{debug, warn};
+use tracing::{debug, info, warn};
 
 use crate::error::Error;
 
@@ -28,30 +28,63 @@ impl UdpSession {
 		dual_stack: Option<bool>,
 		max_pkt_size: usize,
 	) -> Result<Self, Error> {
+		info!(
+			"[socks5] [{ctrl_addr}] [associate] [{assoc_id:#06x}] creating UDP session, local_ip: {local_ip}, family: {:?}",
+			local_ip
+		);
+
 		let domain = match local_ip {
-			IpAddr::V4(_) => Domain::IPV4,
-			IpAddr::V6(_) => Domain::IPV6,
+			IpAddr::V4(_) => {
+				info!("[socks5] [{ctrl_addr}] [associate] [{assoc_id:#06x}] using IPv4 domain");
+				Domain::IPV4
+			}
+			IpAddr::V6(_) => {
+				info!("[socks5] [{ctrl_addr}] [associate] [{assoc_id:#06x}] using IPv6 domain");
+				Domain::IPV6
+			}
 		};
 
-		let socket = Socket::new(domain, Type::DGRAM, Some(Protocol::UDP))
-			.map_err(|err| Error::Socket("failed to create socks5 server UDP associate socket", err))?;
+		let socket = Socket::new(domain, Type::DGRAM, Some(Protocol::UDP)).map_err(|err| {
+			warn!("[socks5] [{ctrl_addr}] [associate] [{assoc_id:#06x}] failed to create socket: {err}");
+			Error::Socket("failed to create socks5 server UDP associate socket", err)
+		})?;
 
-		if let Some(dual_stack) = dual_stack {
-			socket
-				.set_only_v6(!dual_stack)
-				.map_err(|err| Error::Socket("socks5 server UDP associate dual-stack socket setting error", err))?;
+		debug!("[socks5] [{ctrl_addr}] [associate] [{assoc_id:#06x}] socket created successfully");
+
+		// Only set IPV6_V6ONLY option for IPv6 sockets
+		if let (Some(dual_stack), IpAddr::V6(_)) = (dual_stack, local_ip) {
+			socket.set_only_v6(!dual_stack).map_err(|err| {
+				warn!("[socks5] [{ctrl_addr}] [associate] [{assoc_id:#06x}] failed to set dual-stack: {err}");
+				Error::Socket("socks5 server UDP associate dual-stack socket setting error", err)
+			})?;
+			debug!("[socks5] [{ctrl_addr}] [associate] [{assoc_id:#06x}] dual-stack set to: {dual_stack}");
 		}
 
-		socket
-			.set_nonblocking(true)
-			.map_err(|err| Error::Socket("failed setting socks5 server UDP associate socket as non-blocking", err))?;
+		socket.set_nonblocking(true).map_err(|err| {
+			warn!("[socks5] [{ctrl_addr}] [associate] [{assoc_id:#06x}] failed to set non-blocking: {err}");
+			Error::Socket("failed setting socks5 server UDP associate socket as non-blocking", err)
+		})?;
 
-		socket
-			.bind(&SockAddr::from(SocketAddr::from((local_ip, 0))))
-			.map_err(|err| Error::Socket("failed to bind socks5 server UDP associate socket", err))?;
+		let bind_addr = SocketAddr::from((local_ip, 0));
+		info!("[socks5] [{ctrl_addr}] [associate] [{assoc_id:#06x}] binding to {bind_addr}");
 
-		let socket = UdpSocket::from_std(StdUdpSocket::from(socket))
-			.map_err(|err| Error::Socket("failed to create socks5 server UDP associate socket", err))?;
+		socket.bind(&SockAddr::from(bind_addr)).map_err(|err| {
+			warn!("[socks5] [{ctrl_addr}] [associate] [{assoc_id:#06x}] failed to bind to {bind_addr}: {err}");
+			Error::Socket("failed to bind socks5 server UDP associate socket", err)
+		})?;
+
+		info!(
+			"[socks5] [{ctrl_addr}] [associate] [{assoc_id:#06x}] socket bound successfully to {:?}",
+			bind_addr
+		);
+
+		let socket = UdpSocket::from_std(StdUdpSocket::from(socket)).map_err(|err| {
+			warn!("[socks5] [{ctrl_addr}] [associate] [{assoc_id:#06x}] failed to convert to tokio UdpSocket: {err}");
+			Error::Socket("failed to create socks5 server UDP associate socket", err)
+		})?;
+
+		let local_addr = socket.local_addr().unwrap();
+		info!("[socks5] [{ctrl_addr}] [associate] [{assoc_id:#06x}] tokio socket local address is {local_addr}");
 
 		Ok(Self {
 			socket: Arc::new(AssociatedUdpSocket::from((socket, max_pkt_size))),
