@@ -355,8 +355,12 @@ async fn test_server_client_integration() -> eyre::Result<()> {
 
 		// Test TCP connection through SOCKS5
 		let test_data = b"Hello, TUIC!";
-		let success = test_tcp_through_socks5("127.0.0.1:1080", echo_addr, test_data, "TCP Test").await;
-		assert!(success, "[TCP Test] TCP relay through SOCKS5 failed");
+		let result = test_tcp_through_socks5("127.0.0.1:1080", echo_addr, test_data, "TCP Test").await;
+		assert!(
+			result.is_ok(),
+			"[TCP Test] TCP relay through SOCKS5 failed: {:?}",
+			result.err()
+		);
 
 		// Wait a bit to see if echo server gets anything
 		info!("[TCP Test] Waiting for echo server to finish...");
@@ -670,8 +674,12 @@ async fn test_ipv6_server_client_integration() -> eyre::Result<()> {
 
 		// Test TCP connection through SOCKS5 on IPv6
 		let test_data = b"Hello IPv6 TUIC!";
-		let success = test_tcp_through_socks5("[::1]:1081", echo_addr, test_data, "IPv6 TCP Test").await;
-		assert!(success, "[IPv6 TCP Test] TCP relay through SOCKS5 failed");
+		let result = test_tcp_through_socks5("[::1]:1081", echo_addr, test_data, "IPv6 TCP Test").await;
+		assert!(
+			result.is_ok(),
+			"[IPv6 TCP Test] TCP relay through SOCKS5 failed: {:?}",
+			result.err()
+		);
 
 		echo_task.abort();
 		info!("[IPv6 TCP Test] TCP test completed\n");
@@ -850,8 +858,12 @@ async fn test_client_proxy_configuration() -> eyre::Result<()> {
 	// Try to connect to echo server through SOCKS5 proxy
 	info!("[Proxy Config Test] Testing connection through SOCKS5 proxy to echo server...");
 	let test_data = b"Hello through SOCKS5 proxy!";
-	let success = test_tcp_through_socks5(local_socks, echo_addr, test_data, "Proxy Test 1").await;
-	assert!(success, "[Proxy Config Test] TCP relay through SOCKS5 proxy failed");
+	let result = test_tcp_through_socks5(local_socks, echo_addr, test_data, "Proxy Test 1").await;
+	assert!(
+		result.is_ok(),
+		"[Proxy Config Test] TCP relay through SOCKS5 proxy failed: {:?}",
+		result.err()
+	);
 
 	// Clean up
 	echo_handle.abort();

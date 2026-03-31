@@ -106,7 +106,7 @@ pub async fn test_tcp_through_socks5(
 	target_addr: std::net::SocketAddr,
 	test_data: &[u8],
 	test_name: &str,
-) -> bool {
+) -> Result<bool, String> {
 	use fast_socks5::client::{Config, Socks5Stream};
 	use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
@@ -135,7 +135,7 @@ pub async fn test_tcp_through_socks5(
 
 			if let Err(e) = stream.write_all(test_data).await {
 				error!("[{}] Failed to send data: {}", test_name, e);
-				return false;
+				return Err(format!("Failed to send data: {}", e));
 			}
 
 			info!("[{}] Data sent successfully", test_name);
@@ -148,27 +148,27 @@ pub async fn test_tcp_through_socks5(
 
 					if buffer.as_slice() == test_data {
 						info!("[{}] ✓ TCP echo test PASSED - data matches!", test_name);
-						true
+						Ok(true)
 					} else {
 						error!("[{}] ✗ TCP echo test FAILED - data mismatch!", test_name);
 						error!("[{}] Expected: {:?}", test_name, test_data);
 						error!("[{}] Got: {:?}", test_name, &buffer);
-						false
+						Err("Data mismatch".to_string())
 					}
 				}
 				Ok(Err(e)) => {
 					error!("[{}] Failed to read response: {}", test_name, e);
-					false
+					Err(format!("Failed to read response: {}", e))
 				}
 				Err(_) => {
 					error!("[{}] Timeout waiting for response", test_name);
-					false
+					Err("Timeout waiting for TCP response".to_string())
 				}
 			}
 		}
 		Err(e) => {
 			error!("[{}] Failed to connect to SOCKS5 proxy: {}", test_name, e);
-			false
+			Err(format!("Failed to connect to SOCKS5 proxy: {}", e))
 		}
 	}
 }
