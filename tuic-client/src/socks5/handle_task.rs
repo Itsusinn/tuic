@@ -23,6 +23,21 @@ impl Server {
 		let peer_addr = assoc.peer_addr().unwrap();
 		let local_ip = assoc.local_addr().unwrap().ip();
 
+		debug!(
+			"[socks5] [{peer_addr}] [associate] [{assoc_id:#06x}] starting UDP associate, local_ip: {local_ip}, dual_stack: {:?}",
+			dual_stack
+		);
+
+		// Check for existing session with same ID
+		{
+			let sessions = ctx.socks5_udp_sessions.read().await;
+			if sessions.contains_key(&assoc_id) {
+				warn!(
+					"[socks5] [{peer_addr}] [associate] [{assoc_id:#06x}] session ID already exists! This may cause conflicts"
+				);
+			}
+		}
+
 		match UdpSession::new(assoc_id, peer_addr, local_ip, dual_stack, max_pkt_size) {
 			Ok(session) => {
 				let local_addr = session.local_addr().unwrap();
