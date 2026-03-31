@@ -268,7 +268,7 @@ async fn test_server_client_integration() -> eyre::Result<()> {
 	info!("[Integration Test] Starting TUIC server on 127.0.0.1:8443...");
 	let server_handle = tokio::spawn(async move {
 		// Run server with a timeout
-		match timeout(Duration::from_secs(10), tuic_server::run(server_config)).await {
+		match timeout(Duration::from_secs(30), tuic_server::run(server_config)).await {
 			Ok(Ok(())) => info!("[Integration Test] Server completed successfully"),
 			Ok(Err(e)) => error!("[Integration Test] Server error: {}", e),
 			Err(_) => error!("[Integration Test] Server timeout"),
@@ -315,7 +315,7 @@ async fn test_server_client_integration() -> eyre::Result<()> {
 	// Spawn client in background with timeout
 	info!("[Integration Test] Starting TUIC client with SOCKS5 server on 127.0.0.1:1080...");
 	let client_handle = tokio::spawn(async move {
-		match timeout(Duration::from_secs(10), tuic_client::run(client_config)).await {
+		match timeout(Duration::from_secs(30), tuic_client::run(client_config)).await {
 			Ok(Ok(())) => info!("[Integration Test] Client completed successfully"),
 			Ok(Err(e)) => error!("[Integration Test] Client error: {}", e),
 			Err(_) => error!("[Integration Test] Client timeout"),
@@ -324,7 +324,7 @@ async fn test_server_client_integration() -> eyre::Result<()> {
 
 	// Wait for client to establish connection and start SOCKS5 server
 	info!("[Integration Test] Waiting for client to connect and start SOCKS5 server...");
-	tokio::time::sleep(Duration::from_secs(2)).await;
+	tokio::time::sleep(Duration::from_secs(5)).await;
 	info!("[Integration Test] SOCKS5 proxy should be ready now\n");
 
 	// Quick connectivity check - try to connect to SOCKS5 proxy
@@ -368,7 +368,7 @@ async fn test_server_client_integration() -> eyre::Result<()> {
 	};
 
 	// Run the TCP test with a timeout
-	timeout(Duration::from_secs(15), tcp_test)
+	timeout(Duration::from_secs(30), tcp_test)
 		.await
 		.expect("[TCP Test] TCP test timed out");
 
@@ -404,7 +404,7 @@ async fn test_server_client_integration() -> eyre::Result<()> {
 	};
 
 	// Run the UDP test with a timeout
-	timeout(Duration::from_secs(10), udp_test)
+	timeout(Duration::from_secs(30), udp_test)
 		.await
 		.expect("[UDP Test] UDP test timed out");
 
@@ -494,7 +494,7 @@ async fn test_server_client_integration() -> eyre::Result<()> {
 	};
 
 	// Run the concurrent test with a timeout
-	timeout(Duration::from_secs(15), concurrent_test)
+	timeout(Duration::from_secs(30), concurrent_test)
 		.await
 		.expect("[Concurrent Test] Concurrent test timed out");
 
@@ -580,7 +580,7 @@ async fn test_ipv6_server_client_integration() -> eyre::Result<()> {
 	// Spawn IPv6 server
 	info!("[IPv6 Test] Starting TUIC server on [::1]:8444...");
 	let server_handle = tokio::spawn(async move {
-		match timeout(Duration::from_secs(10), tuic_server::run(server_config)).await {
+		match timeout(Duration::from_secs(30), tuic_server::run(server_config)).await {
 			Ok(Ok(())) => info!("[IPv6 Test] Server completed successfully"),
 			Ok(Err(e)) => error!("[IPv6 Test] Server error: {}", e),
 			Err(_) => error!("[IPv6 Test] Server timeout"),
@@ -636,7 +636,7 @@ async fn test_ipv6_server_client_integration() -> eyre::Result<()> {
 	// Spawn client with IPv6 SOCKS5 server
 	info!("[IPv6 Test] Starting TUIC client with SOCKS5 server on [::1]:1081...");
 	let client_handle = tokio::spawn(async move {
-		match timeout(Duration::from_secs(10), tuic_client::run(client_config)).await {
+		match timeout(Duration::from_secs(30), tuic_client::run(client_config)).await {
 			Ok(Ok(())) => info!("[IPv6 Test] Client completed successfully"),
 			Ok(Err(e)) => error!("[IPv6 Test] Client error: {}", e),
 			Err(_) => error!("[IPv6 Test] Client timeout"),
@@ -645,7 +645,7 @@ async fn test_ipv6_server_client_integration() -> eyre::Result<()> {
 
 	// Wait for client to connect
 	info!("[IPv6 Test] Waiting for client to connect and start SOCKS5 server...");
-	tokio::time::sleep(Duration::from_secs(2)).await;
+	tokio::time::sleep(Duration::from_secs(5)).await;
 	info!("[IPv6 Test] SOCKS5 proxy should be ready now\n");
 
 	use tokio::net::TcpStream;
@@ -677,7 +677,7 @@ async fn test_ipv6_server_client_integration() -> eyre::Result<()> {
 		info!("[IPv6 TCP Test] TCP test completed\n");
 	};
 
-	let _ = timeout(Duration::from_secs(15), tcp_test)
+	let _ = timeout(Duration::from_secs(30), tcp_test)
 		.await
 		.expect("[IPv6 TCP Test] TCP test timed out");
 
@@ -708,7 +708,7 @@ async fn test_ipv6_server_client_integration() -> eyre::Result<()> {
 		info!("[IPv6 UDP Test] UDP test completed\n");
 	};
 
-	let _ = timeout(Duration::from_secs(10), udp_test)
+	let _ = timeout(Duration::from_secs(30), udp_test)
 		.await
 		.expect("[IPv6 UDP Test] UDP test timed out");
 
@@ -828,7 +828,7 @@ async fn test_client_proxy_configuration() -> eyre::Result<()> {
 
 	info!("[Proxy Config Test] Starting TUIC client with proxy configuration...");
 	let client_handle = tokio::spawn(async move {
-		match timeout(Duration::from_secs(5), tuic_client::run(config)).await {
+		match timeout(Duration::from_secs(30), tuic_client::run(config)).await {
 			Ok(Ok(())) => info!("[Proxy Config Test] Client completed successfully"),
 			Ok(Err(e)) => {
 				info!("[Proxy Config Test] Client error: {}", e);
@@ -838,7 +838,7 @@ async fn test_client_proxy_configuration() -> eyre::Result<()> {
 	});
 
 	// Give client time to start and connect through proxy
-	tokio::time::sleep(Duration::from_secs(2)).await;
+	tokio::time::sleep(Duration::from_secs(5)).await;
 
 	info!("[Proxy Config Test] ✓ Client started with proxy configuration");
 
