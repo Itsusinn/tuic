@@ -2129,14 +2129,14 @@ dependencies = [
 [[package]]
 name = "quinn"
 version = "0.12.0"
-source = "git+https://github.com/Tipuch/quinn.git?branch=bbrv3#50ebb23e6007fdcfa3c1b226595a3d6291443116"
+source = "git+https://github.com/Tipuch/quinn.git?branch=bbrv3#3896e5b27db244e40f9d1ea5c46f2d4c46f5c8aa"
 dependencies = [
  "bytes",
  "cfg_aliases",
  "futures-io",
  "pin-project-lite",
  "quinn-proto 0.12.0",
- "quinn-udp 0.6.0",
+ "quinn-udp 0.6.1",
  "rustc-hash",
  "rustls",
  "socket2 0.6.3",
@@ -2180,7 +2180,7 @@ dependencies = [
 [[package]]
 name = "quinn-proto"
 version = "0.12.0"
-source = "git+https://github.com/Tipuch/quinn.git?branch=bbrv3#50ebb23e6007fdcfa3c1b226595a3d6291443116"
+source = "git+https://github.com/Tipuch/quinn.git?branch=bbrv3#3896e5b27db244e40f9d1ea5c46f2d4c46f5c8aa"
 dependencies = [
  "aws-lc-rs",
  "bytes",
@@ -2218,8 +2218,8 @@ dependencies = [
 
 [[package]]
 name = "quinn-udp"
-version = "0.6.0"
-source = "git+https://github.com/Tipuch/quinn.git?branch=bbrv3#50ebb23e6007fdcfa3c1b226595a3d6291443116"
+version = "0.6.1"
+source = "git+https://github.com/Tipuch/quinn.git?branch=bbrv3#3896e5b27db244e40f9d1ea5c46f2d4c46f5c8aa"
 dependencies = [
  "cfg_aliases",
  "libc",
@@ -2726,9 +2726,9 @@ dependencies = [
 
 [[package]]
 name = "serde_spanned"
-version = "1.1.0"
+version = "1.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "876ac351060d4f882bb1032b6369eb0aef79ad9df1ea8bc404874d8cc3d0cd98"
+checksum = "6662b5879511e06e8999a8a235d848113e942c9124f211511b16466ee2995f26"
 dependencies = [
  "serde_core",
 ]
@@ -3211,14 +3211,14 @@ dependencies = [
 
 [[package]]
 name = "toml"
-version = "1.1.0+spec-1.1.0"
+version = "1.1.1+spec-1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f8195ca05e4eb728f4ba94f3e3291661320af739c4e43779cbdfae82ab239fcc"
+checksum = "994b95d9e7bae62b34bab0e2a4510b801fa466066a6a8b2b57361fa1eba068ee"
 dependencies = [
  "indexmap",
  "serde_core",
- "serde_spanned 1.1.0",
- "toml_datetime 1.1.0+spec-1.1.0",
+ "serde_spanned 1.1.1",
+ "toml_datetime 1.1.1+spec-1.1.0",
  "toml_parser",
  "toml_writer",
  "winnow 1.0.0",
@@ -3235,9 +3235,9 @@ dependencies = [
 
 [[package]]
 name = "toml_datetime"
-version = "1.1.0+spec-1.1.0"
+version = "1.1.1+spec-1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "97251a7c317e03ad83774a8752a7e81fb6067740609f75ea2b585b569a59198f"
+checksum = "3165f65f62e28e0115a00b2ebdd37eb6f3b641855f9d636d3cd4103767159ad7"
 dependencies = [
  "serde_core",
 ]
@@ -3258,9 +3258,9 @@ dependencies = [
 
 [[package]]
 name = "toml_parser"
-version = "1.1.0+spec-1.1.0"
+version = "1.1.1+spec-1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2334f11ee363607eb04df9b8fc8a13ca1715a72ba8662a26ac285c98aabb4011"
+checksum = "39ca317ebc49f06bd748bfba29533eac9485569dc9bf80b849024b025e814fb9"
 dependencies = [
  "winnow 1.0.0",
 ]
@@ -3273,9 +3273,9 @@ checksum = "5d99f8c9a7727884afe522e9bd5edbfc91a3312b36a77b5fb8926e4c31a41801"
 
 [[package]]
 name = "toml_writer"
-version = "1.1.0+spec-1.1.0"
+version = "1.1.1+spec-1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d282ade6016312faf3e41e57ebbba0c073e4056dab1232ab1cb624199648f8ed"
+checksum = "756daf9b1013ebe47a8776667b466417e2d4c5679d441c26230efd9ef78692db"
 
 [[package]]
 name = "tower"
@@ -3448,7 +3448,7 @@ dependencies = [
  "time",
  "tokio",
  "tokio-util",
- "toml 1.1.0+spec-1.1.0",
+ "toml 1.1.1+spec-1.1.0",
  "tracing",
  "tracing-subscriber",
  "tuic-core",
@@ -3525,7 +3525,7 @@ dependencies = [
  "tokio-stream",
  "tokio-test",
  "tokio-util",
- "toml 1.1.0+spec-1.1.0",
+ "toml 1.1.1+spec-1.1.0",
  "tracing",
  "tracing-subscriber",
  "tuic-core",
@@ -3637,9 +3637,9 @@ checksum = "06abde3611657adf66d383f00b093d7faecc7fa57071cce2578660c9f1010821"
 
 [[package]]
 name = "uuid"
-version = "1.22.0"
+version = "1.23.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a68d3c8f01c0cfa54a75291d83601161799e4a89a39e0929f4b0354d88757a37"
+checksum = "5ac8b6f42ead25368cf5b098aeb3dc8a1a2c05a3eee8a9a1a68c640edbfc79d9"
 dependencies = [
  "getrandom 0.4.2",
  "js-sys",
