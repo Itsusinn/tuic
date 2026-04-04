@@ -5,7 +5,7 @@ use clap::Parser;
 use tikv_jemallocator::Jemalloc;
 use tracing::level_filters::LevelFilter;
 use tracing_subscriber::{fmt::time::LocalTime, layer::SubscriberExt, util::SubscriberInitExt};
-use tuic_server::config::{Cli, Control, EnvState, TokioRuntime, parse_config};
+use tuic_server::config::{Cli, Control, EnvState, ResolvedRuntime, parse_config};
 
 #[cfg(feature = "jemallocator")]
 #[global_allocator]
@@ -62,9 +62,9 @@ fn main() -> eyre::Result<()> {
 		)
 		.try_init()?;
 
-	let mut builder = match cfg.tokio_runtime {
-		TokioRuntime::MultiThread => tokio::runtime::Builder::new_multi_thread(),
-		TokioRuntime::CurrentThread => tokio::runtime::Builder::new_current_thread(),
+	let mut builder = match cfg.tokio_runtime.resolve() {
+		ResolvedRuntime::MultiThread => tokio::runtime::Builder::new_multi_thread(),
+		ResolvedRuntime::CurrentThread => tokio::runtime::Builder::new_current_thread(),
 	};
 
 	let rt = builder.enable_all().build()?;

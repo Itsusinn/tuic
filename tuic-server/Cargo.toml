@@ -19,6 +19,7 @@ jemallocator = ["tikv-jemallocator"]
 
 [dependencies]
 
+num_cpus = "1"
 toml = "1.1"
 clap = { version = "4", features = ["derive"] }
 socket2 = { version = "0.6", default-features = false }
