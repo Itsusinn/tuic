@@ -7,8 +7,8 @@ where
 	A: AsyncRead + AsyncWrite + Unpin + ?Sized,
 	B: AsyncRead + AsyncWrite + Unpin + ?Sized,
 {
-	let mut a2b = bytes::BytesMut::zeroed(BUFFER_SIZE);
-	let mut b2a = bytes::BytesMut::zeroed(BUFFER_SIZE);
+	let mut a2b = bytes::BytesMut::with_capacity(BUFFER_SIZE);
+	let mut b2a = bytes::BytesMut::with_capacity(BUFFER_SIZE);
 
 	let mut a2b_num = 0;
 	let mut b2a_num = 0;
@@ -20,7 +20,7 @@ where
 
 	loop {
 		tokio::select! {
-		   a2b_res = a.read(&mut a2b), if !a_eof => match a2b_res {
+		   a2b_res = a.read_buf(&mut a2b), if !a_eof => match a2b_res {
 			  Ok(num) => {
 				 if num == 0 {
 					a_eof = true;
@@ -36,6 +36,7 @@ where
 						last_err = Some(err);
 						break;
 					}
+					a2b.clear();
 				 }
 			  },
 			  Err(err) => {
@@ -43,7 +44,7 @@ where
 				 break;
 			  }
 		   },
-		   b2a_res = b.read(&mut b2a), if !b_eof => match b2a_res {
+		   b2a_res = b.read_buf(&mut b2a), if !b_eof => match b2a_res {
 			  Ok(num) => {
 				 if num == 0 {
 					b_eof = true;
@@ -59,6 +60,7 @@ where
 						last_err = Some(err);
 						break;
 					}
+					b2a.clear();
 				 }
 			  },
 			  Err(err) => {
