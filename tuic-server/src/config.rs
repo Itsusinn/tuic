@@ -98,6 +98,9 @@ pub struct Config {
 	#[educe(Default = false)]
 	pub zero_rtt_handshake: bool,
 
+	#[educe(Default(expression = TokioRuntime::MultiThread))]
+	pub tokio_runtime: TokioRuntime,
+
 	#[educe(Default = true)]
 	pub dual_stack: bool,
 
@@ -473,6 +476,20 @@ pub enum LogLevel {
 	Error,
 	Off,
 }
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TokioRuntime {
+	MultiThread,
+	CurrentThread,
+}
+
+impl Default for TokioRuntime {
+	fn default() -> Self {
+		TokioRuntime::MultiThread
+	}
+}
+
 impl From<LogLevel> for LevelFilter {
 	fn from(value: LogLevel) -> Self {
 		match value {

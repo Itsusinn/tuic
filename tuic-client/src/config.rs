@@ -72,6 +72,22 @@ pub struct Config {
 
 	#[educe(Default = "info")]
 	pub log_level: String,
+
+	#[educe(Default(expression = TokioRuntime::MultiThread))]
+	pub tokio_runtime: TokioRuntime,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TokioRuntime {
+	MultiThread,
+	CurrentThread,
+}
+
+impl Default for TokioRuntime {
+	fn default() -> Self {
+		TokioRuntime::MultiThread
+	}
 }
 
 #[derive(Debug, Deserialize, serde::Serialize, Educe)]

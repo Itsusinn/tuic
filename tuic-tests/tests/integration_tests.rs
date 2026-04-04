@@ -283,6 +283,7 @@ async fn test_server_client_integration() -> eyre::Result<()> {
 
 	// Create a client configuration that connects to the test server
 	let client_config = tuic_client::Config {
+		tokio_runtime: Default::default(),
 		relay:     tuic_client::config::Relay {
 			server: ("127.0.0.1".to_string(), 8443),
 			uuid: Uuid::parse_str("00000000-0000-0000-0000-000000000000")?,
@@ -600,6 +601,7 @@ async fn test_ipv6_server_client_integration() -> eyre::Result<()> {
 
 	// Create client configuration connecting to IPv6 server
 	let client_config = tuic_client::Config {
+		tokio_runtime: Default::default(),
 		relay:     tuic_client::config::Relay {
 			server:               ("[::1]".to_string(), 8444),
 			uuid:                 Uuid::parse_str("00000000-0000-0000-0000-000000000000")?,
@@ -814,6 +816,7 @@ async fn test_client_proxy_configuration() -> eyre::Result<()> {
 
 	// Build config directly
 	let config = tuic_client::config::Config {
+		tokio_runtime: Default::default(),
 		relay:     tuic_client::config::Relay {
 			server: ("127.0.0.1".to_string(), 8445),
 			uuid: Uuid::parse_str("00000000-0000-0000-0000-000000000000")?,

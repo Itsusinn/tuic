@@ -1,0 +1,5 @@
+    Checking tuic-core v1.7.2 (/home/ihsin/.openclaw/workspace/repos/Itsusinn/tuic/main/tuic-core)
+    Checking tuic-client v1.7.2 (/home/ihsin/.openclaw/workspace/repos/Itsusinn/tuic/main/tuic-client)
+    Checking tuic-server v1.7.2 (/home/ihsin/.openclaw/workspace/repos/Itsusinn/tuic/main/tuic-server)
+    Checking tuic-tests v1.7.2 (/home/ihsin/.openclaw/workspace/repos/Itsusinn/tuic/main/tuic-tests)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 3.21s
