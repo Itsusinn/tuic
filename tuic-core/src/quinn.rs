@@ -60,7 +60,7 @@ impl<Side> Connection<Side> {
 
 		let model = self.model.send_packet(assoc_id, addr, max_pkt_size);
 
-		for (header, frag) in model.into_fragments(pkt) {
+		for (header, frag) in model.into_fragments(pkt.as_ref()) {
 			let mut buf = BytesMut::with_capacity(header.len() + frag.len());
 			header.write(&mut buf);
 			buf.put_slice(frag);
@@ -74,7 +74,7 @@ impl<Side> Connection<Side> {
 	pub async fn packet_quic(&self, pkt: impl AsRef<[u8]>, addr: Address, assoc_id: u16) -> eyre::Result<()> {
 		let model = self.model.send_packet(assoc_id, addr, u16::MAX as usize);
 
-		for (header, frag) in model.into_fragments(pkt) {
+		for (header, frag) in model.into_fragments(pkt.as_ref()) {
 			let mut send = self.conn.open_uni().await?;
 			header.async_marshal(&mut send).await?;
 			send.write_all(frag).await?;
