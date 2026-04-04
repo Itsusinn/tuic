@@ -38,9 +38,7 @@ impl<B> Packet<side::Tx, B> {
 
 	/// Fragment the payload into multiple packets
 	pub fn into_fragments<'a>(self, payload: &'a [u8]) -> Fragments<'a>
-	where
-		
-	{
+where {
 		let Side::Tx(tx) = self.inner else { unreachable!() };
 		Fragments::new(tx.assoc_id, tx.pkt_id, tx.addr, tx.max_pkt_size, payload)
 	}
@@ -184,13 +182,9 @@ pub struct Fragments<'a> {
 	next_frag_id:    u8,
 	next_frag_start: usize,
 	payload:         &'a [u8],
-	
 }
 
-impl<'a> Fragments<'a>
-where
-	
-{
+impl<'a> Fragments<'a> {
 	fn new(assoc_id: u16, pkt_id: u16, addr: Address, max_pkt_size: usize, payload: &'a [u8]) -> Self {
 		let header_addr_ref = Header::Packet(PacketHeader::new(0, 0, 0, 0, 0, addr));
 		let header_addr_none_ref = Header::Packet(PacketHeader::new(0, 0, 0, 0, 0, Address::None));
@@ -222,10 +216,7 @@ where
 	}
 }
 
-impl<'a> Iterator for Fragments<'a>
-where
-	
-{
+impl<'a> Iterator for Fragments<'a> {
 	type Item = (Header, &'a [u8]);
 
 	fn next(&mut self) -> Option<Self::Item> {
@@ -259,9 +250,7 @@ where
 	}
 }
 
-impl ExactSizeIterator for Fragments<'_>
-where
-{
+impl ExactSizeIterator for Fragments<'_> {
 	fn len(&self) -> usize {
 		self.frag_total as usize
 	}

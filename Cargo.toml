@@ -16,6 +16,9 @@ quinn = { branch = "bbrv3", git = "https://github.com/Tipuch/quinn.git", default
 quinn-proto = { branch = "bbrv3", git = "https://github.com/Tipuch/quinn.git", default-features = false }
 quinn-congestions = { git = "https://github.com/proxy-rs/quinn-congestions.git", default-features = false}
 
+[workspace.lints.clippy]
+unwrap_used = "deny"
+
 [profile.release]
 opt-level = "z"
 debug = 1
