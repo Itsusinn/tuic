@@ -8,7 +8,7 @@ use std::{
 
 pub use ::quinn;
 use ::quinn::{Connection as QuinnConnection, ConnectionError, RecvStream, SendDatagramError, SendStream, VarInt};
-use bytes::{BufMut, Bytes, BytesMut};
+use bytes::{BufMut, Bytes};
 use thiserror::Error;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, ReadBuf};
 use tracing::warn;
@@ -59,12 +59,14 @@ impl<Side> Connection<Side> {
 		};
 
 		let model = self.model.send_packet(assoc_id, addr, max_pkt_size);
+		let mut shared_buf = bytes::BytesMut::with_capacity(65536);
 
 		for (header, frag) in model.into_fragments(pkt.as_ref()) {
-			let mut buf = BytesMut::with_capacity(header.len() + frag.len());
-			header.write(&mut buf);
-			buf.put_slice(frag);
-			self.conn.send_datagram(Bytes::from(buf))?;
+			shared_buf.reserve(header.len() + frag.len());
+			header.write(&mut shared_buf);
+			shared_buf.put_slice(frag);
+			let frame = shared_buf.split().freeze();
+			self.conn.send_datagram(frame)?;
 		}
 
 		Ok(())
