@@ -18,6 +18,15 @@ quinn-congestions = { git = "https://github.com/proxy-rs/quinn-congestions.git",
 
 [workspace.lints.clippy]
 unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+unimplemented = "deny"
+todo = "deny"
+unreachable = "warn"
+cast_lossless = "warn"
+ptr_as_ptr = "warn"
+missing_safety_doc = "warn"
+cloned_instead_of_copied = "warn"
 
 [profile.release]
 opt-level = "z"
