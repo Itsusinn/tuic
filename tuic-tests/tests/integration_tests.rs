@@ -687,7 +687,7 @@ async fn test_ipv6_server_client_integration() -> eyre::Result<()> {
 		info!("[IPv6 TCP Test] TCP test completed\n");
 	};
 
-	let _ = timeout(Duration::from_secs(30), tcp_test)
+	timeout(Duration::from_secs(30), tcp_test)
 		.await
 		.expect("[IPv6 TCP Test] TCP test timed out");
 
@@ -718,7 +718,7 @@ async fn test_ipv6_server_client_integration() -> eyre::Result<()> {
 		info!("[IPv6 UDP Test] UDP test completed\n");
 	};
 
-	let _ = timeout(Duration::from_secs(30), udp_test)
+	timeout(Duration::from_secs(30), udp_test)
 		.await
 		.expect("[IPv6 UDP Test] UDP test timed out");
 
