@@ -564,7 +564,7 @@ mod model_tests {
 		let pkt = conn.send_packet(1, Address::DomainAddress("test.com".to_string(), 53), 1200);
 
 		let payload = vec![0u8; 100];
-		let fragments: Vec<_> = pkt.into_fragments(payload).collect();
+		let fragments: Vec<_> = pkt.into_fragments(&payload).collect();
 
 		assert_eq!(fragments.len(), 1);
 		let (header, data) = &fragments[0];
@@ -579,7 +579,7 @@ mod model_tests {
 		let pkt = conn.send_packet(1, Address::DomainAddress("test.com".to_string(), 53), 50);
 
 		let payload = vec![0xAB; 200];
-		let fragments: Vec<_> = pkt.into_fragments(payload).collect();
+		let fragments: Vec<_> = pkt.into_fragments(&payload).collect();
 
 		assert!(fragments.len() > 1);
 
@@ -804,7 +804,7 @@ mod model_tests {
 		let pkt = conn.send_packet(1, Address::DomainAddress("test.com".to_string(), 53), 50);
 
 		let payload = vec![0xAB; 200];
-		let fragments = pkt.into_fragments(payload);
+		let fragments = pkt.into_fragments(&payload);
 		let expected_len = fragments.len();
 		let actual: Vec<_> = fragments.collect();
 		assert_eq!(actual.len(), expected_len);

@@ -1,7 +1,5 @@
 use std::{
 	fmt::{Debug, Formatter, Result as FmtResult},
-	marker::PhantomData,
-	slice,
 	sync::Arc,
 };
 
@@ -39,10 +37,8 @@ impl<B> Packet<side::Tx, B> {
 	}
 
 	/// Fragment the payload into multiple packets
-	pub fn into_fragments<'a, P>(self, payload: P) -> Fragments<'a, P>
-	where
-		P: AsRef<[u8]> + 'a,
-	{
+	pub fn into_fragments<'a>(self, payload: &'a [u8]) -> Fragments<'a>
+where {
 		let Side::Tx(tx) = self.inner else { unreachable!() };
 		Fragments::new(tx.assoc_id, tx.pkt_id, tx.addr, tx.max_pkt_size, payload)
 	}
@@ -177,7 +173,7 @@ impl<B> Debug for Packet<side::Rx, B> {
 
 /// Iterator over fragments of a packet
 #[derive(Debug)]
-pub struct Fragments<'a, P> {
+pub struct Fragments<'a> {
 	assoc_id:        u16,
 	pkt_id:          u16,
 	addr:            Address,
@@ -185,15 +181,11 @@ pub struct Fragments<'a, P> {
 	frag_total:      u8,
 	next_frag_id:    u8,
 	next_frag_start: usize,
-	payload:         P,
-	_marker:         PhantomData<&'a P>,
+	payload:         &'a [u8],
 }
 
-impl<'a, P> Fragments<'a, P>
-where
-	P: AsRef<[u8]> + 'a,
-{
-	fn new(assoc_id: u16, pkt_id: u16, addr: Address, max_pkt_size: usize, payload: P) -> Self {
+impl<'a> Fragments<'a> {
+	fn new(assoc_id: u16, pkt_id: u16, addr: Address, max_pkt_size: usize, payload: &'a [u8]) -> Self {
 		let header_addr_ref = Header::Packet(PacketHeader::new(0, 0, 0, 0, 0, addr));
 		let header_addr_none_ref = Header::Packet(PacketHeader::new(0, 0, 0, 0, 0, Address::None));
 
@@ -220,15 +212,11 @@ where
 			next_frag_id: 0,
 			next_frag_start: 0,
 			payload,
-			_marker: PhantomData,
 		}
 	}
 }
 
-impl<'a, P> Iterator for Fragments<'a, P>
-where
-	P: AsRef<[u8]> + 'a,
-{
+impl<'a> Iterator for Fragments<'a> {
 	type Item = (Header, &'a [u8]);
 
 	fn next(&mut self) -> Option<Self::Item> {
@@ -250,8 +238,7 @@ where
 				addr,
 			));
 
-			let payload_ptr = &(self.payload.as_ref()[self.next_frag_start]) as *const u8;
-			let payload = unsafe { slice::from_raw_parts(payload_ptr, next_frag_end - self.next_frag_start) };
+			let payload = &self.payload[self.next_frag_start..next_frag_end];
 
 			self.next_frag_id += 1;
 			self.next_frag_start = next_frag_end;
@@ -263,10 +250,7 @@ where
 	}
 }
 
-impl<P> ExactSizeIterator for Fragments<'_, P>
-where
-	P: AsRef<[u8]>,
-{
+impl ExactSizeIterator for Fragments<'_> {
 	fn len(&self) -> usize {
 		self.frag_total as usize
 	}

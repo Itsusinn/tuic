@@ -7,8 +7,8 @@ where
 	A: AsyncRead + AsyncWrite + Unpin + ?Sized,
 	B: AsyncRead + AsyncWrite + Unpin + ?Sized,
 {
-	let mut a2b = unsafe { Box::new_uninit_slice(BUFFER_SIZE).assume_init() };
-	let mut b2a = unsafe { Box::new_uninit_slice(BUFFER_SIZE).assume_init() };
+	let mut a2b = bytes::BytesMut::zeroed(BUFFER_SIZE);
+	let mut b2a = bytes::BytesMut::zeroed(BUFFER_SIZE);
 
 	let mut a2b_num = 0;
 	let mut b2a_num = 0;
