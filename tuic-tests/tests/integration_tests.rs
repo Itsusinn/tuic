@@ -614,6 +614,7 @@ async fn test_ipv6_server_client_integration() -> eyre::Result<()> {
 			disable_sni:          true,
 			sni:                  None,
 			timeout:              Duration::from_secs(8),
+			startup_mode:         tuic_client::config::StartupMode::Lazy,
 			heartbeat:            Duration::from_secs(3),
 			disable_native_certs: true,
 			send_window:          8 * 1024 * 1024 * 2,
