@@ -1,5 +1,3 @@
-#![feature(ip)]
-
 use std::{process, str::FromStr};
 
 use chrono::{Offset, TimeZone};
