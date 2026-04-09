@@ -3,10 +3,17 @@
 
 use std::{
 	collections::HashMap,
-	sync::{Arc, atomic::AtomicU16},
+	sync::{
+		Arc,
+		atomic::{AtomicBool, AtomicU16, Ordering},
+	},
 };
 
-use tokio::sync::RwLock as AsyncRwLock;
+use tokio::{
+	sync::{Mutex as AsyncMutex, RwLock as AsyncRwLock},
+	time::{Duration, sleep},
+};
+use tracing::{error, warn};
 
 pub mod config;
 pub mod connection;
@@ -32,19 +39,68 @@ pub struct AppContext {
 	/// Next association ID counter for UDP forwarding (high bit set to avoid
 	/// collisions with SOCKS5 IDs)
 	pub next_fwd_assoc_id:   AtomicU16,
+	/// Startup connection behavior.
+	pub startup_mode:        config::StartupMode,
+	/// Whether the first relay connection has been established at least once.
+	pub first_connected:     AtomicBool,
+	/// Serializes first-connection logic under non-eager modes.
+	pub first_connect_lock:  AsyncMutex<()>,
 }
 
 impl AppContext {
 	/// Get or re-establish the TUIC relay connection.
 	pub async fn get_conn(&self) -> Result<connection::Connection, error::Error> {
-		self.conn_mgr
-			.get_conn(self.socks5_udp_sessions.clone(), self.fwd_udp_sessions.clone())
-			.await
+		if self.first_connected.load(Ordering::Relaxed) {
+			return self
+				.conn_mgr
+				.get_conn(self.socks5_udp_sessions.clone(), self.fwd_udp_sessions.clone())
+				.await;
+		}
+
+		let _guard = self.first_connect_lock.lock().await;
+		if self.first_connected.load(Ordering::Relaxed) {
+			return self
+				.conn_mgr
+				.get_conn(self.socks5_udp_sessions.clone(), self.fwd_udp_sessions.clone())
+				.await;
+		}
+
+		match self.startup_mode {
+			config::StartupMode::Eager | config::StartupMode::Lazy => {
+				let conn = self
+					.conn_mgr
+					.get_conn(self.socks5_udp_sessions.clone(), self.fwd_udp_sessions.clone())
+					.await
+					.unwrap_or_else(|err| {
+						error!("[relay] first on-demand connection failed: {err}");
+						std::process::exit(1);
+					});
+				self.first_connected.store(true, Ordering::Relaxed);
+				Ok(conn)
+			}
+			config::StartupMode::Loop => loop {
+				match self
+					.conn_mgr
+					.get_conn(self.socks5_udp_sessions.clone(), self.fwd_udp_sessions.clone())
+					.await
+				{
+					Ok(conn) => {
+						self.first_connected.store(true, Ordering::Relaxed);
+						return Ok(conn);
+					}
+					Err(err) => {
+						warn!("[relay] first on-demand connection failed in loop mode, retrying: {err}");
+						sleep(Duration::from_secs(1)).await;
+					}
+				}
+			},
+		}
 	}
 }
 
 /// Run the TUIC client with the given configuration.
 pub async fn run(cfg: Config) -> eyre::Result<()> {
+	let startup_mode = cfg.relay.startup_mode;
 	let conn_mgr = Arc::new(connection::ConnectionManager::build(cfg.relay).await?);
 	let socks5 = Arc::new(socks5::Server::new(
 		cfg.local.server,
@@ -59,10 +115,16 @@ pub async fn run(cfg: Config) -> eyre::Result<()> {
 		socks5_udp_sessions: Arc::new(AsyncRwLock::new(HashMap::new())),
 		fwd_udp_sessions: Arc::new(AsyncRwLock::new(HashMap::new())),
 		next_fwd_assoc_id: AtomicU16::new(0),
+		startup_mode,
+		first_connected: AtomicBool::new(false),
+		first_connect_lock: AsyncMutex::new(()),
 	});
 
-	// Establish the initial relay connection eagerly
-	ctx.get_conn().await?;
+	// Eager mode keeps the original behavior: connect at startup and exit on
+	// failure.
+	if matches!(startup_mode, config::StartupMode::Eager) {
+		ctx.get_conn().await?;
+	}
 
 	forward::start(ctx.clone(), cfg.local.tcp_forward, cfg.local.udp_forward).await;
 	socks5::Server::start(ctx.clone()).await;

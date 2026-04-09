@@ -82,6 +82,12 @@ disable_sni = false
 # Connection timeout
 timeout = "8s"
 
+# Startup behavior:
+# "eager" -> connect on startup, exit on failure
+# "lazy"  -> (default) connect on first incoming SOCKS5/forward request, exit on failure
+# "loop"  -> connect on first incoming request, retry forever until success
+startup_mode = "lazy"
+
 # Heartbeat interval
 heartbeat = "3s"
 

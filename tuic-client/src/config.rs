@@ -120,6 +120,9 @@ pub struct Relay {
 	#[serde(with = "humantime_serde")]
 	pub timeout: Duration,
 
+	#[educe(Default(expression = StartupMode::Lazy))]
+	pub startup_mode: StartupMode,
+
 	#[educe(Default(expression = Duration::from_secs(3)))]
 	#[serde(with = "humantime_serde")]
 	pub heartbeat: Duration,
@@ -158,6 +161,15 @@ pub struct Relay {
 
 	#[educe(Default = None)]
 	pub proxy: Option<ProxyConfig>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, serde::Serialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum StartupMode {
+	Eager,
+	#[default]
+	Lazy,
+	Loop,
 }
 
 #[derive(Debug, Deserialize, serde::Serialize, Educe, Clone, PartialEq, Eq)]
@@ -565,6 +577,7 @@ mod tests {
 		assert!(!config.relay.zero_rtt_handshake);
 		assert!(!config.relay.disable_sni);
 		assert_eq!(config.relay.timeout, Duration::from_secs(8));
+		assert_eq!(config.relay.startup_mode, StartupMode::Lazy);
 		assert_eq!(config.relay.heartbeat, Duration::from_secs(3));
 		assert!(!config.relay.disable_native_certs);
 		assert_eq!(config.relay.send_window, 16 * 1024 * 1024);
@@ -577,6 +590,41 @@ mod tests {
 		assert_eq!(config.relay.gc_lifetime, Duration::from_secs(15));
 		assert!(!config.relay.skip_cert_verify);
 		assert_eq!(config.local.max_packet_size, 1500);
+	}
+
+	#[test]
+	fn test_startup_mode_string_values() {
+		let json5_config = r#"
+		{
+			relay: {
+				server: "example.com:443",
+				uuid: "00000000-0000-0000-0000-000000000000",
+				password: "test",
+				startup_mode: "loop",
+			},
+			local: { server: "127.0.0.1:1080" },
+		}
+		"#;
+
+		let config = test_parse_config(json5_config, ".json5").unwrap();
+		assert_eq!(config.relay.startup_mode, StartupMode::Loop);
+	}
+
+	#[test]
+	fn test_startup_mode_eager() {
+		let toml_config = r#"
+		[relay]
+		server = "example.com:443"
+		uuid = "00000000-0000-0000-0000-000000000000"
+		password = "test"
+		startup_mode = "eager"
+
+		[local]
+		server = "127.0.0.1:1080"
+		"#;
+
+		let config = test_parse_config(toml_config, ".toml").unwrap();
+		assert_eq!(config.relay.startup_mode, StartupMode::Eager);
 	}
 	#[test]
 	fn test_tcp_udp_forward() {
