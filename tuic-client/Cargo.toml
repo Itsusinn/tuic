@@ -18,6 +18,7 @@ aws-lc-rs = ["tuic-core/aws-lc-rs", "dep:aws-lc-rs", "rustls/aws-lc-rs", "quinn/
 jemallocator = ["tikv-jemallocator"]
 
 [dependencies]
+num_cpus = "1"
 bytes = { version = "1", default-features = false, features = ["std"] }
 
 clap = { version = "4", features = ["derive"] }
