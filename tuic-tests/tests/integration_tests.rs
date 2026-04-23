@@ -284,7 +284,7 @@ async fn test_server_client_integration() -> eyre::Result<()> {
 	// Create a client configuration that connects to the test server
 	let client_config = tuic_client::Config {
 		tokio_runtime: Default::default(),
-		relay:     tuic_client::config::Relay {
+		relay:         tuic_client::config::Relay {
 			server: ("127.0.0.1".to_string(), 8443),
 			uuid: Uuid::parse_str("00000000-0000-0000-0000-000000000000")?,
 			password: std::sync::Arc::from(b"test_password".to_vec().into_boxed_slice()),
@@ -302,7 +302,7 @@ async fn test_server_client_integration() -> eyre::Result<()> {
 			skip_cert_verify: true,
 			..Default::default()
 		},
-		local:     tuic_client::config::Local {
+		local:         tuic_client::config::Local {
 			server:          "127.0.0.1:1080".parse()?,
 			username:        None,
 			password:        None,
@@ -311,7 +311,7 @@ async fn test_server_client_integration() -> eyre::Result<()> {
 			tcp_forward:     Vec::new(),
 			udp_forward:     Vec::new(),
 		},
-		log_level: "debug".to_string(),
+		log_level:     "debug".to_string(),
 	};
 
 	// Spawn client in background with timeout
@@ -602,7 +602,7 @@ async fn test_ipv6_server_client_integration() -> eyre::Result<()> {
 	// Create client configuration connecting to IPv6 server
 	let client_config = tuic_client::Config {
 		tokio_runtime: Default::default(),
-		relay:     tuic_client::config::Relay {
+		relay:         tuic_client::config::Relay {
 			server:               ("[::1]".to_string(), 8444),
 			uuid:                 Uuid::parse_str("00000000-0000-0000-0000-000000000000")?,
 			password:             std::sync::Arc::from(b"test_password".to_vec().into_boxed_slice()),
@@ -630,7 +630,7 @@ async fn test_ipv6_server_client_integration() -> eyre::Result<()> {
 			skip_cert_verify:     true,
 			proxy:                None,
 		},
-		local:     tuic_client::config::Local {
+		local:         tuic_client::config::Local {
 			server:          "[::1]:1081".parse()?,
 			username:        None,
 			password:        None,
@@ -639,7 +639,7 @@ async fn test_ipv6_server_client_integration() -> eyre::Result<()> {
 			tcp_forward:     Vec::new(),
 			udp_forward:     Vec::new(),
 		},
-		log_level: "debug".to_string(),
+		log_level:     "debug".to_string(),
 	};
 
 	// Spawn client with IPv6 SOCKS5 server
@@ -818,7 +818,7 @@ async fn test_client_proxy_configuration() -> eyre::Result<()> {
 	// Build config directly
 	let config = tuic_client::config::Config {
 		tokio_runtime: Default::default(),
-		relay:     tuic_client::config::Relay {
+		relay:         tuic_client::config::Relay {
 			server: ("127.0.0.1".to_string(), 8445),
 			uuid: Uuid::parse_str("00000000-0000-0000-0000-000000000000")?,
 			password: std::sync::Arc::from("test_password".as_bytes()),
@@ -832,11 +832,11 @@ async fn test_client_proxy_configuration() -> eyre::Result<()> {
 			alpn: vec![b"h3".to_vec()],
 			..Default::default()
 		},
-		local:     tuic_client::config::Local {
+		local:         tuic_client::config::Local {
 			server: "127.0.0.1:1082".parse()?,
 			..Default::default()
 		},
-		log_level: "debug".to_string(),
+		log_level:     "debug".to_string(),
 	};
 	let local_socks = "127.0.0.1:1082";
 	info!("[Proxy Config Test] ✓ Config built successfully");

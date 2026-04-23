@@ -23,14 +23,13 @@ fn main() -> eyre::Result<()> {
 	}
 	let cli = Cli::parse();
 	let env_state = EnvState::from_system();
-	
-	// Create a temporary single-threaded runtime just to parse config asynchronously
+
+	// Create a temporary single-threaded runtime just to parse config
+	// asynchronously
 	let cfg = tokio::runtime::Builder::new_current_thread()
 		.enable_all()
 		.build()?
-		.block_on(async {
-			parse_config(cli, env_state).await
-		});
+		.block_on(async { parse_config(cli, env_state).await });
 
 	let cfg = match cfg {
 		Ok(cfg) => cfg,

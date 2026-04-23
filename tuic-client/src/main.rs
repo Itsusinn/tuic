@@ -58,7 +58,5 @@ fn main() -> eyre::Result<()> {
 
 	let rt = builder.enable_all().build()?;
 
-	rt.block_on(async move {
-		tuic_client::run(cfg).await
-	})
+	rt.block_on(async move { tuic_client::run(cfg).await })
 }
