@@ -10,8 +10,27 @@ use tuic_core::quinn::Task;
 use super::Connection;
 use crate::{error::Error, utils::UdpRelayMode};
 
+enum UniStreamSource {
+	Normal(RecvStream),
+	Prefetched(RecvStream, Bytes),
+}
+
+enum BiStreamSource {
+	Normal(SendStream, RecvStream),
+	Prefetched(SendStream, RecvStream, Bytes),
+}
+
 impl Connection {
 	pub async fn handle_uni_stream(self, recv: RecvStream, reg: Register) {
+		self.handle_uni_stream_inner(UniStreamSource::Normal(recv), reg).await;
+	}
+
+	pub async fn handle_uni_stream_prefixed(self, recv: RecvStream, prefix: Bytes, reg: Register) {
+		self.handle_uni_stream_inner(UniStreamSource::Prefetched(recv, prefix), reg)
+			.await;
+	}
+
+	async fn handle_uni_stream_inner(self, source: UniStreamSource, reg: Register) {
 		debug!(
 			"[{id:#010x}] [{addr}] [{user}] incoming unidirectional stream",
 			id = self.id(),
@@ -19,27 +38,22 @@ impl Connection {
 			user = self.auth,
 		);
 
-		let current_max = self.max_concurrent_uni_streams.load(Ordering::Relaxed);
-
-		if self.remote_uni_stream_cnt.count() >= (current_max as f32 * 0.7) as usize
-			&& let Ok(_) = self.max_concurrent_uni_streams.compare_exchange(
-				current_max,
-				current_max * 2,
-				Ordering::AcqRel,
-				Ordering::Acquire,
-			) {
-			debug!(
-				"[{id:#010x}] reached max concurrent uni_streams, setting bigger limitation={num}",
-				id = self.id(),
-				num = current_max * 2
-			);
-			self.inner.set_max_concurrent_uni_streams(VarInt::from(current_max * 2));
-		}
+		self.maybe_expand_uni_stream_limit();
 
 		let pre_process = async {
-			let task = time::timeout(self.ctx.cfg.task_negotiation_timeout, self.model.accept_uni_stream(recv))
+			let task = match source {
+				UniStreamSource::Normal(recv) => {
+					time::timeout(self.ctx.cfg.task_negotiation_timeout, self.model.accept_uni_stream(recv))
+						.await
+						.map_err(|_| Error::TaskNegotiationTimeout)??
+				}
+				UniStreamSource::Prefetched(recv, prefix) => time::timeout(
+					self.ctx.cfg.task_negotiation_timeout,
+					self.model.accept_uni_stream_prefixed(recv, prefix),
+				)
 				.await
-				.map_err(|_| Error::TaskNegotiationTimeout)??;
+				.map_err(|_| Error::TaskNegotiationTimeout)??,
+			};
 
 			if let Task::Authenticate(auth) = &task {
 				self.authenticate(auth).await?;
@@ -81,6 +95,15 @@ impl Connection {
 	}
 
 	pub async fn handle_bi_stream(self, (send, recv): (SendStream, RecvStream), reg: Register) {
+		self.handle_bi_stream_inner(BiStreamSource::Normal(send, recv), reg).await;
+	}
+
+	pub async fn handle_bi_stream_prefixed(self, (send, recv): (SendStream, RecvStream), prefix: Bytes, reg: Register) {
+		self.handle_bi_stream_inner(BiStreamSource::Prefetched(send, recv, prefix), reg)
+			.await;
+	}
+
+	async fn handle_bi_stream_inner(self, source: BiStreamSource, reg: Register) {
 		debug!(
 			"[{id:#010x}] [{addr}] [{user}] incoming bidirectional stream",
 			id = self.id(),
@@ -88,27 +111,22 @@ impl Connection {
 			user = self.auth,
 		);
 
-		let current_max = self.max_concurrent_bi_streams.load(Ordering::Relaxed);
-
-		if self.remote_bi_stream_cnt.count() >= (current_max as f32 * 0.7) as usize
-			&& let Ok(_) = self.max_concurrent_bi_streams.compare_exchange(
-				current_max,
-				current_max * 2,
-				Ordering::AcqRel,
-				Ordering::Acquire,
-			) {
-			debug!(
-				"[{id:#010x}] reached max concurrent bi_streams, setting bigger limitation={num}",
-				id = self.id(),
-				num = current_max * 2
-			);
-			self.inner.set_max_concurrent_bi_streams(VarInt::from(current_max * 2));
-		}
+		self.maybe_expand_bi_stream_limit();
 
 		let pre_process = async {
-			let task = time::timeout(self.ctx.cfg.task_negotiation_timeout, self.model.accept_bi_stream(send, recv))
+			let task = match source {
+				BiStreamSource::Normal(send, recv) => {
+					time::timeout(self.ctx.cfg.task_negotiation_timeout, self.model.accept_bi_stream(send, recv))
+						.await
+						.map_err(|_| Error::TaskNegotiationTimeout)??
+				}
+				BiStreamSource::Prefetched(send, recv, prefix) => time::timeout(
+					self.ctx.cfg.task_negotiation_timeout,
+					self.model.accept_bi_stream_prefixed(send, recv, prefix),
+				)
 				.await
-				.map_err(|_| Error::TaskNegotiationTimeout)??;
+				.map_err(|_| Error::TaskNegotiationTimeout)??,
+			};
 
 			// Fast path: if already authenticated, skip the select
 			if !self.auth.is_authenticated() {
@@ -135,6 +153,44 @@ impl Connection {
 			}
 		}
 		drop(reg);
+	}
+
+	fn maybe_expand_uni_stream_limit(&self) {
+		let current_max = self.max_concurrent_uni_streams.load(Ordering::Relaxed);
+
+		if self.remote_uni_stream_cnt.count() >= (current_max as f32 * 0.7) as usize
+			&& let Ok(_) = self.max_concurrent_uni_streams.compare_exchange(
+				current_max,
+				current_max * 2,
+				Ordering::AcqRel,
+				Ordering::Acquire,
+			) {
+			debug!(
+				"[{id:#010x}] reached max concurrent uni_streams, setting bigger limitation={num}",
+				id = self.id(),
+				num = current_max * 2
+			);
+			self.inner.set_max_concurrent_uni_streams(VarInt::from(current_max * 2));
+		}
+	}
+
+	fn maybe_expand_bi_stream_limit(&self) {
+		let current_max = self.max_concurrent_bi_streams.load(Ordering::Relaxed);
+
+		if self.remote_bi_stream_cnt.count() >= (current_max as f32 * 0.7) as usize
+			&& let Ok(_) = self.max_concurrent_bi_streams.compare_exchange(
+				current_max,
+				current_max * 2,
+				Ordering::AcqRel,
+				Ordering::Acquire,
+			) {
+			debug!(
+				"[{id:#010x}] reached max concurrent bi_streams, setting bigger limitation={num}",
+				id = self.id(),
+				num = current_max * 2
+			);
+			self.inner.set_max_concurrent_bi_streams(VarInt::from(current_max * 2));
+		}
 	}
 
 	pub async fn handle_datagram(self, dg: Bytes) {

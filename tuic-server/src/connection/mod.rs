@@ -5,6 +5,8 @@ use std::{
 };
 
 use arc_swap::ArcSwap;
+use bytes::Bytes;
+use peekable::future::AsyncPeekExt;
 use quinn::{Connecting, Connection as QuinnConnection, VarInt};
 use register_count::Counter;
 use tokio::{sync::RwLock as AsyncRwLock, time};
@@ -12,7 +14,7 @@ use tracing::{debug, info, warn};
 use tuic_core::quinn::{Authenticate, Connection as Model, side};
 
 use self::{authenticated::Authenticated, udp_session::UdpSession};
-use crate::{AppContext, error::Error, restful, utils::UdpRelayMode};
+use crate::{AppContext, camouflage, error::Error, h3_quinn_compat, restful, utils::UdpRelayMode};
 
 mod authenticated;
 mod handle_stream;
@@ -21,6 +23,38 @@ mod udp_session;
 
 pub const ERROR_CODE: VarInt = VarInt::from_u32(0);
 pub const INIT_CONCURRENT_STREAMS: u32 = 512;
+
+enum H3Dispatch {
+	Tuic(Option<PrefetchedFirstEventTuic>),
+	Camouflage {
+		prefetched_uni: Option<h3_quinn_compat::PeekableRecvStream>,
+		prefetched_bi:  Option<h3_quinn_compat::PrefetchedBiRecv>,
+	},
+}
+
+enum FirstEvent {
+	Uni(quinn::RecvStream),
+	Bi(quinn::SendStream, quinn::RecvStream),
+	Datagram(Bytes),
+}
+
+enum ClassifiedRecvStream {
+	Tuic { recv: quinn::RecvStream, prefix: Bytes },
+	Camouflage(h3_quinn_compat::PeekableRecvStream),
+}
+
+enum PrefetchedFirstEventTuic {
+	Uni {
+		recv:   quinn::RecvStream,
+		prefix: Bytes,
+	},
+	Bi {
+		send:   quinn::SendStream,
+		recv:   quinn::RecvStream,
+		prefix: Bytes,
+	},
+	Datagram(Bytes),
+}
 
 #[derive(Clone)]
 pub struct Connection {
@@ -55,6 +89,60 @@ impl Connection {
 
 		match init.await {
 			Ok(conn) => {
+				if ctx.cfg.camouflage.as_ref().is_some_and(|cfg| cfg.enabled) {
+					match conn.classify_h3_dispatch().await {
+						Ok(H3Dispatch::Camouflage {
+							prefetched_uni,
+							prefetched_bi,
+						}) => {
+							if let Err(err) =
+								camouflage::handle(ctx.clone(), conn.inner.clone(), prefetched_uni, prefetched_bi).await
+							{
+								warn!("[{id:#010x}] [{addr}] [camouflage] {err}", id = conn.id(), addr = addr);
+							}
+							return;
+						}
+						Ok(H3Dispatch::Tuic(first_event)) => {
+							info!(
+								"[{id:#010x}] [{addr}] [{user}] connection established",
+								id = conn.id(),
+								user = conn.auth,
+							);
+							tokio::spawn(conn.clone().timeout_authenticate(ctx.cfg.auth_timeout));
+							tokio::spawn(conn.clone().collect_garbage());
+							if let Some(first_event) = first_event {
+								match first_event {
+									PrefetchedFirstEventTuic::Uni { recv, prefix } => {
+										tokio::spawn(conn.clone().handle_uni_stream_prefixed(
+											recv,
+											prefix,
+											conn.remote_uni_stream_cnt.reg(),
+										));
+									}
+									PrefetchedFirstEventTuic::Bi { send, recv, prefix } => {
+										tokio::spawn(conn.clone().handle_bi_stream_prefixed(
+											(send, recv),
+											prefix,
+											conn.remote_bi_stream_cnt.reg(),
+										));
+									}
+									PrefetchedFirstEventTuic::Datagram(dg) => {
+										tokio::spawn(conn.clone().handle_datagram(dg));
+									}
+								}
+							}
+
+							conn.run_tuic_event_loop().await;
+							return;
+						}
+						Err(err) => {
+							warn!("[{id:#010x}] [{addr}] [classifier] {err}", id = conn.id(), addr = addr);
+							conn.close();
+							return;
+						}
+					}
+				}
+
 				info!(
 					"[{id:#010x}] [{addr}] [{user}] connection established",
 					id = conn.id(),
@@ -62,37 +150,7 @@ impl Connection {
 				);
 				tokio::spawn(conn.clone().timeout_authenticate(ctx.cfg.auth_timeout));
 				tokio::spawn(conn.clone().collect_garbage());
-
-				loop {
-					if conn.is_closed() {
-						break;
-					}
-
-					let handle_incoming = async {
-						tokio::select! {
-							res = conn.inner.accept_uni() =>
-								tokio::spawn(conn.clone().handle_uni_stream(res?, conn.remote_uni_stream_cnt.reg())),
-							res = conn.inner.accept_bi() =>
-								tokio::spawn(conn.clone().handle_bi_stream(res?, conn.remote_bi_stream_cnt.reg())),
-							res = conn.inner.read_datagram() =>
-								tokio::spawn(conn.clone().handle_datagram(res?)),
-						};
-
-						Ok::<_, Error>(())
-					};
-
-					match handle_incoming.await {
-						Ok(()) => {}
-						Err(err) if err.is_trivial() => {
-							debug!("[{id:#010x}] [{addr}] [{user}] {err}", id = conn.id(), user = conn.auth,);
-						}
-						Err(err) => warn!(
-							"[{id:#010x}] [{addr}] [{user}] connection error: {err}",
-							id = conn.id(),
-							user = conn.auth,
-						),
-					}
-				}
+				conn.run_tuic_event_loop().await;
 			}
 			Err(err) if err.is_trivial() => {
 				debug!("[{id:#010x}] [{addr}] [unauthenticated] {err}", id = u32::MAX,);
@@ -176,6 +234,134 @@ impl Connection {
 
 	fn id(&self) -> u32 {
 		self.inner.stable_id() as u32
+	}
+
+	async fn classify_h3_dispatch(&self) -> Result<H3Dispatch, Error> {
+		let classify_timeout = self.ctx.cfg.task_negotiation_timeout;
+		let first_event = match time::timeout(classify_timeout, async {
+			tokio::select! {
+				res = self.inner.accept_uni() => {
+					let recv = res?;
+					Ok::<_, Error>(FirstEvent::Uni(recv))
+				}
+				res = self.inner.accept_bi() => {
+					let (send, recv) = res?;
+					Ok::<_, Error>(FirstEvent::Bi(send, recv))
+				}
+				res = self.inner.read_datagram() => {
+					let dg = res?;
+					Ok::<_, Error>(FirstEvent::Datagram(dg))
+				}
+			}
+		})
+		.await
+		{
+			Ok(Ok(event)) => event,
+			Ok(Err(err)) => return Err(err),
+			Err(_) => {
+				return Ok(H3Dispatch::Camouflage {
+					prefetched_uni: None,
+					prefetched_bi:  None,
+				});
+			}
+		};
+
+		match first_event {
+			FirstEvent::Uni(recv) => match self.classify_recv_stream(recv, classify_timeout).await? {
+				ClassifiedRecvStream::Tuic { recv, prefix } => {
+					Ok(H3Dispatch::Tuic(Some(PrefetchedFirstEventTuic::Uni { recv, prefix })))
+				}
+				ClassifiedRecvStream::Camouflage(recv) => Ok(H3Dispatch::Camouflage {
+					prefetched_uni: Some(recv),
+					prefetched_bi:  None,
+				}),
+			},
+			FirstEvent::Bi(send, recv) => match self.classify_recv_stream(recv, classify_timeout).await? {
+				ClassifiedRecvStream::Tuic { recv, prefix } => {
+					Ok(H3Dispatch::Tuic(Some(PrefetchedFirstEventTuic::Bi { send, recv, prefix })))
+				}
+				ClassifiedRecvStream::Camouflage(recv) => Ok(H3Dispatch::Camouflage {
+					prefetched_uni: None,
+					prefetched_bi:  Some(h3_quinn_compat::PrefetchedBiRecv { send, recv }),
+				}),
+			},
+			FirstEvent::Datagram(dg) => {
+				if self.is_tuic_datagram(&dg) {
+					Ok(H3Dispatch::Tuic(Some(PrefetchedFirstEventTuic::Datagram(dg))))
+				} else {
+					Ok(H3Dispatch::Camouflage {
+						prefetched_uni: None,
+						prefetched_bi:  None,
+					})
+				}
+			}
+		}
+	}
+
+	async fn classify_recv_stream(&self, recv: quinn::RecvStream, timeout: Duration) -> Result<ClassifiedRecvStream, Error> {
+		let mut recv = recv.peekable();
+		let mut prefix = [0u8; 2];
+		let read = time::timeout(timeout, recv.peek_exact(&mut prefix))
+			.await
+			.map_err(|_| Error::TaskNegotiationTimeout)?;
+		if let Err(err) = read {
+			return Err(Error::Other(eyre::eyre!("failed peeking classifier prefix: {err:?}")));
+		}
+
+		if self.is_tuic_prefix(prefix) {
+			let prefix = Bytes::from(recv.consume());
+			let (_, recv) = recv.into_components();
+			Ok(ClassifiedRecvStream::Tuic { recv, prefix })
+		} else {
+			Ok(ClassifiedRecvStream::Camouflage(recv))
+		}
+	}
+
+	fn is_tuic_prefix(&self, prefix: [u8; 2]) -> bool {
+		prefix[0] == tuic_core::VERSION && (prefix[1] <= tuic_core::Header::TYPE_CODE_HEARTBEAT)
+	}
+
+	fn is_tuic_datagram(&self, dg: &Bytes) -> bool {
+		dg.len() >= 2 && self.is_tuic_prefix([dg[0], dg[1]])
+	}
+
+	async fn run_tuic_event_loop(&self) {
+		loop {
+			if self.is_closed() {
+				break;
+			}
+
+			let handle_incoming = async {
+				tokio::select! {
+					res = self.inner.accept_uni() =>
+						tokio::spawn(self.clone().handle_uni_stream(res?, self.remote_uni_stream_cnt.reg())),
+					res = self.inner.accept_bi() =>
+						tokio::spawn(self.clone().handle_bi_stream(res?, self.remote_bi_stream_cnt.reg())),
+					res = self.inner.read_datagram() =>
+						tokio::spawn(self.clone().handle_datagram(res?)),
+				};
+
+				Ok::<_, Error>(())
+			};
+
+			match handle_incoming.await {
+				Ok(()) => {}
+				Err(err) if err.is_trivial() => {
+					debug!(
+						"[{id:#010x}] [{addr}] [{user}] {err}",
+						id = self.id(),
+						addr = self.inner.remote_address(),
+						user = self.auth,
+					);
+				}
+				Err(err) => warn!(
+					"[{id:#010x}] [{addr}] [{user}] connection error: {err}",
+					id = self.id(),
+					addr = self.inner.remote_address(),
+					user = self.auth,
+				),
+			}
+		}
 	}
 
 	fn is_closed(&self) -> bool {

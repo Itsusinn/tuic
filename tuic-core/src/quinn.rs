@@ -9,6 +9,7 @@ use std::{
 pub use ::quinn;
 use ::quinn::{Connection as QuinnConnection, ConnectionError, RecvStream, SendDatagramError, SendStream, VarInt};
 use bytes::{BufMut, Bytes, BytesMut};
+use futures_util::AsyncRead as FuturesAsyncRead;
 use thiserror::Error;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, ReadBuf};
 use tracing::warn;
@@ -275,6 +276,35 @@ impl Connection<side::Server> {
 		}
 	}
 
+	/// Try to parse a `quinn::RecvStream` as a TUIC command with prefetched
+	/// prefix bytes.
+	pub async fn accept_uni_stream_prefixed(&self, recv: RecvStream, prefix: Bytes) -> Result<Task, Error> {
+		let mut prefixed = PrefixedRecvStream::new(recv, prefix);
+
+		let header = match Header::async_unmarshal(&mut prefixed).await {
+			Ok(header) => header,
+			Err(err) => return Err(Error::UnmarshalUniStream(err, prefixed.into_inner())),
+		};
+		let recv = prefixed.into_inner();
+
+		match header {
+			Header::Authenticate(auth) => {
+				let model = self.model.recv_authenticate(auth);
+				Ok(Task::Authenticate(Authenticate::new(model, self.keying_material_exporter())))
+			}
+			Header::Connect(_) => Err(Error::BadCommandUniStream("connect", recv)),
+			Header::Packet(pkt) => {
+				let model = self.model.recv_packet_unrestricted(pkt);
+				Ok(Task::Packet(Packet::new(model, PacketSource::Quic(recv))))
+			}
+			Header::Dissociate(dissoc) => {
+				let model = self.model.recv_dissociate(dissoc);
+				Ok(Task::Dissociate(model.assoc_id()))
+			}
+			Header::Heartbeat(_) => Err(Error::BadCommandUniStream("heartbeat", recv)),
+		}
+	}
+
 	/// Try to parse a pair of `quinn::SendStream` and `quinn::RecvStream` as a
 	/// TUIC command.
 	///
@@ -285,6 +315,28 @@ impl Connection<side::Server> {
 			Ok(header) => header,
 			Err(err) => return Err(Error::UnmarshalBiStream(err, send, recv)),
 		};
+
+		match header {
+			Header::Authenticate(_) => Err(Error::BadCommandBiStream("authenticate", send, recv)),
+			Header::Connect(conn) => {
+				let model = self.model.recv_connect(conn);
+				Ok(Task::Connect(Connect::new(Side::Server(model), send, recv)))
+			}
+			Header::Packet(_) => Err(Error::BadCommandBiStream("packet", send, recv)),
+			Header::Dissociate(_) => Err(Error::BadCommandBiStream("dissociate", send, recv)),
+			Header::Heartbeat(_) => Err(Error::BadCommandBiStream("heartbeat", send, recv)),
+		}
+	}
+
+	/// Try to parse a pair of `quinn::SendStream` and `quinn::RecvStream` as a
+	/// TUIC command with prefetched prefix bytes from `recv`.
+	pub async fn accept_bi_stream_prefixed(&self, send: SendStream, recv: RecvStream, prefix: Bytes) -> Result<Task, Error> {
+		let mut prefixed = PrefixedRecvStream::new(recv, prefix);
+		let header = match Header::async_unmarshal(&mut prefixed).await {
+			Ok(header) => header,
+			Err(err) => return Err(Error::UnmarshalBiStream(err, send, prefixed.into_inner())),
+		};
+		let recv = prefixed.into_inner();
 
 		match header {
 			Header::Authenticate(_) => Err(Error::BadCommandBiStream("authenticate", send, recv)),
@@ -325,6 +377,45 @@ impl Connection<side::Server> {
 				Ok(Task::Heartbeat)
 			}
 		}
+	}
+}
+
+struct PrefixedRecvStream {
+	recv:       RecvStream,
+	prefix:     Bytes,
+	prefix_pos: usize,
+}
+
+impl PrefixedRecvStream {
+	fn new(recv: RecvStream, prefix: Bytes) -> Self {
+		Self {
+			recv,
+			prefix,
+			prefix_pos: 0,
+		}
+	}
+
+	fn into_inner(self) -> RecvStream {
+		self.recv
+	}
+}
+
+impl FuturesAsyncRead for PrefixedRecvStream {
+	fn poll_read(mut self: Pin<&mut Self>, cx: &mut Context<'_>, buf: &mut [u8]) -> Poll<Result<usize, IoError>> {
+		if buf.is_empty() {
+			return Poll::Ready(Ok(0));
+		}
+
+		let prefix_len = self.prefix.len();
+		if self.prefix_pos < prefix_len {
+			let remaining = &self.prefix[self.prefix_pos..];
+			let copy_len = remaining.len().min(buf.len());
+			buf[..copy_len].copy_from_slice(&remaining[..copy_len]);
+			self.prefix_pos += copy_len;
+			return Poll::Ready(Ok(copy_len));
+		}
+
+		FuturesAsyncRead::poll_read(Pin::new(&mut self.recv), cx, buf)
 	}
 }
 

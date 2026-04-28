@@ -198,6 +198,22 @@ auto_ssl = false
 # (Optional) email for ACME account creation, if left empty, will use 'admin@<hostname>' or 'admin@<random_string>.com'
 acme_email = ""
 
+[camouflage]
+# Enable HTTP/3 camouflage mode for non-TUIC ALPN `h3*` traffic
+enabled = false
+# Reverse proxy target for camouflage requests
+# (usually an HTTP/2 or HTTP/1.1 web server endpoint)
+reverse_proxy_url = "https://127.0.0.1:443"
+# Optional backend server name. When set, it is used as:
+# 1) TLS SNI for backend connection
+# 2) HTTP Host header for backend request routing
+# Required only when reverse_proxy_url host is an IP address.
+reverse_proxy_hostname = "example.com"
+# Per-request timeout for backend proxying
+request_timeout = "10s"
+# Skip TLS verification for backend target (use only for local/self-signed backends)
+skip_backend_tls_verify = false
+
 [restful]
 # Address to bind RESTful API server
 addr = "127.0.0.1:8443"

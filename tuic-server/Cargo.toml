@@ -79,12 +79,16 @@ eyre = { version = "0.6" }
 # Web
 axum = { version = "0.8", features = ["json", "tokio"] }
 axum-extra = { version = "0.12", features = ["typed-header"] }
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "http2", "stream"] }
+h3 = "0.0.8"
+futures-util = { version = "0.3", default-features = false, features = ["std"] }
+futures = "0.3"
+peekable = { version = "0.6.1", default-features = false, features = ["future"] }
 
 tikv-jemallocator = { version = "0.6", optional = true }
 rand = "0.10"
 
 [dev-dependencies]
-reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"]}
 tempfile = "3"
 tokio = { version = "1", features = ["full", "test-util"] }
 x509-parser = "0.18"
