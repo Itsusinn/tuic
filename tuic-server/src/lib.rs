@@ -12,10 +12,12 @@ use uuid::Uuid;
 
 pub mod acl;
 pub mod acme;
+pub mod camouflage;
 pub mod compat;
 pub mod config;
 pub mod connection;
 pub mod error;
+pub mod h3_quinn_compat;
 pub mod io;
 pub mod restful;
 pub mod server;
