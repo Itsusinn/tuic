@@ -4,7 +4,7 @@ use std::{
 	string::FromUtf8Error,
 };
 
-use futures_util::{AsyncRead, AsyncReadExt};
+use tokio::io::{AsyncRead, AsyncReadExt};
 use thiserror::Error;
 use uuid::{Error as UuidError, Uuid};
 
