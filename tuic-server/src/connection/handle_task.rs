@@ -177,24 +177,13 @@ impl Connection {
 	}
 
 	pub async fn handle_authenticate(&self, auth: Authenticate) {
-		info!(
-			"[{id:#010x}] [{addr}] [{user}] [AUTH] {auth_uuid}",
-			id = self.id(),
-			addr = self.inner.remote_address(),
-			user = self.auth,
-			auth_uuid = auth.uuid(),
-		);
+		info!("[AUTH] {}", auth.uuid());
 	}
 
 	pub async fn handle_connect<S: StreamTx, R: StreamRx>(&self, mut conn: Connect<S, R>) {
 		let target_addr = conn.addr().to_string();
 
-		info!(
-			"[{id:#010x}] [{addr}] [{user}] [TCP] {target_addr} ",
-			id = self.id(),
-			addr = self.inner.remote_address(),
-			user = self.auth,
-		);
+		info!("[TCP] {target_addr} ");
 
 		let process = async {
 			// First resolve using default outbound to get candidate IPs
@@ -210,12 +199,7 @@ impl Connection {
 			let (outbound_name, hijack, drop) = self.decide_acl_for_addrs(&initial_addrs, port, true, domain).await;
 
 			if drop {
-				warn!(
-					"[{id:#010x}] [{addr}] [{user}] [TCP] {target_addr} blocked by ACL",
-					id = self.id(),
-					addr = self.inner.remote_address(),
-					user = self.auth,
-				);
+				warn!("[TCP] {target_addr} blocked by ACL");
 				_ = conn.reset(ERROR_CODE);
 				return Ok(());
 			}
@@ -255,12 +239,7 @@ impl Connection {
 
 		match process.await {
 			Ok(()) => {}
-			Err(err) => warn!(
-				"[{id:#010x}] [{addr}] [{user}] [TCP] {target_addr}: {err}",
-				id = self.id(),
-				addr = self.inner.remote_address(),
-				user = self.auth,
-			),
+			Err(err) => warn!("[TCP] {target_addr}: {err}"),
 		}
 	}
 
@@ -326,12 +305,8 @@ impl Connection {
 		let frag_total = pkt.frag_total();
 
 		info!(
-			"[{id:#010x}] [{addr}] [{user}] [UDP-OUT] [{assoc_id:#06x}] [from-{mode}] [{pkt_id:#06x}] fragment \
-			 {frag_id}/{frag_total}",
-			id = self.id(),
-			addr = self.inner.remote_address(),
-			user = self.auth,
-			frag_id = frag_id + 1,
+			"[UDP-OUT] [{assoc_id:#06x}] [from-{mode}] [{pkt_id:#06x}] fragment {frag_id}/{frag_total}",
+			frag_id = frag_id + 1
 		);
 
 		self.udp_relay_mode.store(Some(mode).into());
@@ -341,11 +316,7 @@ impl Connection {
 			Ok(Some(res)) => res,
 			Err(err) => {
 				warn!(
-					"[{id:#010x}] [{addr}] [{user}] [UDP-OUT] [{assoc_id:#06x}] [from-{mode}] [{pkt_id:#06x}] fragment \
-					 {frag_id}/{frag_total}: {err}",
-					id = self.id(),
-					addr = self.inner.remote_address(),
-					user = self.auth,
+					"[UDP-OUT] [{assoc_id:#06x}] [from-{mode}] [{pkt_id:#06x}] fragment {frag_id}/{frag_total}: {err}",
 					frag_id = frag_id + 1,
 				);
 				return;
@@ -354,11 +325,8 @@ impl Connection {
 
 		let process = async {
 			info!(
-				"[{id:#010x}] [{addr}] [{user}] [UDP-OUT] [{assoc_id:#06x}] [from-{mode}] [{pkt_id:#06x}] to {src_addr}",
-				id = self.id(),
-				addr = self.inner.remote_address(),
-				user = self.auth,
-				src_addr = addr,
+				"[UDP-OUT] [{assoc_id:#06x}] [from-{mode}] [{pkt_id:#06x}] to {src_addr}",
+				src_addr = addr
 			);
 
 			let guard = self.udp_sessions.read().await;
@@ -391,12 +359,8 @@ impl Connection {
 			if should_drop {
 				// Silently drop the packet as per ACL
 				warn!(
-					"[{id:#010x}] [{addr}] [{user}] [UDP-OUT] [{assoc_id:#06x}] [from-{mode}] [{pkt_id:#06x}] to {src_addr} \
-					 blocked by ACL",
-					id = self.id(),
-					addr = self.inner.remote_address(),
-					user = self.auth,
-					src_addr = addr,
+					"[UDP-OUT] [{assoc_id:#06x}] [from-{mode}] [{pkt_id:#06x}] to {src_addr} blocked by ACL",
+					src_addr = addr
 				);
 				return Ok(());
 			}
@@ -409,34 +373,21 @@ impl Connection {
 				let allow_udp = outbound.allow_udp.unwrap_or(false);
 				if !allow_udp {
 					warn!(
-						"[{id:#010x}] [{addr}] [{user}] [UDP-OUT-SOCKS5] [{assoc_id:#06x}] [from-{mode}] [{pkt_id:#06x}] to \
-						 {src_addr} blocked by ACL",
-						id = self.id(),
-						addr = self.inner.remote_address(),
-						user = self.auth,
-						src_addr = addr,
+						"[UDP-OUT-SOCKS5] [{assoc_id:#06x}] [from-{mode}] [{pkt_id:#06x}] to {src_addr} blocked by ACL",
+						src_addr = addr
 					);
 					// Silently drop UDP to avoid leaking QUIC/HTTP3 when SOCKS5 is requested
 					return Ok(());
 				} else {
 					// We don't support UDP via SOCKS5 yet; fall back to direct
 					info!(
-						"[{id:#010x}] [{addr}] [{user}] [UDP-OUT] [{assoc_id:#06x}] outbound '{outbound_name}' allows UDP but \
-						 UDP via SOCKS5 not supported; using direct as you configured",
-						id = self.id(),
-						addr = self.inner.remote_address(),
-						user = self.auth,
+						"[UDP-OUT] [{assoc_id:#06x}] outbound '{outbound_name}' allows UDP but UDP via SOCKS5 not supported; \
+						 using direct as you configured"
 					);
 				}
 			} else if !outbound.kind.eq_ignore_ascii_case("direct") {
 				// Outbound other than direct is not supported for UDP yet; proceed as direct
-				warn!(
-					"[{id:#010x}] [{addr}] [{user}] [UDP-OUT] [{assoc_id:#06x}] outbound '{outbound_name}' not supported; \
-					 using direct",
-					id = self.id(),
-					addr = self.inner.remote_address(),
-					user = self.auth,
-				);
+				warn!("[UDP-OUT] [{assoc_id:#06x}] outbound '{outbound_name}' not supported; using direct");
 			}
 
 			let socket_addr = if let Some(h) = hijack {
@@ -457,22 +408,14 @@ impl Connection {
 
 		if let Err(err) = process.await {
 			warn!(
-				"[{id:#010x}] [{addr}] [{user}] [UDP-OUT] [{assoc_id:#06x}] [from-{mode}] [{pkt_id:#06x}] to {src_addr}: {err}",
-				id = self.id(),
-				addr = self.inner.remote_address(),
-				user = self.auth,
-				src_addr = addr,
+				"[UDP-OUT] [{assoc_id:#06x}] [from-{mode}] [{pkt_id:#06x}] to {src_addr}: {err}",
+				src_addr = addr
 			);
 		}
 	}
 
 	pub async fn handle_dissociate(&self, assoc_id: u16) {
-		info!(
-			"[{id:#010x}] [{addr}] [{user}] [UDP-DROP] [{assoc_id:#06x}]",
-			id = self.id(),
-			addr = self.inner.remote_address(),
-			user = self.auth,
-		);
+		info!("[UDP-DROP] [{assoc_id:#06x}]");
 
 		if let Some(session) = self.udp_sessions.write().await.remove(&assoc_id)
 			&& let Some(session) = session.upgrade()
@@ -482,24 +425,16 @@ impl Connection {
 	}
 
 	pub async fn handle_heartbeat(&self) {
-		info!(
-			"[{id:#010x}] [{addr}] [{user}] [HB]",
-			id = self.id(),
-			addr = self.inner.remote_address(),
-			user = self.auth,
-		);
+		info!("[HB]");
 	}
 
 	pub async fn relay_packet(self, pkt: Bytes, addr: Address, assoc_id: u16) -> eyre::Result<()> {
 		let addr_display = addr.to_string();
 
 		info!(
-			"[{id:#010x}] [{addr}] [{user}] [UDP-IN] [{assoc_id:#06x}] [to-{mode}] from {src_addr}",
-			id = self.id(),
-			addr = self.inner.remote_address(),
-			user = self.auth,
+			"[UDP-IN] [{assoc_id:#06x}] [to-{mode}] from {src_addr}",
 			mode = self.udp_relay_mode.load().unwrap(),
-			src_addr = addr_display,
+			src_addr = addr_display
 		);
 
 		restful::traffic_rx(&self.ctx, &self.auth.get().ok_or_eyre("Unreachable")?, pkt.len());
@@ -511,12 +446,9 @@ impl Connection {
 
 		if let Err(err) = res {
 			warn!(
-				"[{id:#010x}] [{addr}] [{user}] [UDP-IN] [{assoc_id:#06x}] [to-{mode}] from {src_addr}: {err}",
-				id = self.id(),
-				addr = self.inner.remote_address(),
-				user = self.auth,
+				"[UDP-IN] [{assoc_id:#06x}] [to-{mode}] from {src_addr}: {err}",
 				mode = self.udp_relay_mode.load().unwrap(),
-				src_addr = addr_display,
+				src_addr = addr_display
 			);
 		}
 		Ok(())

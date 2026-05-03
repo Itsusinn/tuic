@@ -12,12 +12,7 @@ use crate::{error::Error, utils::UdpRelayMode};
 
 impl Connection {
 	pub async fn handle_uni_stream<R: StreamRx>(self, recv: R, reg: Register) {
-		debug!(
-			"[{id:#010x}] [{addr}] [{user}] incoming unidirectional stream",
-			id = self.id(),
-			addr = self.inner.remote_address(),
-			user = self.auth,
-		);
+		debug!("incoming unidirectional stream");
 
 		self.maybe_expand_uni_stream_limit();
 
@@ -50,12 +45,7 @@ impl Connection {
 			Ok(Task::Dissociate(assoc_id)) => self.handle_dissociate(assoc_id).await,
 			Ok(_) => unreachable!(),
 			Err(err) => {
-				warn!(
-					"[{id:#010x}] [{addr}] [{user}] handling incoming unidirectional stream error: {err}",
-					id = self.id(),
-					addr = self.inner.remote_address(),
-					user = self.auth,
-				);
+				warn!("handling incoming unidirectional stream error: {err}");
 				self.close();
 			}
 		}
@@ -63,12 +53,7 @@ impl Connection {
 	}
 
 	pub async fn handle_bi_stream<S: StreamTx, R: StreamRx>(self, (send, recv): (S, R), reg: Register) {
-		debug!(
-			"[{id:#010x}] [{addr}] [{user}] incoming bidirectional stream",
-			id = self.id(),
-			addr = self.inner.remote_address(),
-			user = self.auth,
-		);
+		debug!("incoming bidirectional stream");
 
 		self.maybe_expand_bi_stream_limit();
 
@@ -91,12 +76,7 @@ impl Connection {
 			Ok(Task::Connect(conn)) => self.handle_connect(conn).await,
 			Ok(_) => unreachable!(),
 			Err(err) => {
-				warn!(
-					"[{id:#010x}] [{addr}] [{user}] handling incoming bidirectional stream error: {err}",
-					id = self.id(),
-					addr = self.inner.remote_address(),
-					user = self.auth,
-				);
+				warn!("handling incoming bidirectional stream error: {err}");
 				self.close();
 			}
 		}
@@ -114,8 +94,7 @@ impl Connection {
 				Ordering::Acquire,
 			) {
 			debug!(
-				"[{id:#010x}] reached max concurrent uni_streams, setting bigger limitation={num}",
-				id = self.id(),
+				"reached max concurrent uni_streams, setting bigger limitation={num}",
 				num = current_max * 2
 			);
 			self.inner.set_max_concurrent_uni_streams(VarInt::from(current_max * 2));
@@ -133,8 +112,7 @@ impl Connection {
 				Ordering::Acquire,
 			) {
 			debug!(
-				"[{id:#010x}] reached max concurrent bi_streams, setting bigger limitation={num}",
-				id = self.id(),
+				"reached max concurrent bi_streams, setting bigger limitation={num}",
 				num = current_max * 2
 			);
 			self.inner.set_max_concurrent_bi_streams(VarInt::from(current_max * 2));
@@ -142,12 +120,7 @@ impl Connection {
 	}
 
 	pub async fn handle_datagram(self, dg: Bytes) {
-		debug!(
-			"[{id:#010x}] [{addr}] [{user}] incoming datagram",
-			id = self.id(),
-			addr = self.inner.remote_address(),
-			user = self.auth,
-		);
+		debug!("incoming datagram");
 
 		let pre_process = async {
 			let task = self.model.accept_datagram(dg)?;
@@ -171,12 +144,7 @@ impl Connection {
 			Ok(Task::Heartbeat) => self.handle_heartbeat().await,
 			Ok(_) => unreachable!(),
 			Err(err) => {
-				warn!(
-					"[{id:#010x}] [{addr}] [{user}] handling incoming datagram error: {err}",
-					id = self.id(),
-					addr = self.inner.remote_address(),
-					user = self.auth,
-				);
+				warn!("handling incoming datagram error: {err}");
 				self.close();
 			}
 		}

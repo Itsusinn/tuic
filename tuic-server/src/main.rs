@@ -54,10 +54,12 @@ fn main() -> eyre::Result<()> {
 		.with(filter)
 		.with(
 			tracing_subscriber::fmt::layer()
-				.with_target(true)
+				.with_target(false)
+				.with_thread_ids(false)
 				.with_timer(LocalTime::new(time::macros::format_description!(
 					"[year repr:last_two]-[month]-[day] [hour]:[minute]:[second]"
-				))),
+				)))
+				.compact(),
 		)
 		.try_init()?;
 
