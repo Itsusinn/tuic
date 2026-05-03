@@ -6,13 +6,10 @@ use std::{
 
 use parking_lot::Mutex;
 
-use super::{
-	Assemblable, AssembleError, UdpSessions,
-	side,
-};
+use super::{Assemblable, AssembleError, UdpSessions, side};
 use crate::{Address, Header, Packet as PacketHeader};
 
-// ── Per-model Side (with an extra type param `B` for buffered data) ─────
+// ── Per-model Side (with extra type param `B` for buffered data) ────────
 
 pub trait PacketTypes<B> {
 	type TxData;
@@ -84,32 +81,29 @@ impl<B> Packet<side::Tx, B> {
 	}
 
 	pub fn into_fragments<'a>(self, payload: &'a [u8]) -> Fragments<'a> {
-		match self.inner {
-			PacketSide::Tx(tx) => {
-				Fragments::new(tx.assoc_id, tx.pkt_id, tx.addr, tx.max_pkt_size, payload)
-			}
-			_ => unreachable!(),
-		}
+		// Rx(!) is uninhabited — value-match is irrefutable
+		let PacketSide::Tx(tx) = self.inner;
+		Fragments::new(tx.assoc_id, tx.pkt_id, tx.addr, tx.max_pkt_size, payload)
 	}
 
 	pub fn assoc_id(&self) -> u16 {
 		match &self.inner {
 			PacketSide::Tx(tx) => tx.assoc_id,
-			_ => unreachable!(),
+			PacketSide::Rx(!),
 		}
 	}
 
 	pub fn pkt_id(&self) -> u16 {
 		match &self.inner {
 			PacketSide::Tx(tx) => tx.pkt_id,
-			_ => unreachable!(),
+			PacketSide::Rx(!),
 		}
 	}
 
 	pub fn addr(&self) -> &Address {
 		match &self.inner {
 			PacketSide::Tx(tx) => &tx.addr,
-			_ => unreachable!(),
+			PacketSide::Rx(!),
 		}
 	}
 }
@@ -124,7 +118,7 @@ impl<B> Debug for Packet<side::Tx, B> {
 				.field("addr", &tx.addr)
 				.field("max_pkt_size", &tx.max_pkt_size)
 				.finish(),
-			_ => unreachable!(),
+			PacketSide::Rx(!),
 		}
 	}
 }
@@ -159,54 +153,51 @@ where
 	}
 
 	pub fn assemble(self, data: B) -> Result<Option<Assemblable<B>>, AssembleError> {
-		match self.inner {
-			PacketSide::Rx(rx) => {
-				let mut sessions = rx.sessions.lock();
-				sessions.insert(rx.assoc_id, rx.pkt_id, rx.frag_total, rx.frag_id, rx.size, rx.addr, data)
-			}
-			_ => unreachable!(),
-		}
+		// Tx(!) is uninhabited — value-match is irrefutable
+		let PacketSide::Rx(rx) = self.inner;
+		let mut sessions = rx.sessions.lock();
+		sessions.insert(rx.assoc_id, rx.pkt_id, rx.frag_total, rx.frag_id, rx.size, rx.addr, data)
 	}
 
 	pub fn assoc_id(&self) -> u16 {
 		match &self.inner {
 			PacketSide::Rx(rx) => rx.assoc_id,
-			_ => unreachable!(),
+			PacketSide::Tx(!),
 		}
 	}
 
 	pub fn pkt_id(&self) -> u16 {
 		match &self.inner {
 			PacketSide::Rx(rx) => rx.pkt_id,
-			_ => unreachable!(),
+			PacketSide::Tx(!),
 		}
 	}
 
 	pub fn frag_id(&self) -> u8 {
 		match &self.inner {
 			PacketSide::Rx(rx) => rx.frag_id,
-			_ => unreachable!(),
+			PacketSide::Tx(!),
 		}
 	}
 
 	pub fn frag_total(&self) -> u8 {
 		match &self.inner {
 			PacketSide::Rx(rx) => rx.frag_total,
-			_ => unreachable!(),
+			PacketSide::Tx(!),
 		}
 	}
 
 	pub fn addr(&self) -> &Address {
 		match &self.inner {
 			PacketSide::Rx(rx) => &rx.addr,
-			_ => unreachable!(),
+			PacketSide::Tx(!),
 		}
 	}
 
 	pub fn size(&self) -> u16 {
 		match &self.inner {
 			PacketSide::Rx(rx) => rx.size,
-			_ => unreachable!(),
+			PacketSide::Tx(!),
 		}
 	}
 }
@@ -223,7 +214,7 @@ impl<B> Debug for Packet<side::Rx, B> {
 				.field("size", &rx.size)
 				.field("addr", &rx.addr)
 				.finish(),
-			_ => unreachable!(),
+			PacketSide::Tx(!),
 		}
 	}
 }

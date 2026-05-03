@@ -18,15 +18,11 @@ enum HeartbeatSide<M: HeartbeatTypes> {
 	Rx(<M as HeartbeatTypes>::RxData),
 }
 
-// ── Data types per side ──────────────────────────────────────────────────
-
 pub struct Tx {
 	header: Header,
 }
 
 pub struct Rx;
-
-// ── Marker → concrete type mapping ──────────────────────────────────────
 
 impl HeartbeatTypes for side::Tx {
 	type TxData = Tx;
@@ -37,8 +33,6 @@ impl HeartbeatTypes for side::Rx {
 	type TxData = !;
 	type RxData = Rx;
 }
-
-// ── Public wrapper ───────────────────────────────────────────────────────
 
 pub struct Heartbeat<M: HeartbeatTypes> {
 	inner:   HeartbeatSide<M>,
@@ -60,7 +54,7 @@ impl Heartbeat<side::Tx> {
 	pub fn header(&self) -> &Header {
 		match &self.inner {
 			HeartbeatSide::Tx(tx) => &tx.header,
-			_ => unreachable!(),
+			HeartbeatSide::Rx(!),
 		}
 	}
 }
@@ -69,7 +63,7 @@ impl Debug for Heartbeat<side::Tx> {
 	fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
 		match &self.inner {
 			HeartbeatSide::Tx(tx) => f.debug_struct("Heartbeat").field("header", &tx.header).finish(),
-			_ => unreachable!(),
+			HeartbeatSide::Rx(!),
 		}
 	}
 }

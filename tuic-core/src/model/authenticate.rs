@@ -20,8 +20,6 @@ enum AuthenticateSide<M: AuthenticateTypes> {
 	Rx(<M as AuthenticateTypes>::RxData),
 }
 
-// ── Data types per side ──────────────────────────────────────────────────
-
 pub struct Tx {
 	header: Header,
 }
@@ -30,8 +28,6 @@ pub struct Rx {
 	uuid:  Uuid,
 	token: [u8; 32],
 }
-
-// ── Marker → concrete type mapping ──────────────────────────────────────
 
 impl AuthenticateTypes for side::Tx {
 	type TxData = Tx;
@@ -42,8 +38,6 @@ impl AuthenticateTypes for side::Rx {
 	type TxData = !;
 	type RxData = Rx;
 }
-
-// ── Public wrapper ───────────────────────────────────────────────────────
 
 pub struct Authenticate<M: AuthenticateTypes> {
 	inner:   AuthenticateSide<M>,
@@ -68,7 +62,7 @@ impl Authenticate<side::Tx> {
 	pub fn header(&self) -> &Header {
 		match &self.inner {
 			AuthenticateSide::Tx(tx) => &tx.header,
-			_ => unreachable!(),
+			AuthenticateSide::Rx(!),
 		}
 	}
 }
@@ -77,7 +71,7 @@ impl Debug for Authenticate<side::Tx> {
 	fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
 		match &self.inner {
 			AuthenticateSide::Tx(tx) => f.debug_struct("Authenticate").field("header", &tx.header).finish(),
-			_ => unreachable!(),
+			AuthenticateSide::Rx(!),
 		}
 	}
 }
@@ -95,14 +89,14 @@ impl Authenticate<side::Rx> {
 	pub fn uuid(&self) -> Uuid {
 		match &self.inner {
 			AuthenticateSide::Rx(rx) => rx.uuid,
-			_ => unreachable!(),
+			AuthenticateSide::Tx(!),
 		}
 	}
 
 	pub fn token(&self) -> [u8; 32] {
 		match &self.inner {
 			AuthenticateSide::Rx(rx) => rx.token,
-			_ => unreachable!(),
+			AuthenticateSide::Tx(!),
 		}
 	}
 
@@ -111,7 +105,7 @@ impl Authenticate<side::Rx> {
 			AuthenticateSide::Rx(rx) => {
 				rx.token == exporter.export_keying_material(rx.uuid.as_ref(), password.as_ref())
 			}
-			_ => unreachable!(),
+			AuthenticateSide::Tx(!),
 		}
 	}
 }
@@ -124,7 +118,7 @@ impl Debug for Authenticate<side::Rx> {
 				.field("uuid", &rx.uuid)
 				.field("token", &rx.token)
 				.finish(),
-			_ => unreachable!(),
+			AuthenticateSide::Tx(!),
 		}
 	}
 }

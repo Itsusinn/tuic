@@ -1,4 +1,4 @@
-#![feature(never_type)]
+#![feature(never_type, never_patterns)]
 
 mod protocol;
 

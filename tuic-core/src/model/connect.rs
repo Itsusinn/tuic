@@ -8,7 +8,7 @@ use register_count::Register;
 use super::side;
 use crate::{Address, Connect as ConnectHeader, Header};
 
-// ── Per-model Side (one variant is `!` / uninhabited) ───────────────────
+// ── Per-model Side ──────────────────────────────────────────────────────
 
 pub trait ConnectTypes {
 	type TxData;
@@ -20,8 +20,6 @@ enum ConnectSide<M: ConnectTypes> {
 	Rx(<M as ConnectTypes>::RxData),
 }
 
-// ── Data types per side ──────────────────────────────────────────────────
-
 pub struct Tx {
 	header:    Header,
 	_task_reg: Register,
@@ -32,12 +30,6 @@ pub struct Rx {
 	_task_reg: Register,
 }
 
-// ── Marker → concrete type mapping ──────────────────────────────────────
-// The variant for the other side holds `!` – constructible only for the
-// correct side. Matching by reference still needs a `_` arm, but the
-// `_ => match self.inner {}` arm is a compile-time guarantee of
-// unreachability (fails if the `!` type is replaced with an inhabited type).
-
 impl ConnectTypes for side::Tx {
 	type TxData = Tx;
 	type RxData = !;
@@ -47,8 +39,6 @@ impl ConnectTypes for side::Rx {
 	type TxData = !;
 	type RxData = Rx;
 }
-
-// ── Public wrapper ───────────────────────────────────────────────────────
 
 pub struct Connect<M: ConnectTypes> {
 	inner:   ConnectSide<M>,
@@ -71,14 +61,14 @@ impl Connect<side::Tx> {
 	pub fn header(&self) -> &Header {
 		match &self.inner {
 			ConnectSide::Tx(tx) => &tx.header,
-			_ => unreachable!(),
+			ConnectSide::Rx(!),
 		}
 	}
 
 	fn tx_ref(&self) -> &Tx {
 		match &self.inner {
 			ConnectSide::Tx(tx) => tx,
-			_ => unreachable!(),
+			ConnectSide::Rx(!),
 		}
 	}
 }
@@ -106,14 +96,14 @@ impl Connect<side::Rx> {
 	pub fn addr(&self) -> &Address {
 		match &self.inner {
 			ConnectSide::Rx(rx) => &rx.addr,
-			_ => unreachable!(),
+			ConnectSide::Tx(!),
 		}
 	}
 
 	fn rx_ref(&self) -> &Rx {
 		match &self.inner {
 			ConnectSide::Rx(rx) => rx,
-			_ => unreachable!(),
+			ConnectSide::Tx(!),
 		}
 	}
 }

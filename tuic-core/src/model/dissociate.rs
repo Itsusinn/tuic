@@ -18,8 +18,6 @@ enum DissociateSide<M: DissociateTypes> {
 	Rx(<M as DissociateTypes>::RxData),
 }
 
-// ── Data types per side ──────────────────────────────────────────────────
-
 pub struct Tx {
 	header: Header,
 }
@@ -27,8 +25,6 @@ pub struct Tx {
 pub struct Rx {
 	assoc_id: u16,
 }
-
-// ── Marker → concrete type mapping ──────────────────────────────────────
 
 impl DissociateTypes for side::Tx {
 	type TxData = Tx;
@@ -39,8 +35,6 @@ impl DissociateTypes for side::Rx {
 	type TxData = !;
 	type RxData = Rx;
 }
-
-// ── Public wrapper ───────────────────────────────────────────────────────
 
 pub struct Dissociate<M: DissociateTypes> {
 	inner:   DissociateSide<M>,
@@ -62,7 +56,7 @@ impl Dissociate<side::Tx> {
 	pub fn header(&self) -> &Header {
 		match &self.inner {
 			DissociateSide::Tx(tx) => &tx.header,
-			_ => unreachable!(),
+			DissociateSide::Rx(!),
 		}
 	}
 }
@@ -71,7 +65,7 @@ impl Debug for Dissociate<side::Tx> {
 	fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
 		match &self.inner {
 			DissociateSide::Tx(tx) => f.debug_struct("Dissociate").field("header", &tx.header).finish(),
-			_ => unreachable!(),
+			DissociateSide::Rx(!),
 		}
 	}
 }
@@ -89,7 +83,7 @@ impl Dissociate<side::Rx> {
 	pub fn assoc_id(&self) -> u16 {
 		match &self.inner {
 			DissociateSide::Rx(rx) => rx.assoc_id,
-			_ => unreachable!(),
+			DissociateSide::Tx(!),
 		}
 	}
 }
@@ -98,7 +92,7 @@ impl Debug for Dissociate<side::Rx> {
 	fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
 		match &self.inner {
 			DissociateSide::Rx(rx) => f.debug_struct("Dissociate").field("assoc_id", &rx.assoc_id).finish(),
-			_ => unreachable!(),
+			DissociateSide::Tx(!),
 		}
 	}
 }
