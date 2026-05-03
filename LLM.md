@@ -15,8 +15,10 @@ Assisted-by: AGENT_NAME:MODEL_VERSION [TOOL1] [TOOL2]
 | Component | Description |
 |-----------|-------------|
 | `AGENT_NAME` | The name of the AI tool or framework used (e.g., Claude, OpenClaw, Copilot) |
-| `MODEL_VERSION` | The specific model version (e.g., claude-3-opus, gemini-2.5-pro, k2p5) |
+| `MODEL_VERSION` | The specific model version without provider prefix (e.g., `claude-3-opus`, `gpt-4o`, `deepseek-v4-flash` — not `deepseek/deepseek-v4-flash`) |
 | `[TOOL1] [TOOL2]` | Optional: Additional specialized analysis tools used (e.g., coccinelle, sparse, smatch, clang-tidy) |
+
+> **Important:** Do **not** include the provider prefix in `MODEL_VERSION`. For example, write `deepseek-v4-flash`, not `deepseek/deepseek-v4-flash`. The provider/API routing detail is irrelevant to readers; only the model identity matters.
 
 ### Notes
 

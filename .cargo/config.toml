@@ -1,5 +1,5 @@
 [build]
-rustc-wrapper = "sccache"
+#rustc-wrapper = "sccache"
 
 [env]
 RUSTC_BOOTSTRAP = { value = "1" }
