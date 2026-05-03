@@ -30,13 +30,13 @@ pub struct Rx {
 }
 
 impl AuthenticateTypes for side::Tx {
-	type TxData = Tx;
 	type RxData = !;
+	type TxData = Tx;
 }
 
 impl AuthenticateTypes for side::Rx {
-	type TxData = !;
 	type RxData = Rx;
+	type TxData = !;
 }
 
 pub struct Authenticate<M: AuthenticateTypes> {

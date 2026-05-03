@@ -25,13 +25,13 @@ pub struct Tx {
 pub struct Rx;
 
 impl HeartbeatTypes for side::Tx {
-	type TxData = Tx;
 	type RxData = !;
+	type TxData = Tx;
 }
 
 impl HeartbeatTypes for side::Rx {
-	type TxData = !;
 	type RxData = Rx;
+	type TxData = !;
 }
 
 pub struct Heartbeat<M: HeartbeatTypes> {

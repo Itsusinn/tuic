@@ -31,13 +31,13 @@ pub struct Rx {
 }
 
 impl ConnectTypes for side::Tx {
-	type TxData = Tx;
 	type RxData = !;
+	type TxData = Tx;
 }
 
 impl ConnectTypes for side::Rx {
-	type TxData = !;
 	type RxData = Rx;
+	type TxData = !;
 }
 
 pub struct Connect<M: ConnectTypes> {

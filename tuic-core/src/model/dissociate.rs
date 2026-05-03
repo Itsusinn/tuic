@@ -27,13 +27,13 @@ pub struct Rx {
 }
 
 impl DissociateTypes for side::Tx {
-	type TxData = Tx;
 	type RxData = !;
+	type TxData = Tx;
 }
 
 impl DissociateTypes for side::Rx {
-	type TxData = !;
 	type RxData = Rx;
+	type TxData = !;
 }
 
 pub struct Dissociate<M: DissociateTypes> {

@@ -46,13 +46,13 @@ pub struct Rx<B> {
 // ── Marker → concrete type mapping ──────────────────────────────────────
 
 impl<B> PacketTypes<B> for side::Tx {
-	type TxData = Tx;
 	type RxData = !;
+	type TxData = Tx;
 }
 
 impl<B> PacketTypes<B> for side::Rx {
-	type TxData = !;
 	type RxData = Rx<B>;
+	type TxData = !;
 }
 
 // ── Public wrapper ───────────────────────────────────────────────────────
