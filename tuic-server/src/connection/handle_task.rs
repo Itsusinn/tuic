@@ -14,7 +14,7 @@ use tokio::{
 use tracing::{info, warn};
 use tuic_core::{
 	Address, is_private_ip,
-	quinn::{Authenticate, Connect, Packet},
+	quinn::{Authenticate, Connect, Packet, StreamRx, StreamTx},
 };
 
 use super::{Connection, ERROR_CODE, UdpSession};
@@ -186,7 +186,7 @@ impl Connection {
 		);
 	}
 
-	pub async fn handle_connect(&self, mut conn: Connect) {
+	pub async fn handle_connect<S: StreamTx, R: StreamRx>(&self, mut conn: Connect<S, R>) {
 		let target_addr = conn.addr().to_string();
 
 		info!(
@@ -319,7 +319,7 @@ impl Connection {
 			.unwrap_or_else(|| eyre!("Failed to connect to any address")))
 	}
 
-	pub async fn handle_packet(&self, pkt: Packet, mode: UdpRelayMode) {
+	pub async fn handle_packet<R: StreamRx>(&self, pkt: Packet<R>, mode: UdpRelayMode) {
 		let assoc_id = pkt.assoc_id();
 		let pkt_id = pkt.pkt_id();
 		let frag_id = pkt.frag_id();

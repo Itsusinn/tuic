@@ -16,13 +16,13 @@ use h3::{
 	error::Code,
 	quic::{self, ConnectionErrorIncoming, StreamErrorIncoming, StreamId, WriteBuf},
 };
-use peekable::future::AsyncPeekable;
+use peekable::tokio::AsyncPeekable;
 use quinn::{AcceptBi, AcceptUni, OpenBi, OpenUni, ReadError, VarInt};
 use tokio_util::sync::ReusableBoxFuture;
 
 type BoxStreamSync<'a, T> = Pin<Box<dyn Stream<Item = T> + Sync + Send + 'a>>;
 
-pub type PeekableRecvStream = AsyncPeekable<quinn::RecvStream>;
+pub type PeekableRecvStream = AsyncPeekable<quinn::RecvStream, smallvec::SmallVec<[u8; 4]>>;
 
 pub struct PrefetchedBiRecv {
 	pub send: quinn::SendStream,
@@ -307,7 +307,7 @@ type ReadChunkFuture = ReusableBoxFuture<'static, (PeekableRecvStream, Result<Op
 impl RecvStream {
 	fn new(stream: quinn::RecvStream) -> Self {
 		let num: u64 = stream.id().into();
-		Self::new_inner(AsyncPeekable::new(stream), num)
+		Self::new_inner(AsyncPeekable::with_buffer(stream), num)
 	}
 
 	fn new_peekable(stream: PeekableRecvStream) -> Self {
