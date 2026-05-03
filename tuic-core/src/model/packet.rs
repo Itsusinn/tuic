@@ -1,5 +1,6 @@
 use std::{
 	fmt::{Debug, Formatter, Result as FmtResult},
+	marker::PhantomData,
 	sync::Arc,
 };
 
@@ -7,74 +8,35 @@ use parking_lot::Mutex;
 
 use super::{
 	Assemblable, AssembleError, UdpSessions,
-	side::{self, Side},
+	side,
 };
 use crate::{Address, Header, Packet as PacketHeader};
 
-pub struct Packet<M, B> {
-	inner:   Side<Tx, Rx<B>>,
-	_marker: M,
+// ── Per-model Side (with an extra type param `B` for buffered data) ─────
+
+pub trait PacketTypes<B> {
+	type TxData;
+	type RxData;
 }
 
-struct Tx {
+enum PacketSide<M, B>
+where
+	M: PacketTypes<B>,
+{
+	Tx(<M as PacketTypes<B>>::TxData),
+	Rx(<M as PacketTypes<B>>::RxData),
+}
+
+// ── Data types per side ──────────────────────────────────────────────────
+
+pub struct Tx {
 	assoc_id:     u16,
 	pkt_id:       u16,
 	addr:         Address,
 	max_pkt_size: usize,
 }
 
-impl<B> Packet<side::Tx, B> {
-	pub(super) fn new(assoc_id: u16, pkt_id: u16, addr: Address, max_pkt_size: usize) -> Self {
-		Self {
-			inner:   Side::Tx(Tx {
-				assoc_id,
-				pkt_id,
-				addr,
-				max_pkt_size,
-			}),
-			_marker: side::Tx,
-		}
-	}
-
-	/// Fragment the payload into multiple packets
-	pub fn into_fragments<'a>(self, payload: &'a [u8]) -> Fragments<'a>
-where {
-		let Side::Tx(tx) = self.inner else { unreachable!() };
-		Fragments::new(tx.assoc_id, tx.pkt_id, tx.addr, tx.max_pkt_size, payload)
-	}
-
-	/// Returns the UDP session ID
-	pub fn assoc_id(&self) -> u16 {
-		let Side::Tx(tx) = &self.inner else { unreachable!() };
-		tx.assoc_id
-	}
-
-	/// Returns the packet ID
-	pub fn pkt_id(&self) -> u16 {
-		let Side::Tx(tx) = &self.inner else { unreachable!() };
-		tx.pkt_id
-	}
-
-	/// Returns the address
-	pub fn addr(&self) -> &Address {
-		let Side::Tx(tx) = &self.inner else { unreachable!() };
-		&tx.addr
-	}
-}
-
-impl Debug for Packet<side::Tx, ()> {
-	fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
-		let Side::Tx(tx) = &self.inner else { unreachable!() };
-		f.debug_struct("Packet")
-			.field("assoc_id", &tx.assoc_id)
-			.field("pkt_id", &tx.pkt_id)
-			.field("addr", &tx.addr)
-			.field("max_pkt_size", &tx.max_pkt_size)
-			.finish()
-	}
-}
-
-struct Rx<B> {
+pub struct Rx<B> {
 	sessions:   Arc<Mutex<UdpSessions<B>>>,
 	assoc_id:   u16,
 	pkt_id:     u16,
@@ -83,6 +45,91 @@ struct Rx<B> {
 	size:       u16,
 	addr:       Address,
 }
+
+// ── Marker → concrete type mapping ──────────────────────────────────────
+
+impl<B> PacketTypes<B> for side::Tx {
+	type TxData = Tx;
+	type RxData = !;
+}
+
+impl<B> PacketTypes<B> for side::Rx {
+	type TxData = !;
+	type RxData = Rx<B>;
+}
+
+// ── Public wrapper ───────────────────────────────────────────────────────
+
+pub struct Packet<M, B>
+where
+	M: PacketTypes<B>,
+{
+	inner:   PacketSide<M, B>,
+	_marker: PhantomData<M>,
+}
+
+// ── Tx side ─────────────────────────────────────────────────────────────
+
+impl<B> Packet<side::Tx, B> {
+	pub(super) fn new(assoc_id: u16, pkt_id: u16, addr: Address, max_pkt_size: usize) -> Self {
+		Self {
+			inner:   PacketSide::Tx(Tx {
+				assoc_id,
+				pkt_id,
+				addr,
+				max_pkt_size,
+			}),
+			_marker: PhantomData,
+		}
+	}
+
+	pub fn into_fragments<'a>(self, payload: &'a [u8]) -> Fragments<'a> {
+		match self.inner {
+			PacketSide::Tx(tx) => {
+				Fragments::new(tx.assoc_id, tx.pkt_id, tx.addr, tx.max_pkt_size, payload)
+			}
+			_ => unreachable!(),
+		}
+	}
+
+	pub fn assoc_id(&self) -> u16 {
+		match &self.inner {
+			PacketSide::Tx(tx) => tx.assoc_id,
+			_ => unreachable!(),
+		}
+	}
+
+	pub fn pkt_id(&self) -> u16 {
+		match &self.inner {
+			PacketSide::Tx(tx) => tx.pkt_id,
+			_ => unreachable!(),
+		}
+	}
+
+	pub fn addr(&self) -> &Address {
+		match &self.inner {
+			PacketSide::Tx(tx) => &tx.addr,
+			_ => unreachable!(),
+		}
+	}
+}
+
+impl<B> Debug for Packet<side::Tx, B> {
+	fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
+		match &self.inner {
+			PacketSide::Tx(tx) => f
+				.debug_struct("Packet")
+				.field("assoc_id", &tx.assoc_id)
+				.field("pkt_id", &tx.pkt_id)
+				.field("addr", &tx.addr)
+				.field("max_pkt_size", &tx.max_pkt_size)
+				.finish(),
+			_ => unreachable!(),
+		}
+	}
+}
+
+// ── Rx side ─────────────────────────────────────────────────────────────
 
 impl<B> Packet<side::Rx, B>
 where
@@ -98,7 +145,7 @@ where
 		addr: Address,
 	) -> Self {
 		Self {
-			inner:   Side::Rx(Rx {
+			inner:   PacketSide::Rx(Rx {
 				sessions,
 				assoc_id,
 				pkt_id,
@@ -107,67 +154,77 @@ where
 				size,
 				addr,
 			}),
-			_marker: side::Rx,
+			_marker: PhantomData,
 		}
 	}
 
-	/// Reassembles the packet. If the packet is not complete yet, `None` is
-	/// returned.
 	pub fn assemble(self, data: B) -> Result<Option<Assemblable<B>>, AssembleError> {
-		let Side::Rx(rx) = self.inner else { unreachable!() };
-		let mut sessions = rx.sessions.lock();
-
-		sessions.insert(rx.assoc_id, rx.pkt_id, rx.frag_total, rx.frag_id, rx.size, rx.addr, data)
+		match self.inner {
+			PacketSide::Rx(rx) => {
+				let mut sessions = rx.sessions.lock();
+				sessions.insert(rx.assoc_id, rx.pkt_id, rx.frag_total, rx.frag_id, rx.size, rx.addr, data)
+			}
+			_ => unreachable!(),
+		}
 	}
 
-	/// Returns the UDP session ID
 	pub fn assoc_id(&self) -> u16 {
-		let Side::Rx(rx) = &self.inner else { unreachable!() };
-		rx.assoc_id
+		match &self.inner {
+			PacketSide::Rx(rx) => rx.assoc_id,
+			_ => unreachable!(),
+		}
 	}
 
-	/// Returns the packet ID
 	pub fn pkt_id(&self) -> u16 {
-		let Side::Rx(rx) = &self.inner else { unreachable!() };
-		rx.pkt_id
+		match &self.inner {
+			PacketSide::Rx(rx) => rx.pkt_id,
+			_ => unreachable!(),
+		}
 	}
 
-	/// Returns the fragment ID
 	pub fn frag_id(&self) -> u8 {
-		let Side::Rx(rx) = &self.inner else { unreachable!() };
-		rx.frag_id
+		match &self.inner {
+			PacketSide::Rx(rx) => rx.frag_id,
+			_ => unreachable!(),
+		}
 	}
 
-	/// Returns the total number of fragments
 	pub fn frag_total(&self) -> u8 {
-		let Side::Rx(rx) = &self.inner else { unreachable!() };
-		rx.frag_total
+		match &self.inner {
+			PacketSide::Rx(rx) => rx.frag_total,
+			_ => unreachable!(),
+		}
 	}
 
-	/// Returns the address
 	pub fn addr(&self) -> &Address {
-		let Side::Rx(rx) = &self.inner else { unreachable!() };
-		&rx.addr
+		match &self.inner {
+			PacketSide::Rx(rx) => &rx.addr,
+			_ => unreachable!(),
+		}
 	}
 
-	/// Returns the size of the (fragmented) packet
 	pub fn size(&self) -> u16 {
-		let Side::Rx(rx) = &self.inner else { unreachable!() };
-		rx.size
+		match &self.inner {
+			PacketSide::Rx(rx) => rx.size,
+			_ => unreachable!(),
+		}
 	}
 }
 
 impl<B> Debug for Packet<side::Rx, B> {
 	fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
-		let Side::Rx(rx) = &self.inner else { unreachable!() };
-		f.debug_struct("Packet")
-			.field("assoc_id", &rx.assoc_id)
-			.field("pkt_id", &rx.pkt_id)
-			.field("frag_total", &rx.frag_total)
-			.field("frag_id", &rx.frag_id)
-			.field("size", &rx.size)
-			.field("addr", &rx.addr)
-			.finish()
+		match &self.inner {
+			PacketSide::Rx(rx) => f
+				.debug_struct("Packet")
+				.field("assoc_id", &rx.assoc_id)
+				.field("pkt_id", &rx.pkt_id)
+				.field("frag_total", &rx.frag_total)
+				.field("frag_id", &rx.frag_id)
+				.field("size", &rx.size)
+				.field("addr", &rx.addr)
+				.finish(),
+			_ => unreachable!(),
+		}
 	}
 }
 

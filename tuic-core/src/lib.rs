@@ -1,3 +1,5 @@
+#![feature(never_type)]
+
 mod protocol;
 
 pub use self::protocol::{Address, Authenticate, Connect, Dissociate, Header, Heartbeat, Packet, VERSION};

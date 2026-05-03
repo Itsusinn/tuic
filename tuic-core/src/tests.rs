@@ -626,10 +626,7 @@ mod model_tests {
 		);
 		let pkt_rx = conn.recv_packet_unrestricted(header);
 
-		let result = pkt_rx.assemble(payload.to_vec()).unwrap();
-		assert!(result.is_some());
-
-		let assembled = result.unwrap();
+		let assembled = pkt_rx.assemble(payload.to_vec()).unwrap().unwrap();
 		let mut buf = Vec::new();
 		let (addr, assoc_id) = assembled.assemble(&mut buf);
 		assert_eq!(buf, payload);
@@ -656,10 +653,7 @@ mod model_tests {
 		// Fragment 2 (last, no address)
 		let header2 = crate::Packet::new(1, 0, 3, 2, 3, Address::None);
 		let pkt2 = conn.recv_packet_unrestricted(header2);
-		let result2 = pkt2.assemble(vec![11, 12, 13]).unwrap();
-		assert!(result2.is_some()); // now complete
-
-		let assembled = result2.unwrap();
+		let assembled = pkt2.assemble(vec![11, 12, 13]).unwrap().unwrap();
 		let mut buf = Vec::new();
 		let (addr, assoc_id) = assembled.assemble(&mut buf);
 		assert_eq!(buf, vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13]);
@@ -765,8 +759,8 @@ mod model_tests {
 		let header_new = crate::Packet::new(1, 1, 1, 0, 3, Address::DomainAddress("new.com".to_string(), 80));
 		let pkt_new = conn.recv_packet(header_new);
 		assert!(pkt_new.is_some());
-		let result = pkt_new.unwrap().assemble(vec![10, 20, 30]).unwrap();
-		assert!(result.is_some()); // single fragment completes immediately
+		// single fragment completes immediately
+		let _ = pkt_new.unwrap().assemble(vec![10, 20, 30]).unwrap().unwrap();
 	}
 
 	#[test]

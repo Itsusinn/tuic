@@ -173,11 +173,6 @@ pub mod side {
 	pub struct Tx;
 	/// The side of a task that receives data
 	pub struct Rx;
-
-	pub(super) enum Side<T, R> {
-		Tx(T),
-		Rx(R),
-	}
 }
 
 struct UdpSessions<B> {

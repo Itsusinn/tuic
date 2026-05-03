@@ -90,13 +90,10 @@ impl Connection {
 			match addr {
 				AclAddress::Domain(d) => d.eq_ignore_ascii_case(dom),
 				AclAddress::WildcardDomain(pattern) => {
-					let stripped = if let Some(rest) = pattern.strip_prefix("*.") {
-						rest
-					} else if let Some(rest) = pattern.strip_prefix("suffix:") {
-						rest
-					} else {
-						pattern.as_str()
-					};
+					let stripped = pattern
+						.strip_prefix("*.")
+						.or_else(|| pattern.strip_prefix("suffix:"))
+						.unwrap_or(pattern);
 					let dom_l = dom.to_ascii_lowercase();
 					let suf_l = stripped.to_ascii_lowercase();
 					dom_l == suf_l || dom_l.ends_with(&format!(".{suf_l}"))

@@ -1,64 +1,104 @@
-use std::fmt::{Debug, Formatter, Result as FmtResult};
+use std::{
+	fmt::{Debug, Formatter, Result as FmtResult},
+	marker::PhantomData,
+};
 
-use super::side::{self, Side};
+use super::side;
 use crate::{Dissociate as DissociateHeader, Header};
 
-/// The model of the `Dissociate` command
-pub struct Dissociate<M> {
-	inner:   Side<Tx, Rx>,
-	_marker: M,
+// ── Per-model Side ──────────────────────────────────────────────────────
+
+pub trait DissociateTypes {
+	type TxData;
+	type RxData;
 }
 
-struct Tx {
+enum DissociateSide<M: DissociateTypes> {
+	Tx(<M as DissociateTypes>::TxData),
+	Rx(<M as DissociateTypes>::RxData),
+}
+
+// ── Data types per side ──────────────────────────────────────────────────
+
+pub struct Tx {
 	header: Header,
 }
+
+pub struct Rx {
+	assoc_id: u16,
+}
+
+// ── Marker → concrete type mapping ──────────────────────────────────────
+
+impl DissociateTypes for side::Tx {
+	type TxData = Tx;
+	type RxData = !;
+}
+
+impl DissociateTypes for side::Rx {
+	type TxData = !;
+	type RxData = Rx;
+}
+
+// ── Public wrapper ───────────────────────────────────────────────────────
+
+pub struct Dissociate<M: DissociateTypes> {
+	inner:   DissociateSide<M>,
+	_marker: PhantomData<M>,
+}
+
+// ── Tx side ─────────────────────────────────────────────────────────────
 
 impl Dissociate<side::Tx> {
 	pub(super) fn new(assoc_id: u16) -> Self {
 		Self {
-			inner:   Side::Tx(Tx {
+			inner:   DissociateSide::Tx(Tx {
 				header: Header::Dissociate(DissociateHeader::new(assoc_id)),
 			}),
-			_marker: side::Tx,
+			_marker: PhantomData,
 		}
 	}
 
-	/// Returns the header of the `Dissociate` command
 	pub fn header(&self) -> &Header {
-		let Side::Tx(tx) = &self.inner else { unreachable!() };
-		&tx.header
+		match &self.inner {
+			DissociateSide::Tx(tx) => &tx.header,
+			_ => unreachable!(),
+		}
 	}
 }
 
 impl Debug for Dissociate<side::Tx> {
 	fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
-		let Side::Tx(tx) = &self.inner else { unreachable!() };
-		f.debug_struct("Dissociate").field("header", &tx.header).finish()
+		match &self.inner {
+			DissociateSide::Tx(tx) => f.debug_struct("Dissociate").field("header", &tx.header).finish(),
+			_ => unreachable!(),
+		}
 	}
 }
 
-struct Rx {
-	assoc_id: u16,
-}
+// ── Rx side ─────────────────────────────────────────────────────────────
 
 impl Dissociate<side::Rx> {
 	pub(super) fn new(assoc_id: u16) -> Self {
 		Self {
-			inner:   Side::Rx(Rx { assoc_id }),
-			_marker: side::Rx,
+			inner:   DissociateSide::Rx(Rx { assoc_id }),
+			_marker: PhantomData,
 		}
 	}
 
-	/// Returns the UDP session ID
 	pub fn assoc_id(&self) -> u16 {
-		let Side::Rx(rx) = &self.inner else { unreachable!() };
-		rx.assoc_id
+		match &self.inner {
+			DissociateSide::Rx(rx) => rx.assoc_id,
+			_ => unreachable!(),
+		}
 	}
 }
 
 impl Debug for Dissociate<side::Rx> {
 	fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
-		let Side::Rx(rx) = &self.inner else { unreachable!() };
-		f.debug_struct("Dissociate").field("assoc_id", &rx.assoc_id).finish()
+		match &self.inner {
+			DissociateSide::Rx(rx) => f.debug_struct("Dissociate").field("assoc_id", &rx.assoc_id).finish(),
+			_ => unreachable!(),
+		}
 	}
 }

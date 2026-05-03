@@ -1,48 +1,86 @@
-use std::fmt::{Debug, Formatter, Result as FmtResult};
+use std::{
+	fmt::{Debug, Formatter, Result as FmtResult},
+	marker::PhantomData,
+};
 
-use super::side::{self, Side};
+use super::side;
 use crate::{Header, Heartbeat as HeartbeatHeader};
 
-pub struct Heartbeat<M> {
-	inner:   Side<Tx, Rx>,
-	_marker: M,
+// ── Per-model Side ──────────────────────────────────────────────────────
+
+pub trait HeartbeatTypes {
+	type TxData;
+	type RxData;
 }
 
-struct Tx {
+enum HeartbeatSide<M: HeartbeatTypes> {
+	Tx(<M as HeartbeatTypes>::TxData),
+	Rx(<M as HeartbeatTypes>::RxData),
+}
+
+// ── Data types per side ──────────────────────────────────────────────────
+
+pub struct Tx {
 	header: Header,
 }
+
+pub struct Rx;
+
+// ── Marker → concrete type mapping ──────────────────────────────────────
+
+impl HeartbeatTypes for side::Tx {
+	type TxData = Tx;
+	type RxData = !;
+}
+
+impl HeartbeatTypes for side::Rx {
+	type TxData = !;
+	type RxData = Rx;
+}
+
+// ── Public wrapper ───────────────────────────────────────────────────────
+
+pub struct Heartbeat<M: HeartbeatTypes> {
+	inner:   HeartbeatSide<M>,
+	_marker: PhantomData<M>,
+}
+
+// ── Tx side ─────────────────────────────────────────────────────────────
 
 impl Heartbeat<side::Tx> {
 	pub(super) fn new() -> Self {
 		Self {
-			inner:   Side::Tx(Tx {
+			inner:   HeartbeatSide::Tx(Tx {
 				header: Header::Heartbeat(HeartbeatHeader::new()),
 			}),
-			_marker: side::Tx,
+			_marker: PhantomData,
 		}
 	}
 
-	/// Returns the header of the `Heartbeat` command
 	pub fn header(&self) -> &Header {
-		let Side::Tx(tx) = &self.inner else { unreachable!() };
-		&tx.header
+		match &self.inner {
+			HeartbeatSide::Tx(tx) => &tx.header,
+			_ => unreachable!(),
+		}
 	}
 }
 
 impl Debug for Heartbeat<side::Tx> {
 	fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
-		let Side::Tx(tx) = &self.inner else { unreachable!() };
-		f.debug_struct("Heartbeat").field("header", &tx.header).finish()
+		match &self.inner {
+			HeartbeatSide::Tx(tx) => f.debug_struct("Heartbeat").field("header", &tx.header).finish(),
+			_ => unreachable!(),
+		}
 	}
 }
 
-struct Rx;
+// ── Rx side ─────────────────────────────────────────────────────────────
 
 impl Heartbeat<side::Rx> {
 	pub(super) fn new() -> Self {
 		Self {
-			inner:   Side::Rx(Rx),
-			_marker: side::Rx,
+			inner:   HeartbeatSide::Rx(Rx),
+			_marker: PhantomData,
 		}
 	}
 }
