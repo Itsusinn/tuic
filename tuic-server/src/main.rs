@@ -3,9 +3,10 @@ use std::process;
 use clap::Parser;
 #[cfg(feature = "jemallocator")]
 use tikv_jemallocator::Jemalloc;
-use tracing::level_filters::LevelFilter;
-use tracing_subscriber::{fmt::time::LocalTime, layer::SubscriberExt, util::SubscriberInitExt};
-use tuic_server::config::{Cli, Control, EnvState, ResolvedRuntime, parse_config};
+use tuic_server::{
+	config::{Cli, Control, EnvState, ResolvedRuntime, parse_config},
+	log,
+};
 
 #[cfg(feature = "jemallocator")]
 #[global_allocator]
@@ -42,26 +43,7 @@ fn main() -> eyre::Result<()> {
 			return Err(err);
 		}
 	};
-	let filter = tracing_subscriber::filter::Targets::new()
-		.with_targets(vec![
-			("tuic", cfg.log_level),
-			("tuic_quinn", cfg.log_level),
-			("tuic_server", cfg.log_level),
-		])
-		.with_default(LevelFilter::INFO);
-	let registry = tracing_subscriber::registry();
-	registry
-		.with(filter)
-		.with(
-			tracing_subscriber::fmt::layer()
-				.with_target(false)
-				.with_thread_ids(false)
-				.with_timer(LocalTime::new(time::macros::format_description!(
-					"[year repr:last_two]-[month]-[day] [hour]:[minute]:[second]"
-				)))
-				.compact(),
-		)
-		.try_init()?;
+	let _log_guards = log::init(&cfg)?;
 
 	let mut builder = match cfg.tokio_runtime.resolve() {
 		ResolvedRuntime::MultiThread => tokio::runtime::Builder::new_multi_thread(),
