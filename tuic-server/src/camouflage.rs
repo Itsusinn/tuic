@@ -29,9 +29,9 @@ pub async fn handle(
 	let (backend, backend_host_override, client) = build_backend_route(camouflage)?;
 
 	info!(
-		"[{id:#010x}] [{addr}] [camouflage] HTTP/3 camouflage enabled, reverse proxy target={target}, backend_host={host:?}",
 		id = conn.stable_id() as u32,
-		addr = conn.remote_address(),
+		addr = %conn.remote_address(),
+		"HTTP/3 camouflage enabled, reverse proxy target={target}, backend_host={host:?}",
 		target = backend,
 		host = backend_host_override
 	);

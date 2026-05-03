@@ -10,7 +10,7 @@ use tokio::{
 	net::UdpSocket,
 	sync::{RwLock as AsyncRwLock, oneshot},
 };
-use tracing::warn;
+use tracing::{Instrument, Span, warn};
 use tuic_core::Address;
 
 use super::Connection;
@@ -77,6 +77,7 @@ impl UdpSession {
 
 		let session_listening = session.clone();
 		// UdpSession's real owner.
+		let listen_span = Span::current();
 		let listen = async move {
 			let mut rx = rx;
 			let mut timeout = tokio::time::interval(ctx.cfg.stream_timeout);
@@ -89,12 +90,7 @@ impl UdpSession {
 					// Avoid client didn't send `UDP-DROP` properly
 					_ = timeout.tick() => {
 						session_listening.close().await;
-						warn!(
-							"[{id:#010x}] [{addr}] [{user}] [packet] [{assoc_id:#06x}] UDP session timeout",
-							id = session_listening.conn.id(),
-							addr = session_listening.conn.inner.remote_address(),
-							user = session_listening.conn.auth,
-						);
+						warn!("[packet] [{assoc_id:#06x}] UDP session timeout", assoc_id = session_listening.assoc_id);
 						continue;
 					},
 					// `UDP-DROP`
@@ -105,10 +101,8 @@ impl UdpSession {
 					Ok(v) => v,
 					Err(err) => {
 						warn!(
-							"[{id:#010x}] [{addr}] [{user}] [packet] [{assoc_id:#06x}] outbound listening error: {err}",
-							id = session_listening.conn.id(),
-							addr = session_listening.conn.inner.remote_address(),
-							user = session_listening.conn.auth,
+							"[packet] [{assoc_id:#06x}] outbound listening error: {err}",
+							assoc_id = session_listening.assoc_id
 						);
 						continue;
 					}
@@ -125,7 +119,7 @@ impl UdpSession {
 			session_listening.conn.udp_sessions.write().await.remove(&assoc_id);
 		};
 
-		tokio::spawn(listen);
+		tokio::spawn(listen.instrument(listen_span));
 		Ok(Arc::downgrade(&session))
 	}
 

@@ -11,7 +11,7 @@ use quinn::{Connecting, Connection as QuinnConnection, VarInt};
 use register_count::Counter;
 use smallvec::SmallVec;
 use tokio::{sync::RwLock as AsyncRwLock, time};
-use tracing::{debug, info, warn};
+use tracing::{Instrument, Span, debug, info, info_span, warn};
 use tuic_core::quinn::{Authenticate, Connection as Model, side};
 
 use self::{authenticated::Authenticated, udp_session::UdpSession};
@@ -69,7 +69,7 @@ pub struct Connection {
 
 impl Connection {
 	pub async fn handle(ctx: Arc<AppContext>, conn: Connecting) {
-		let addr = conn.remote_address();
+		let peer_addr = conn.remote_address();
 
 		let init = async {
 			let conn = if ctx.cfg.zero_rtt_handshake {
@@ -86,68 +86,85 @@ impl Connection {
 
 		match init.await {
 			Ok(conn) => {
+				let conn_span = info_span!(
+					"conn",
+					id = conn.id(),
+					addr = %conn.inner.remote_address(),
+					user = tracing::field::Empty,
+				);
+				let _guard = conn_span.enter();
+				let conn_span = conn_span.clone();
+
 				if ctx.cfg.camouflage.as_ref().is_some_and(|cfg| cfg.enabled) {
 					match conn.classify_h3_dispatch().await {
 						Ok(H3Dispatch::Camouflage {
 							prefetched_uni,
 							prefetched_bi,
 						}) => {
+							drop(_guard);
 							if let Err(err) =
 								camouflage::handle(ctx.clone(), conn.inner.clone(), prefetched_uni, prefetched_bi).await
 							{
-								warn!("[{id:#010x}] [{addr}] [camouflage] {err}", id = conn.id(), addr = addr);
+								warn!(parent: &conn_span, "camouflage: {err}");
 							}
 							return;
 						}
 						Ok(H3Dispatch::Tuic(first_event)) => {
-							info!(
-								"[{id:#010x}] [{addr}] [{user}] connection established",
-								id = conn.id(),
-								user = conn.auth,
+							info!("connection established");
+							tokio::spawn(
+								conn.clone()
+									.timeout_authenticate(ctx.cfg.auth_timeout)
+									.instrument(conn_span.clone()),
 							);
-							tokio::spawn(conn.clone().timeout_authenticate(ctx.cfg.auth_timeout));
-							tokio::spawn(conn.clone().collect_garbage());
+							tokio::spawn(conn.clone().collect_garbage().instrument(conn_span.clone()));
 							if let Some(first_event) = first_event {
+								let span = conn_span.clone();
 								match first_event {
 									PrefetchedFirstEventTuic::Uni(recv) => {
-										tokio::spawn(conn.clone().handle_uni_stream(recv, conn.remote_uni_stream_cnt.reg()));
+										tokio::spawn(
+											conn.clone()
+												.handle_uni_stream(recv, conn.remote_uni_stream_cnt.reg())
+												.instrument(span),
+										);
 									}
 									PrefetchedFirstEventTuic::Bi { send, recv } => {
 										tokio::spawn(
-											conn.clone().handle_bi_stream((send, recv), conn.remote_bi_stream_cnt.reg()),
+											conn.clone()
+												.handle_bi_stream((send, recv), conn.remote_bi_stream_cnt.reg())
+												.instrument(span),
 										);
 									}
 									PrefetchedFirstEventTuic::Datagram(dg) => {
-										tokio::spawn(conn.clone().handle_datagram(dg));
+										tokio::spawn(conn.clone().handle_datagram(dg).instrument(span));
 									}
 								}
 							}
 
-							conn.run_tuic_event_loop().await;
+							conn.run_tuic_event_loop().instrument(conn_span).await;
 							return;
 						}
 						Err(err) => {
-							warn!("[{id:#010x}] [{addr}] [classifier] {err}", id = conn.id(), addr = addr);
+							warn!("classifier: {err}");
 							conn.close();
 							return;
 						}
 					}
 				}
 
-				info!(
-					"[{id:#010x}] [{addr}] [{user}] connection established",
-					id = conn.id(),
-					user = conn.auth,
+				info!("connection established");
+				tokio::spawn(
+					conn.clone()
+						.timeout_authenticate(ctx.cfg.auth_timeout)
+						.instrument(conn_span.clone()),
 				);
-				tokio::spawn(conn.clone().timeout_authenticate(ctx.cfg.auth_timeout));
-				tokio::spawn(conn.clone().collect_garbage());
-				conn.run_tuic_event_loop().await;
+				tokio::spawn(conn.clone().collect_garbage().instrument(conn_span.clone()));
+				conn.run_tuic_event_loop().instrument(conn_span).await;
 			}
 			Err(err) if err.is_trivial() => {
-				debug!("[{id:#010x}] [{addr}] [unauthenticated] {err}", id = u32::MAX,);
+				debug!(id = u32::MAX, addr = %peer_addr, "{err}");
 			}
 			Err(err) => {
-				warn!("[{id:#010x}] [{addr}] [unauthenticated] {err}", id = u32::MAX,)
+				warn!(id = u32::MAX, addr = %peer_addr, "{err}")
 			}
 		}
 	}
@@ -178,6 +195,7 @@ impl Connection {
 			.is_some_and(|password| auth.validate(password))
 		{
 			self.auth.set(auth.uuid()).await;
+			Span::current().record("user", auth.uuid().to_string());
 			Ok(())
 		} else {
 			Err(Error::AuthFailed(auth.uuid()))
@@ -192,11 +210,7 @@ impl Connection {
 				restful::client_connect(&self.ctx, &uuid, self.inner).await;
 			}
 			None => {
-				warn!(
-					"[{id:#010x}] [{addr}] [unauthenticated] [authenticate] timeout",
-					id = self.id(),
-					addr = self.inner.remote_address(),
-				);
+				warn!("[authenticate] timeout");
 				self.close();
 			}
 		}
@@ -213,12 +227,7 @@ impl Connection {
 				break;
 			}
 
-			debug!(
-				"[{id:#010x}] [{addr}] [{user}] packet fragment garbage collecting event",
-				id = self.id(),
-				addr = self.inner.remote_address(),
-				user = self.auth,
-			);
+			debug!("packet fragment garbage collecting event");
 			self.model.collect_garbage(self.ctx.cfg.gc_lifetime);
 		}
 	}
@@ -311,6 +320,7 @@ impl Connection {
 	}
 
 	async fn run_tuic_event_loop(&self) {
+		let span = Span::current();
 		loop {
 			if self.is_closed() {
 				break;
@@ -319,11 +329,11 @@ impl Connection {
 			let handle_incoming = async {
 				tokio::select! {
 					res = self.inner.accept_uni() =>
-						tokio::spawn(self.clone().handle_uni_stream(res?, self.remote_uni_stream_cnt.reg())),
+						tokio::spawn(self.clone().handle_uni_stream(res?, self.remote_uni_stream_cnt.reg()).instrument(span.clone())),
 					res = self.inner.accept_bi() =>
-						tokio::spawn(self.clone().handle_bi_stream(res?, self.remote_bi_stream_cnt.reg())),
+						tokio::spawn(self.clone().handle_bi_stream(res?, self.remote_bi_stream_cnt.reg()).instrument(span.clone())),
 					res = self.inner.read_datagram() =>
-						tokio::spawn(self.clone().handle_datagram(res?)),
+						tokio::spawn(self.clone().handle_datagram(res?).instrument(span.clone())),
 				};
 
 				Ok::<_, Error>(())
@@ -332,19 +342,9 @@ impl Connection {
 			match handle_incoming.await {
 				Ok(()) => {}
 				Err(err) if err.is_trivial() => {
-					debug!(
-						"[{id:#010x}] [{addr}] [{user}] {err}",
-						id = self.id(),
-						addr = self.inner.remote_address(),
-						user = self.auth,
-					);
+					debug!("{err}");
 				}
-				Err(err) => warn!(
-					"[{id:#010x}] [{addr}] [{user}] connection error: {err}",
-					id = self.id(),
-					addr = self.inner.remote_address(),
-					user = self.auth,
-				),
+				Err(err) => warn!("connection error: {err}"),
 			}
 		}
 	}
