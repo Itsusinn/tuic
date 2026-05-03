@@ -18,6 +18,7 @@ aws-lc-rs = ["tuic-core/aws-lc-rs", "dep:aws-lc-rs", "rustls/aws-lc-rs", "rcgen/
 jemallocator = ["tikv-jemallocator"]
 
 [dependencies]
+h3 = "0.0.8"
 
 num_cpus = "1"
 toml = "1.1"
@@ -80,10 +81,10 @@ eyre = { version = "0.6" }
 axum = { version = "0.8", features = ["json", "tokio"] }
 axum-extra = { version = "0.12", features = ["typed-header"] }
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "http2", "stream"] }
-h3 = "0.0.8"
 futures-util = { version = "0.3", default-features = false, features = ["std"] }
 futures = "0.3"
-peekable = { version = "0.6.1", default-features = false, features = ["future"] }
+peekable = { version = "0.6.1", default-features = false, features = ["tokio"] }
+smallvec = { version = "1", default-features = false }
 
 tikv-jemallocator = { version = "0.6", optional = true }
 rand = "0.10"

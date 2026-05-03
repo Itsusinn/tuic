@@ -11,7 +11,7 @@ use quinn::Connection;
 use reqwest::{Client, Method, Url};
 use tracing::{debug, info, warn};
 
-use crate::{AppContext, config::CamouflageConfig, h3_quinn_compat};
+use crate::{AppContext, config::CamouflageConfig};
 
 const MAX_REQUEST_BODY_SIZE: usize = 16 * 1024 * 1024;
 const MAX_RESPONSE_BODY_SIZE: usize = 64 * 1024 * 1024;
@@ -19,8 +19,8 @@ const MAX_RESPONSE_BODY_SIZE: usize = 64 * 1024 * 1024;
 pub async fn handle(
 	ctx: Arc<AppContext>,
 	conn: Connection,
-	prefetched_uni: Option<h3_quinn_compat::PeekableRecvStream>,
-	prefetched_bi: Option<h3_quinn_compat::PrefetchedBiRecv>,
+	prefetched_uni: Option<crate::h3_quinn_compat::PeekableRecvStream>,
+	prefetched_bi: Option<crate::h3_quinn_compat::PrefetchedBiRecv>,
 ) -> eyre::Result<()> {
 	let Some(camouflage) = ctx.cfg.camouflage.as_ref().filter(|cfg| cfg.enabled) else {
 		return Ok(());
@@ -36,7 +36,7 @@ pub async fn handle(
 		host = backend_host_override
 	);
 
-	let quic_conn = h3_quinn_compat::Connection::new_with_prefetched(conn, prefetched_uni, prefetched_bi);
+	let quic_conn = crate::h3_quinn_compat::Connection::new_with_prefetched(conn, prefetched_uni, prefetched_bi);
 	let mut h3_conn = server::Connection::new(quic_conn).await?;
 
 	while let Some(resolver) = h3_conn.accept().await? {

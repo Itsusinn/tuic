@@ -6,15 +6,16 @@ use std::{
 
 use arc_swap::ArcSwap;
 use bytes::Bytes;
-use peekable::future::AsyncPeekExt;
+use peekable::tokio::AsyncPeekExt;
 use quinn::{Connecting, Connection as QuinnConnection, VarInt};
 use register_count::Counter;
+use smallvec::SmallVec;
 use tokio::{sync::RwLock as AsyncRwLock, time};
 use tracing::{debug, info, warn};
 use tuic_core::quinn::{Authenticate, Connection as Model, side};
 
 use self::{authenticated::Authenticated, udp_session::UdpSession};
-use crate::{AppContext, camouflage, error::Error, h3_quinn_compat, restful, utils::UdpRelayMode};
+use crate::{AppContext, camouflage, error::Error, restful, utils::UdpRelayMode};
 
 mod authenticated;
 mod handle_stream;
@@ -27,8 +28,8 @@ pub const INIT_CONCURRENT_STREAMS: u32 = 512;
 enum H3Dispatch {
 	Tuic(Option<PrefetchedFirstEventTuic>),
 	Camouflage {
-		prefetched_uni: Option<h3_quinn_compat::PeekableRecvStream>,
-		prefetched_bi:  Option<h3_quinn_compat::PrefetchedBiRecv>,
+		prefetched_uni: Option<crate::h3_quinn_compat::PeekableRecvStream>,
+		prefetched_bi:  Option<crate::h3_quinn_compat::PrefetchedBiRecv>,
 	},
 }
 
@@ -39,19 +40,15 @@ enum FirstEvent {
 }
 
 enum ClassifiedRecvStream {
-	Tuic { recv: quinn::RecvStream, prefix: Bytes },
-	Camouflage(h3_quinn_compat::PeekableRecvStream),
+	Tuic(crate::h3_quinn_compat::PeekableRecvStream),
+	Camouflage(crate::h3_quinn_compat::PeekableRecvStream),
 }
 
 enum PrefetchedFirstEventTuic {
-	Uni {
-		recv:   quinn::RecvStream,
-		prefix: Bytes,
-	},
+	Uni(crate::h3_quinn_compat::PeekableRecvStream),
 	Bi {
-		send:   quinn::SendStream,
-		recv:   quinn::RecvStream,
-		prefix: Bytes,
+		send: quinn::SendStream,
+		recv: crate::h3_quinn_compat::PeekableRecvStream,
 	},
 	Datagram(Bytes),
 }
@@ -112,19 +109,13 @@ impl Connection {
 							tokio::spawn(conn.clone().collect_garbage());
 							if let Some(first_event) = first_event {
 								match first_event {
-									PrefetchedFirstEventTuic::Uni { recv, prefix } => {
-										tokio::spawn(conn.clone().handle_uni_stream_prefixed(
-											recv,
-											prefix,
-											conn.remote_uni_stream_cnt.reg(),
-										));
+									PrefetchedFirstEventTuic::Uni(recv) => {
+										tokio::spawn(conn.clone().handle_uni_stream(recv, conn.remote_uni_stream_cnt.reg()));
 									}
-									PrefetchedFirstEventTuic::Bi { send, recv, prefix } => {
-										tokio::spawn(conn.clone().handle_bi_stream_prefixed(
-											(send, recv),
-											prefix,
-											conn.remote_bi_stream_cnt.reg(),
-										));
+									PrefetchedFirstEventTuic::Bi { send, recv } => {
+										tokio::spawn(
+											conn.clone().handle_bi_stream((send, recv), conn.remote_bi_stream_cnt.reg()),
+										);
 									}
 									PrefetchedFirstEventTuic::Datagram(dg) => {
 										tokio::spawn(conn.clone().handle_datagram(dg));
@@ -268,21 +259,17 @@ impl Connection {
 
 		match first_event {
 			FirstEvent::Uni(recv) => match self.classify_recv_stream(recv, classify_timeout).await? {
-				ClassifiedRecvStream::Tuic { recv, prefix } => {
-					Ok(H3Dispatch::Tuic(Some(PrefetchedFirstEventTuic::Uni { recv, prefix })))
-				}
+				ClassifiedRecvStream::Tuic(recv) => Ok(H3Dispatch::Tuic(Some(PrefetchedFirstEventTuic::Uni(recv)))),
 				ClassifiedRecvStream::Camouflage(recv) => Ok(H3Dispatch::Camouflage {
 					prefetched_uni: Some(recv),
 					prefetched_bi:  None,
 				}),
 			},
 			FirstEvent::Bi(send, recv) => match self.classify_recv_stream(recv, classify_timeout).await? {
-				ClassifiedRecvStream::Tuic { recv, prefix } => {
-					Ok(H3Dispatch::Tuic(Some(PrefetchedFirstEventTuic::Bi { send, recv, prefix })))
-				}
+				ClassifiedRecvStream::Tuic(recv) => Ok(H3Dispatch::Tuic(Some(PrefetchedFirstEventTuic::Bi { send, recv }))),
 				ClassifiedRecvStream::Camouflage(recv) => Ok(H3Dispatch::Camouflage {
 					prefetched_uni: None,
-					prefetched_bi:  Some(h3_quinn_compat::PrefetchedBiRecv { send, recv }),
+					prefetched_bi:  Some(crate::h3_quinn_compat::PrefetchedBiRecv { send, recv }),
 				}),
 			},
 			FirstEvent::Datagram(dg) => {
@@ -299,7 +286,7 @@ impl Connection {
 	}
 
 	async fn classify_recv_stream(&self, recv: quinn::RecvStream, timeout: Duration) -> Result<ClassifiedRecvStream, Error> {
-		let mut recv = recv.peekable();
+		let mut recv = recv.peekable_with_buffer::<SmallVec<[u8; 4]>>();
 		let mut prefix = [0u8; 2];
 		let read = time::timeout(timeout, recv.peek_exact(&mut prefix))
 			.await
@@ -309,9 +296,7 @@ impl Connection {
 		}
 
 		if self.is_tuic_prefix(prefix) {
-			let prefix = Bytes::from(recv.consume());
-			let (_, recv) = recv.into_components();
-			Ok(ClassifiedRecvStream::Tuic { recv, prefix })
+			Ok(ClassifiedRecvStream::Tuic(recv))
 		} else {
 			Ok(ClassifiedRecvStream::Camouflage(recv))
 		}
