@@ -79,6 +79,7 @@ impl UdpSession {
 		// UdpSession's real owner.
 		let listen_span = Span::current();
 		let listen = async move {
+			let span = Span::current();
 			let mut rx = rx;
 			let mut timeout = tokio::time::interval(ctx.cfg.stream_timeout);
 			timeout.reset();
@@ -113,7 +114,8 @@ impl UdpSession {
 						.conn
 						.clone()
 						.relay_packet(pkt, Address::SocketAddress(addr), session_listening.assoc_id)
-						.log_err(),
+						.log_err()
+						.instrument(span.clone()),
 				);
 			}
 			session_listening.conn.udp_sessions.write().await.remove(&assoc_id);

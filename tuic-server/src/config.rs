@@ -90,6 +90,10 @@ pub struct Config {
 	#[educe(Default = "")]
 	pub data_dir: PathBuf,
 
+	/// Logging configuration.
+	#[serde(default)]
+	pub log: LogConfig,
+
 	#[educe(Default = None)]
 	pub restful: Option<RestfulConfig>,
 
@@ -495,6 +499,44 @@ pub enum LogLevel {
 	Warn,
 	Error,
 	Off,
+}
+
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum LogFormat {
+	#[default]
+	Text,
+	Json,
+}
+
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum LogRotation {
+	#[default]
+	Never,
+	Hourly,
+	Daily,
+}
+
+/// Logging settings.
+#[derive(Debug, Clone, Deserialize, Serialize, Educe)]
+#[serde(deny_unknown_fields)]
+#[educe(Default)]
+pub struct LogConfig {
+	/// Log output format for stdout and log_file.
+	pub format: LogFormat,
+
+	/// Use compact log format (single-line, less verbose). Only applies to
+	/// `text` format.
+	#[educe(Default = true)]
+	pub compact: bool,
+
+	/// Optional log file path. When set, logs are also written to this file
+	/// with the configured `log_rotation` policy.
+	pub log_file: Option<PathBuf>,
+
+	/// Rotation policy for `log_file`.
+	pub log_rotation: LogRotation,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize, serde::Serialize)]
