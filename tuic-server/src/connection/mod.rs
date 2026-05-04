@@ -92,8 +92,6 @@ impl Connection {
 					addr = %conn.inner.remote_address(),
 					user = tracing::field::Empty,
 				);
-				let _guard = conn_span.enter();
-				let conn_span = conn_span.clone();
 
 				if ctx.cfg.camouflage.as_ref().is_some_and(|cfg| cfg.enabled) {
 					match conn.classify_h3_dispatch().await {
@@ -101,7 +99,6 @@ impl Connection {
 							prefetched_uni,
 							prefetched_bi,
 						}) => {
-							drop(_guard);
 							if let Err(err) =
 								camouflage::handle(ctx.clone(), conn.inner.clone(), prefetched_uni, prefetched_bi).await
 							{
@@ -110,7 +107,7 @@ impl Connection {
 							return;
 						}
 						Ok(H3Dispatch::Tuic(first_event)) => {
-							info!("connection established");
+							info!(parent: &conn_span, "connection established");
 							tokio::spawn(
 								conn.clone()
 									.timeout_authenticate(ctx.cfg.auth_timeout)
@@ -144,14 +141,14 @@ impl Connection {
 							return;
 						}
 						Err(err) => {
-							warn!("classifier: {err}");
+							warn!(parent: &conn_span, "classifier: {err}");
 							conn.close();
 							return;
 						}
 					}
 				}
 
-				info!("connection established");
+				info!(parent: &conn_span, "connection established");
 				tokio::spawn(
 					conn.clone()
 						.timeout_authenticate(ctx.cfg.auth_timeout)
