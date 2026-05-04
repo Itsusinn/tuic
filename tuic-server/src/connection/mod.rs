@@ -1,16 +1,16 @@
 use std::{
-	collections::HashMap,
-	sync::{Arc, Weak, atomic::AtomicU32},
+	sync::{Arc, atomic::AtomicU32},
 	time::Duration,
 };
 
 use arc_swap::ArcSwap;
 use bytes::Bytes;
+use moka::future::Cache;
 use peekable::tokio::AsyncPeekExt;
 use quinn::{Connecting, Connection as QuinnConnection, VarInt};
 use register_count::Counter;
 use smallvec::SmallVec;
-use tokio::{sync::RwLock as AsyncRwLock, time};
+use tokio::time;
 use tracing::{Instrument, Span, debug, info, info_span, warn};
 use tuic_core::quinn::{Authenticate, Connection as Model, side};
 
@@ -59,7 +59,7 @@ pub struct Connection {
 	inner: QuinnConnection,
 	model: Model<side::Server>,
 	auth: Authenticated,
-	udp_sessions: Arc<AsyncRwLock<HashMap<u16, Weak<UdpSession>>>>,
+	udp_sessions: Cache<u16, Arc<UdpSession>>,
 	udp_relay_mode: Arc<ArcSwap<Option<UdpRelayMode>>>,
 	remote_uni_stream_cnt: Counter,
 	remote_bi_stream_cnt: Counter,
@@ -175,7 +175,7 @@ impl Connection {
 			inner: conn.clone(),
 			model: Model::<side::Server>::new(conn),
 			auth: Authenticated::new(),
-			udp_sessions: Arc::new(AsyncRwLock::new(HashMap::new())),
+			udp_sessions: Cache::new(u16::MAX as u64),
 			udp_relay_mode: Arc::new(ArcSwap::new(None.into())),
 			remote_uni_stream_cnt: Counter::new(),
 			remote_bi_stream_cnt: Counter::new(),
