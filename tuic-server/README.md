@@ -35,6 +35,9 @@ This fork includes advanced features such as Docker support, self-signed certifi
 - TLS support with auto-provisioning and self-signed certificates
 - RESTful API for monitoring and management
 - Docker and Docker Compose deployment options
+- Lock-free concurrent caches (moka) for UDP session management
+- Structured logging with configurable format, compact mode, and file rotation
+- Tracing spans for per-connection observability (id, addr, user)
 
 ---
 
@@ -143,6 +146,19 @@ gc_lifetime = "30s"
 max_external_packet_size = 1500
 # How long to preserve TCP and UDP I/O tasks
 stream_timeout = "60s"
+# Tokio runtime to use: auto, multi_thread, current_thread
+# auto: single-threaded when <= 2 CPUs, multi-threaded otherwise
+tokio_runtime = "auto"
+
+[log]
+# Log output format: text (default), json
+format = "text"
+# Compact format (single-line, less verbose). Only applies to text format
+compact = true
+# Optional log file path. When set, logs are also written to this file
+# log_file = "/var/log/tuic/server.log"
+# Rotation policy for log_file: never (default), hourly, daily
+# log_rotation = "daily"
 
 # Access Control List (ACL) rules - can be specified in two formats:
 
