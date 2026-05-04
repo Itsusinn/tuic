@@ -1,6 +1,7 @@
 use std::{
 	io::{Error as IoError, ErrorKind},
 	net::{IpAddr, SocketAddr},
+	sync::Arc,
 };
 
 use bytes::Bytes;
@@ -328,14 +329,14 @@ impl Connection {
 				src_addr = addr
 			);
 
-			let session = match self.udp_sessions.get(&assoc_id).await {
+			let session = match self.udp_sessions.get(&assoc_id).await.and_then(|w| w.upgrade()) {
 				Some(s) => s,
 				None => {
 					let weak = UdpSession::new(self.ctx.clone(), self.clone(), assoc_id)?;
 					let strong = weak
 						.upgrade()
 						.ok_or_else(|| Error::Other(eyre!("UdpSession dropped before use")))?;
-					self.udp_sessions.insert(assoc_id, strong.clone()).await;
+					self.udp_sessions.insert(assoc_id, Arc::downgrade(&strong)).await;
 					strong
 				}
 			};
@@ -409,7 +410,9 @@ impl Connection {
 	pub async fn handle_dissociate(&self, assoc_id: u16) {
 		info!("[UDP-DROP] [{assoc_id:#06x}]");
 
-		if let Some(session) = self.udp_sessions.remove(&assoc_id).await {
+		if let Some(weak) = self.udp_sessions.remove(&assoc_id).await
+			&& let Some(session) = weak.upgrade()
+		{
 			session.close().await;
 		}
 	}
