@@ -1,10 +1,11 @@
 use std::{
 	io::Error as IoError,
 	net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, UdpSocket as StdUdpSocket},
-	sync::{Arc, Weak},
+	sync::Arc,
 };
 
 use bytes::Bytes;
+use moka::future::Cache;
 use socket2::{Domain, Protocol, SockAddr, Socket, Type};
 use tokio::{
 	net::UdpSocket,
@@ -17,17 +18,26 @@ use super::Connection;
 use crate::{AppContext, error::Error, utils::FutResultExt};
 
 pub struct UdpSession {
-	ctx:       Arc<AppContext>,
-	assoc_id:  u16,
-	conn:      Connection,
-	socket_v4: UdpSocket,
-	socket_v6: Option<UdpSocket>,
-	close:     AsyncRwLock<Option<oneshot::Sender<()>>>,
+	ctx:          Arc<AppContext>,
+	assoc_id:     u16,
+	udp_sessions: Cache<u16, Arc<UdpSession>>,
+	socket_v4:    UdpSocket,
+	socket_v6:    Option<UdpSocket>,
+	close:        AsyncRwLock<Option<oneshot::Sender<()>>>,
 }
 
 impl UdpSession {
-	// spawn a task which actually owns itself, then return its wake reference.
-	pub fn new(ctx: Arc<AppContext>, conn: Connection, assoc_id: u16) -> Result<Weak<Self>, Error> {
+	/// Spawn a listen task for the UDP session and return an `Arc<Self>`.
+	///
+	/// The listen task is the session's real owner; when it ends the session
+	/// is dropped. `conn` is consumed and moved into the listen task for
+	/// outgoing packet relay (`relay_packet`).
+	pub fn new(
+		ctx: Arc<AppContext>,
+		conn: Connection,
+		assoc_id: u16,
+		udp_sessions: Cache<u16, Arc<UdpSession>>,
+	) -> Result<Arc<Self>, Error> {
 		let socket_v4 = {
 			let socket = Socket::new(Domain::IPV4, Type::DGRAM, Some(Protocol::UDP))
 				.map_err(|err| Error::Socket("failed to create UDP associate IPv4 socket", err))?;
@@ -66,22 +76,23 @@ impl UdpSession {
 
 		let (tx, rx) = oneshot::channel();
 
+		let ctx_listening = ctx.clone();
 		let session = Arc::new(Self {
-			ctx: ctx.clone(),
-			conn,
+			ctx,
 			assoc_id,
+			udp_sessions,
 			socket_v4,
 			socket_v6,
 			close: AsyncRwLock::new(Some(tx)),
 		});
 
 		let session_listening = session.clone();
-		// UdpSession's real owner.
+		let conn_listening = conn; // moved here, used by listen task for relay
 		let listen_span = Span::current();
 		let listen = async move {
 			let span = Span::current();
 			let mut rx = rx;
-			let mut timeout = tokio::time::interval(ctx.cfg.stream_timeout);
+			let mut timeout = tokio::time::interval(ctx_listening.cfg.stream_timeout);
 			timeout.reset();
 
 			loop {
@@ -110,19 +121,18 @@ impl UdpSession {
 				};
 
 				tokio::spawn(
-					session_listening
-						.conn
+					conn_listening
 						.clone()
 						.relay_packet(pkt, Address::SocketAddress(addr), session_listening.assoc_id)
 						.log_err()
 						.instrument(span.clone()),
 				);
 			}
-			session_listening.conn.udp_sessions.invalidate(&assoc_id).await;
+			session_listening.udp_sessions.invalidate(&assoc_id).await;
 		};
 
 		tokio::spawn(listen.instrument(listen_span));
-		Ok(Arc::downgrade(&session))
+		Ok(session)
 	}
 
 	pub async fn send(&self, pkt: Bytes, mut addr: SocketAddr) -> Result<(), Error> {

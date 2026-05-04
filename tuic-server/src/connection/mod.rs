@@ -1,5 +1,5 @@
 use std::{
-	sync::{Arc, Weak, atomic::AtomicU32},
+	sync::{Arc, atomic::AtomicU32},
 	time::Duration,
 };
 
@@ -59,7 +59,7 @@ pub struct Connection {
 	inner: QuinnConnection,
 	model: Model<side::Server>,
 	auth: Authenticated,
-	udp_sessions: Cache<u16, Weak<UdpSession>>,
+	udp_sessions: Cache<u16, Arc<UdpSession>>,
 	udp_relay_mode: Arc<ArcSwap<Option<UdpRelayMode>>>,
 	remote_uni_stream_cnt: Counter,
 	remote_bi_stream_cnt: Counter,
