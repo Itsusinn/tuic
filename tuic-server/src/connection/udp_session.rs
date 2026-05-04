@@ -118,7 +118,7 @@ impl UdpSession {
 						.instrument(span.clone()),
 				);
 			}
-			session_listening.conn.udp_sessions.write().await.remove(&assoc_id);
+			session_listening.conn.udp_sessions.invalidate(&assoc_id).await;
 		};
 
 		tokio::spawn(listen.instrument(listen_span));
