@@ -140,6 +140,7 @@ impl Connection {
 								}
 							}
 
+							drop(_guard);
 							conn.run_tuic_event_loop().instrument(conn_span).await;
 							return;
 						}
@@ -158,6 +159,7 @@ impl Connection {
 						.instrument(conn_span.clone()),
 				);
 				tokio::spawn(conn.clone().collect_garbage().instrument(conn_span.clone()));
+				drop(_guard);
 				conn.run_tuic_event_loop().instrument(conn_span).await;
 			}
 			Err(err) if err.is_trivial() => {
