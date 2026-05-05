@@ -5,6 +5,7 @@ use axum::http::{
 	header::{HOST, HeaderValue},
 };
 use bytes::{Buf, Bytes};
+use futures::stream;
 use futures_util::StreamExt;
 use h3::server;
 use quinn::Connection;
@@ -12,9 +13,6 @@ use reqwest::{Client, Method, Url};
 use tracing::{debug, info, warn};
 
 use crate::{AppContext, config::CamouflageConfig};
-
-const MAX_REQUEST_BODY_SIZE: usize = 16 * 1024 * 1024;
-const MAX_RESPONSE_BODY_SIZE: usize = 64 * 1024 * 1024;
 
 pub async fn handle(
 	ctx: Arc<AppContext>,
@@ -40,21 +38,15 @@ pub async fn handle(
 	let mut h3_conn = server::Connection::new(quic_conn).await?;
 
 	while let Some(resolver) = h3_conn.accept().await? {
-		let (request, mut stream) = resolver.resolve_request().await?;
+		let (request, stream) = resolver.resolve_request().await?;
 		debug!(
 			"[camouflage] incoming h3 request: method={} uri={}",
 			request.method(),
 			request.uri()
 		);
 
-		match forward_request(&client, &backend, backend_host_override.as_deref(), request, &mut stream).await {
-			Ok(()) => {}
-			Err(err) => {
-				warn!("[camouflage] request forwarding failed: {err}");
-				let resp = Response::builder().status(502).body(())?;
-				_ = stream.send_response(resp).await;
-				_ = stream.finish().await;
-			}
+		if let Err(err) = forward_request(&client, &backend, backend_host_override.as_deref(), request, stream).await {
+			warn!("[camouflage] request forwarding failed: {err}");
 		}
 	}
 
@@ -95,10 +87,11 @@ async fn forward_request<S>(
 	backend: &Url,
 	backend_host_override: Option<&str>,
 	request: Request<()>,
-	stream: &mut server::RequestStream<S, Bytes>,
+	stream: server::RequestStream<S, Bytes>,
 ) -> eyre::Result<()>
 where
 	S: h3::quic::BidiStream<Bytes>,
+	<S as h3::quic::BidiStream<Bytes>>::RecvStream: Send + 'static,
 {
 	let target = rewrite_target_url(backend, request.uri())?;
 	let method = Method::from_bytes(request.method().as_str().as_bytes())?;
@@ -119,12 +112,31 @@ where
 		backend_request = backend_request.header(HOST, host);
 	}
 
-	let request_body = read_request_body(stream).await?;
-	if !request_body.is_empty() {
-		backend_request = backend_request.body(request_body);
-	}
+	let (mut send_half, recv_half) = stream.split();
 
-	let backend_response = backend_request.send().await?;
+	let body_stream = stream::unfold(Some(recv_half), |state| async move {
+		let mut recv = state?;
+		match recv.recv_data().await {
+			Ok(Some(mut chunk)) => {
+				let remaining = chunk.remaining();
+				let bytes = chunk.copy_to_bytes(remaining);
+				Some((Ok::<Bytes, std::io::Error>(bytes), Some(recv)))
+			}
+			Ok(None) => None,
+			Err(e) => Some((Err(std::io::Error::other(e.to_string())), None)),
+		}
+	});
+	backend_request = backend_request.body(reqwest::Body::wrap_stream(body_stream));
+
+	let backend_response = match backend_request.send().await {
+		Ok(resp) => resp,
+		Err(err) => {
+			let resp = Response::builder().status(502).body(())?;
+			let _ = send_half.send_response(resp).await;
+			let _ = send_half.finish().await;
+			return Err(err.into());
+		}
+	};
 	let status = backend_response.status();
 	let headers = backend_response.headers().clone();
 
@@ -135,48 +147,17 @@ where
 		}
 	}
 	let response = response.body(())?;
-	stream.send_response(response).await?;
+	send_half.send_response(response).await?;
 
-	let mut body_size = 0usize;
 	let mut body_stream = backend_response.bytes_stream();
 	while let Some(chunk) = body_stream.next().await {
 		let chunk = chunk?;
-		body_size += chunk.len();
-		if body_size > MAX_RESPONSE_BODY_SIZE {
-			return Err(eyre::eyre!(
-				"response body too large: {} bytes (max {})",
-				body_size,
-				MAX_RESPONSE_BODY_SIZE
-			));
-		}
 		if !chunk.is_empty() {
-			stream.send_data(chunk).await?;
+			send_half.send_data(chunk).await?;
 		}
 	}
-	stream.finish().await?;
+	send_half.finish().await?;
 	Ok(())
-}
-
-async fn read_request_body<S>(stream: &mut server::RequestStream<S, Bytes>) -> eyre::Result<Bytes>
-where
-	S: h3::quic::BidiStream<Bytes>,
-{
-	let mut body = Vec::new();
-
-	while let Some(mut chunk) = stream.recv_data().await? {
-		let remaining = chunk.remaining();
-		body.extend_from_slice(chunk.copy_to_bytes(remaining).as_ref());
-		if body.len() > MAX_REQUEST_BODY_SIZE {
-			return Err(eyre::eyre!(
-				"request body too large: {} bytes (max {})",
-				body.len(),
-				MAX_REQUEST_BODY_SIZE
-			));
-		}
-	}
-	let _ = stream.recv_trailers().await?;
-
-	Ok(Bytes::from(body))
 }
 
 fn rewrite_target_url(backend: &Url, uri: &Uri) -> eyre::Result<Url> {
