@@ -27,15 +27,18 @@ pub mod utils;
 pub use config::{Cli, Config, Control};
 
 pub struct AppContext {
-	pub cfg:            Config,
+	pub cfg: Config,
+	pub camouflage: Option<camouflage::BackendRoute>,
 	pub online_counter: HashMap<Uuid, AtomicUsize>,
 	pub online_clients: Cache<Uuid, Arc<Cache<usize, compat::QuicClient>>>,
-	pub traffic_stats:  HashMap<Uuid, (AtomicUsize, AtomicUsize)>,
-	pub cancel:         CancellationToken,
+	pub traffic_stats: HashMap<Uuid, (AtomicUsize, AtomicUsize)>,
+	pub cancel: CancellationToken,
 }
 
 /// Run the TUIC server with the given configuration
 pub async fn run(cfg: Config) -> eyre::Result<()> {
+	let camouflage = camouflage::BackendRoute::from_config(cfg.camouflage.as_ref())?;
+
 	let mut online_counter = HashMap::new();
 	for (user, _) in cfg.users.iter() {
 		online_counter.insert(user.to_owned(), AtomicUsize::new(0));
@@ -51,6 +54,7 @@ pub async fn run(cfg: Config) -> eyre::Result<()> {
 		online_clients: Cache::new(cfg.users.len() as u64),
 		traffic_stats,
 		cfg,
+		camouflage,
 		cancel: CancellationToken::new(),
 	});
 	let server = server::Server::init(ctx.clone()).await?;

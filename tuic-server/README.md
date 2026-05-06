@@ -225,7 +225,7 @@ reverse_proxy_url = "https://127.0.0.1:443"
 # 2) HTTP Host header for backend request routing
 # Required only when reverse_proxy_url host is an IP address.
 reverse_proxy_hostname = "example.com"
-# Per-request timeout for backend proxying
+# Timeout for establishing the backend connection; response bodies can stream longer
 request_timeout = "10s"
 # Skip TLS verification for backend target (use only for local/self-signed backends)
 skip_backend_tls_verify = false
