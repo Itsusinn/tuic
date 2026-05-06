@@ -78,7 +78,7 @@ where
 	fn poll_accept_bidi(&mut self, cx: &mut task::Context<'_>) -> Poll<Result<Self::BidiStream, ConnectionErrorIncoming>> {
 		if let Some(prefetched) = self.prefetched_bi.take() {
 			return Poll::Ready(Ok(Self::BidiStream {
-				send: Self::SendStream::new(prefetched.send),
+				send: Self::SendStream::new(prefetched.send, self.conn.clone()),
 				recv: Self::RecvStream::new_peekable(prefetched.recv),
 			}));
 		}
@@ -87,7 +87,7 @@ where
 			.expect("self.incoming_bi never returns None")
 			.map_err(convert_connection_error)?;
 		Poll::Ready(Ok(Self::BidiStream {
-			send: Self::SendStream::new(send),
+			send: Self::SendStream::new(send, self.conn.clone()),
 			recv: Self::RecvStream::new(recv),
 		}))
 	}
@@ -148,7 +148,7 @@ where
 			})?;
 
 		Poll::Ready(Ok(Self::BidiStream {
-			send: Self::SendStream::new(send),
+			send: Self::SendStream::new(send, self.conn.clone()),
 			recv: RecvStream::new(recv),
 		}))
 	}
@@ -165,7 +165,7 @@ where
 			.map_err(|err| StreamErrorIncoming::ConnectionErrorIncoming {
 				connection_error: convert_connection_error(err),
 			})?;
-		Poll::Ready(Ok(Self::SendStream::new(send)))
+		Poll::Ready(Ok(Self::SendStream::new(send, self.conn.clone())))
 	}
 
 	fn close(&mut self, code: Code, reason: &[u8]) {
@@ -201,7 +201,7 @@ where
 			})?;
 
 		Poll::Ready(Ok(Self::BidiStream {
-			send: Self::SendStream::new(send),
+			send: Self::SendStream::new(send, self.conn.clone()),
 			recv: RecvStream::new(recv),
 		}))
 	}
@@ -218,7 +218,7 @@ where
 			.map_err(|err| StreamErrorIncoming::ConnectionErrorIncoming {
 				connection_error: convert_connection_error(err),
 			})?;
-		Poll::Ready(Ok(Self::SendStream::new(send)))
+		Poll::Ready(Ok(Self::SendStream::new(send, self.conn.clone())))
 	}
 
 	fn close(&mut self, code: Code, reason: &[u8]) {
@@ -398,22 +398,55 @@ fn convert_write_error_to_stream_error(error: quinn::WriteError) -> StreamErrorI
 	}
 }
 
+fn retire_finished_stream(conn: quinn::Connection, stream: quinn::SendStream) {
+	tokio::spawn(async move {
+		let stopped = stream.stopped();
+		if let Ok(Some(_)) = stopped.await {
+			let _ = conn.closed().await;
+		}
+		drop(stream);
+	});
+}
+
 pub struct SendStream<B: Buf> {
-	stream:  quinn::SendStream,
+	conn:    quinn::Connection,
+	stream:  Option<quinn::SendStream>,
+	send_id: StreamId,
 	writing: Option<WriteBuf<B>>,
 }
 
 impl<B: Buf> SendStream<B> {
-	fn new(stream: quinn::SendStream) -> Self {
-		Self { stream, writing: None }
+	fn new(stream: quinn::SendStream, conn: quinn::Connection) -> Self {
+		let num: u64 = stream.id().into();
+		Self {
+			conn,
+			stream: Some(stream),
+			send_id: num.try_into().expect("invalid stream id"),
+			writing: None,
+		}
+	}
+
+	fn stream_mut(&mut self) -> Result<&mut quinn::SendStream, StreamErrorIncoming> {
+		self.stream
+			.as_mut()
+			.ok_or_else(|| StreamErrorIncoming::ConnectionErrorIncoming {
+				connection_error: ConnectionErrorIncoming::InternalError("send stream already finished".to_string()),
+			})
 	}
 }
 
 impl<B: Buf> quic::SendStream<B> for SendStream<B> {
 	fn poll_ready(&mut self, cx: &mut task::Context<'_>) -> Poll<Result<(), StreamErrorIncoming>> {
+		if self.writing.is_some() && self.stream.is_none() {
+			return Poll::Ready(Err(StreamErrorIncoming::ConnectionErrorIncoming {
+				connection_error: ConnectionErrorIncoming::InternalError("send stream already finished".to_string()),
+			}));
+		}
+
 		if let Some(ref mut data) = self.writing {
 			while data.has_remaining() {
-				let stream = Pin::new(&mut self.stream);
+				let stream = self.stream.as_mut().expect("stream checked above");
+				let stream = Pin::new(stream);
 				let written = ready!(stream.poll_write(cx, data.chunk())).map_err(convert_write_error_to_stream_error)?;
 				data.advance(written);
 			}
@@ -423,12 +456,27 @@ impl<B: Buf> quic::SendStream<B> for SendStream<B> {
 		Poll::Ready(Ok(()))
 	}
 
-	fn poll_finish(&mut self, _cx: &mut task::Context<'_>) -> Poll<Result<(), StreamErrorIncoming>> {
-		Poll::Ready(self.stream.finish().map_err(|e| StreamErrorIncoming::Unknown(Box::new(e))))
+	fn poll_finish(&mut self, cx: &mut task::Context<'_>) -> Poll<Result<(), StreamErrorIncoming>> {
+		ready!(self.poll_ready(cx))?;
+		let Some(mut stream) = self.stream.take() else {
+			return Poll::Ready(Ok(()));
+		};
+		match stream.finish() {
+			Ok(()) => {
+				retire_finished_stream(self.conn.clone(), stream);
+				Poll::Ready(Ok(()))
+			}
+			Err(err) => {
+				self.stream = Some(stream);
+				Poll::Ready(Err(StreamErrorIncoming::Unknown(Box::new(err))))
+			}
+		}
 	}
 
 	fn reset(&mut self, reset_code: u64) {
-		let _ = self.stream.reset(VarInt::from_u64(reset_code).unwrap_or(VarInt::MAX));
+		if let Some(stream) = self.stream.as_mut() {
+			let _ = stream.reset(VarInt::from_u64(reset_code).unwrap_or(VarInt::MAX));
+		}
 	}
 
 	fn send_data<D: Into<WriteBuf<B>>>(&mut self, data: D) -> Result<(), StreamErrorIncoming> {
@@ -442,8 +490,7 @@ impl<B: Buf> quic::SendStream<B> for SendStream<B> {
 	}
 
 	fn send_id(&self) -> StreamId {
-		let num: u64 = self.stream.id().into();
-		num.try_into().expect("invalid stream id")
+		self.send_id
 	}
 }
 
@@ -453,7 +500,11 @@ impl<B: Buf> quic::SendStreamUnframed<B> for SendStream<B> {
 			panic!("poll_send called while send stream is not ready")
 		}
 
-		let stream = Pin::new(&mut self.stream);
+		let stream = match self.stream_mut() {
+			Ok(stream) => stream,
+			Err(err) => return Poll::Ready(Err(err)),
+		};
+		let stream = Pin::new(stream);
 		match ready!(stream.poll_write(cx, buf.chunk())) {
 			Ok(written) => {
 				buf.advance(written);
