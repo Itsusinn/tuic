@@ -16,9 +16,9 @@ use crate::{AppContext, config::CamouflageConfig};
 
 #[derive(Clone)]
 pub struct BackendRoute {
-	backend: Url,
+	backend:               Url,
 	backend_host_override: Option<String>,
-	client: Client,
+	client:                Client,
 }
 
 impl BackendRoute {

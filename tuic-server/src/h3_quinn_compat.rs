@@ -30,28 +30,28 @@ pub struct PrefetchedBiRecv {
 }
 
 pub struct Connection {
-	conn: quinn::Connection,
-	incoming_bi: BoxStreamSync<'static, <AcceptBi<'static> as Future>::Output>,
-	opening_bi: Option<BoxStreamSync<'static, <OpenBi<'static> as Future>::Output>>,
-	incoming_uni: BoxStreamSync<'static, <AcceptUni<'static> as Future>::Output>,
-	opening_uni: Option<BoxStreamSync<'static, <OpenUni<'static> as Future>::Output>>,
-	prefetched_bi: Option<PrefetchedBiRecv>,
+	conn:           quinn::Connection,
+	incoming_bi:    BoxStreamSync<'static, <AcceptBi<'static> as Future>::Output>,
+	opening_bi:     Option<BoxStreamSync<'static, <OpenBi<'static> as Future>::Output>>,
+	incoming_uni:   BoxStreamSync<'static, <AcceptUni<'static> as Future>::Output>,
+	opening_uni:    Option<BoxStreamSync<'static, <OpenUni<'static> as Future>::Output>>,
+	prefetched_bi:  Option<PrefetchedBiRecv>,
 	prefetched_uni: Option<RecvStream>,
 }
 
 impl Connection {
 	pub fn new(conn: quinn::Connection) -> Self {
 		Self {
-			conn: conn.clone(),
-			incoming_bi: Box::pin(stream::unfold(conn.clone(), |conn| async {
+			conn:           conn.clone(),
+			incoming_bi:    Box::pin(stream::unfold(conn.clone(), |conn| async {
 				Some((conn.accept_bi().await, conn))
 			})),
-			opening_bi: None,
-			incoming_uni: Box::pin(stream::unfold(conn.clone(), |conn| async {
+			opening_bi:     None,
+			incoming_uni:   Box::pin(stream::unfold(conn.clone(), |conn| async {
 				Some((conn.accept_uni().await, conn))
 			})),
-			opening_uni: None,
-			prefetched_bi: None,
+			opening_uni:    None,
+			prefetched_bi:  None,
 			prefetched_uni: None,
 		}
 	}
@@ -105,8 +105,8 @@ where
 
 	fn opener(&self) -> Self::OpenStreams {
 		OpenStreams {
-			conn: self.conn.clone(),
-			opening_bi: None,
+			conn:        self.conn.clone(),
+			opening_bi:  None,
 			opening_uni: None,
 		}
 	}
@@ -175,8 +175,8 @@ where
 }
 
 pub struct OpenStreams {
-	conn: quinn::Connection,
-	opening_bi: Option<BoxStreamSync<'static, <OpenBi<'static> as Future>::Output>>,
+	conn:        quinn::Connection,
+	opening_bi:  Option<BoxStreamSync<'static, <OpenBi<'static> as Future>::Output>>,
 	opening_uni: Option<BoxStreamSync<'static, <OpenUni<'static> as Future>::Output>>,
 }
 
@@ -230,8 +230,8 @@ where
 impl Clone for OpenStreams {
 	fn clone(&self) -> Self {
 		Self {
-			conn: self.conn.clone(),
-			opening_bi: None,
+			conn:        self.conn.clone(),
+			opening_bi:  None,
 			opening_uni: None,
 		}
 	}
@@ -296,10 +296,10 @@ impl<B: Buf> quic::SendStreamUnframed<B> for BidiStream<B> {
 }
 
 pub struct RecvStream {
-	stream: Option<PeekableRecvStream>,
-	recv_id: StreamId,
+	stream:            Option<PeekableRecvStream>,
+	recv_id:           StreamId,
 	pending_stop_code: Option<u64>,
-	read_chunk_fut: ReadChunkFuture,
+	read_chunk_fut:    ReadChunkFuture,
 }
 
 type ReadChunkFuture = ReusableBoxFuture<'static, (PeekableRecvStream, Result<Option<quinn::Chunk>, quinn::ReadError>)>;
@@ -317,10 +317,10 @@ impl RecvStream {
 
 	fn new_inner(stream: PeekableRecvStream, stream_id: u64) -> Self {
 		Self {
-			stream: Some(stream),
-			recv_id: stream_id.try_into().expect("invalid stream id"),
+			stream:            Some(stream),
+			recv_id:           stream_id.try_into().expect("invalid stream id"),
 			pending_stop_code: None,
-			read_chunk_fut: ReusableBoxFuture::new(async { unreachable!() }),
+			read_chunk_fut:    ReusableBoxFuture::new(async { unreachable!() }),
 		}
 	}
 }
@@ -401,19 +401,16 @@ fn convert_write_error_to_stream_error(error: quinn::WriteError) -> StreamErrorI
 fn retire_finished_stream(conn: quinn::Connection, stream: quinn::SendStream) {
 	tokio::spawn(async move {
 		let stopped = stream.stopped();
-		match stopped.await {
-			Ok(Some(_)) => {
-				let _ = conn.closed().await;
-			}
-			Ok(None) | Err(_) => {}
+		if let Ok(Some(_)) = stopped.await {
+			let _ = conn.closed().await;
 		}
 		drop(stream);
 	});
 }
 
 pub struct SendStream<B: Buf> {
-	conn: quinn::Connection,
-	stream: Option<quinn::SendStream>,
+	conn:    quinn::Connection,
+	stream:  Option<quinn::SendStream>,
 	send_id: StreamId,
 	writing: Option<WriteBuf<B>>,
 }
