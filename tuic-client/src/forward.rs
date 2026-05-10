@@ -154,7 +154,7 @@ async fn run_udp_forwarder(entry: UdpForward, ctx: Arc<crate::AppContext>) {
 						let id = 0x8000 | (ctx.next_fwd_assoc_id.fetch_add(1, Ordering::Relaxed) & 0x7fff);
 						// register session
 						let session = ForwardUdpSession::new(socket.clone(), src_addr, id);
-						ctx.fwd_udp_sessions.write().await.insert(id, session);
+						ctx.fwd_udp_sessions.insert(id, session).await;
 						src_map.insert(src_addr, id);
 						// Spawn timeout watcher
 						tokio::spawn(expire_after(id, entry.timeout, ctx.clone()));
@@ -183,10 +183,8 @@ async fn run_udp_forwarder(entry: UdpForward, ctx: Arc<crate::AppContext>) {
 
 async fn expire_after(assoc_id: u16, timeout: Duration, ctx: Arc<crate::AppContext>) {
 	tokio::time::sleep(timeout).await;
-	let mut w = ctx.fwd_udp_sessions.write().await;
-	if let Some(_s) = w.remove(&assoc_id) {
+	if ctx.fwd_udp_sessions.remove(&assoc_id).await.is_some() {
 		debug!("[forward-udp] [{assoc:#06x}] timeout; dissociate", assoc = assoc_id);
-		drop(w);
 		if let Ok(conn) = ctx.get_conn().await {
 			if let Err(err) = conn.dissociate(assoc_id).await {
 				warn!("[forward-udp] [{assoc:#06x}] dissociate error: {err}", assoc = assoc_id);

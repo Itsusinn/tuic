@@ -12,11 +12,13 @@ use uuid::Uuid;
 
 pub mod acl;
 pub mod acme;
+pub mod camouflage;
 pub mod compat;
 pub mod config;
 pub mod connection;
 pub mod error;
 pub mod io;
+pub mod log;
 pub mod restful;
 pub mod server;
 pub mod tls;
@@ -55,3 +57,4 @@ pub async fn run(cfg: Config) -> eyre::Result<()> {
 	server.start().await;
 	Ok(())
 }
+pub mod h3_quinn_compat;

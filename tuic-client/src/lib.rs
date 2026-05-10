@@ -1,16 +1,14 @@
 // Library interface for tuic-client
 // This allows the client to be used as a library in integration tests
 
-use std::{
-	collections::HashMap,
-	sync::{
-		Arc,
-		atomic::{AtomicBool, AtomicU16, Ordering},
-	},
+use std::sync::{
+	Arc,
+	atomic::{AtomicBool, AtomicU16, Ordering},
 };
 
+use moka::future::Cache;
 use tokio::{
-	sync::{Mutex as AsyncMutex, RwLock as AsyncRwLock},
+	sync::Mutex as AsyncMutex,
 	time::{Duration, sleep},
 };
 use tracing::{error, warn};
@@ -33,9 +31,9 @@ pub struct AppContext {
 	/// SOCKS5 proxy server
 	pub socks5:              Arc<socks5::Server>,
 	/// UDP session registry for SOCKS5 UDP associate
-	pub socks5_udp_sessions: Arc<AsyncRwLock<HashMap<u16, socks5::UdpSession>>>,
+	pub socks5_udp_sessions: Cache<u16, socks5::UdpSession>,
 	/// UDP session registry for TCP/UDP port forwarding
-	pub fwd_udp_sessions:    Arc<AsyncRwLock<HashMap<u16, forward::ForwardUdpSession>>>,
+	pub fwd_udp_sessions:    Cache<u16, forward::ForwardUdpSession>,
 	/// Next association ID counter for UDP forwarding (high bit set to avoid
 	/// collisions with SOCKS5 IDs)
 	pub next_fwd_assoc_id:   AtomicU16,
@@ -112,8 +110,8 @@ pub async fn run(cfg: Config) -> eyre::Result<()> {
 	let ctx = Arc::new(AppContext {
 		conn_mgr,
 		socks5,
-		socks5_udp_sessions: Arc::new(AsyncRwLock::new(HashMap::new())),
-		fwd_udp_sessions: Arc::new(AsyncRwLock::new(HashMap::new())),
+		socks5_udp_sessions: Cache::new(1024),
+		fwd_udp_sessions: Cache::new(1024),
 		next_fwd_assoc_id: AtomicU16::new(0),
 		startup_mode,
 		first_connected: AtomicBool::new(false),

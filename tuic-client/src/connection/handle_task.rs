@@ -126,7 +126,7 @@ impl Connection {
 					Address::SocketAddress(addr) => Socks5Address::SocketAddress(addr),
 				};
 
-				let session = self.socks5_udp_sessions.read().await.get(&assoc_id).cloned();
+				let session = self.socks5_udp_sessions.get(&assoc_id).await;
 
 				info!("[relay] [packet] [{assoc_id:#06x}] Checking session map.");
 
@@ -138,7 +138,7 @@ impl Connection {
 						);
 					}
 				} else {
-					let fwd_session = self.fwd_udp_sessions.read().await.get(&assoc_id).cloned();
+					let fwd_session = self.fwd_udp_sessions.get(&assoc_id).await;
 
 					if let Some(session) = fwd_session {
 						if let Err(err) = session.send(pkt).await {

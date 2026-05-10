@@ -18,6 +18,7 @@ aws-lc-rs = ["tuic-core/aws-lc-rs", "dep:aws-lc-rs", "rustls/aws-lc-rs", "rcgen/
 jemallocator = ["tikv-jemallocator"]
 
 [dependencies]
+h3 = "0.0.8"
 
 num_cpus = "1"
 toml = "1.1"
@@ -69,8 +70,9 @@ pest_derive = "2"
 # Logging
 time = { version = "0.3", features = ["macros", "local-offset"] }
 humantime = { version = "2", default-features = false }
-tracing-subscriber = { version = "0.3", default-features = false, features = ["tracing-log", "std", "local-time","fmt", "ansi"] }
+tracing-subscriber = { version = "0.3", default-features = false, features = ["tracing-log", "std", "local-time","fmt", "ansi", "json"] }
 tracing = "0.1"
+tracing-appender = "0.2"
 
 # Error handling
 thiserror = { version = "2", default-features = false }
@@ -79,12 +81,16 @@ eyre = { version = "0.6" }
 # Web
 axum = { version = "0.8", features = ["json", "tokio"] }
 axum-extra = { version = "0.12", features = ["typed-header"] }
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "http2", "stream"] }
+futures-util = { version = "0.3", default-features = false, features = ["std"] }
+futures = "0.3"
+peekable = { version = "0.6.1", default-features = false, features = ["tokio"] }
+smallvec = { version = "1", default-features = false }
 
 tikv-jemallocator = { version = "0.6", optional = true }
 rand = "0.10"
 
 [dev-dependencies]
-reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"]}
 tempfile = "3"
 tokio = { version = "1", features = ["full", "test-util"] }
 x509-parser = "0.18"

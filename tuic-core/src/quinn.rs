@@ -9,6 +9,7 @@ use std::{
 pub use ::quinn;
 use ::quinn::{Connection as QuinnConnection, ConnectionError, RecvStream, SendDatagramError, SendStream, VarInt};
 use bytes::{BufMut, Bytes, BytesMut};
+use peekable::{buffer::Buffer, tokio::AsyncPeekable};
 use thiserror::Error;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, ReadBuf};
 use tracing::warn;
@@ -19,8 +20,7 @@ use crate::{
 	Address, Header, UnmarshalError,
 	model::{
 		AssembleError, Authenticate as AuthenticateModel, Connect as ConnectModel, Connection as ConnectionModel,
-		KeyingMaterialExporter as KeyingMaterialExporterImpl, Packet as PacketModel,
-		side::{Rx, Tx},
+		KeyingMaterialExporter as KeyingMaterialExporterImpl, Packet as PacketModel, side as model_side,
 	},
 };
 
@@ -38,12 +38,53 @@ pub mod side {
 	}
 }
 
+/// Trait abstracting QUIC send stream operations.
+pub trait StreamTx: tokio::io::AsyncWrite + futures_util::AsyncWrite + Unpin + Send {
+	/// Notify the peer that no more data will be written to this stream.
+	fn finish(&mut self) -> Result<(), ::quinn::ClosedStream>;
+	/// Wait for the stream to be stopped or read to completion by the peer.
+	fn stopped(&mut self) -> impl std::future::Future<Output = Result<Option<VarInt>, ::quinn::StoppedError>> + Send;
+	/// Close the send stream immediately with the given error code.
+	fn reset(&mut self, error_code: VarInt) -> Result<(), ::quinn::ClosedStream>;
+}
+
+/// Trait abstracting QUIC receive stream operations.
+pub trait StreamRx: tokio::io::AsyncRead + Unpin + Send {
+	/// Stop accepting data and notify the peer to stop transmitting.
+	fn stop(&mut self, error_code: VarInt) -> Result<(), ::quinn::ClosedStream>;
+}
+
+impl StreamTx for ::quinn::SendStream {
+	fn finish(&mut self) -> Result<(), ::quinn::ClosedStream> {
+		SendStream::finish(self)
+	}
+
+	fn stopped(&mut self) -> impl std::future::Future<Output = Result<Option<VarInt>, ::quinn::StoppedError>> + Send {
+		SendStream::stopped(self)
+	}
+
+	fn reset(&mut self, error_code: VarInt) -> Result<(), ::quinn::ClosedStream> {
+		SendStream::reset(self, error_code)
+	}
+}
+
+impl StreamRx for ::quinn::RecvStream {
+	fn stop(&mut self, error_code: VarInt) -> Result<(), ::quinn::ClosedStream> {
+		RecvStream::stop(self, error_code)
+	}
+}
+
+impl<R: StreamRx, B: Buffer + Send> StreamRx for AsyncPeekable<R, B> {
+	fn stop(&mut self, error_code: VarInt) -> Result<(), ::quinn::ClosedStream> {
+		let (_, inner) = self.get_mut();
+		inner.stop(error_code)
+	}
+}
+
 /// The TUIC Connection.
 ///
 /// This struct takes a clone of `quinn::Connection` for performing TUIC
 /// operations.
-///
-/// See more details about the TUIC protocol at [SPEC.md](https://github.com/EAimTY/tuic/blob/dev/tuic/SPEC.md)
 #[derive(Clone)]
 pub struct Connection<Side> {
 	conn:    QuinnConnection,
@@ -153,19 +194,19 @@ impl Connection<side::Client> {
 		Ok(())
 	}
 
-	/// Try to parse a `quinn::RecvStream` as a TUIC command.
+	/// Try to parse a unidirectional stream as a TUIC command.
 	///
-	/// The `quinn::RecvStream` should be accepted by
-	/// `quinn::Connection::accept_uni()` from the same `quinn::Connection`.
-	pub async fn accept_uni_stream(&self, mut recv: RecvStream) -> Result<Task, Error> {
+	/// The stream should be accepted by `quinn::Connection::accept_uni()`
+	/// from the same `QuinnConnection`.
+	pub async fn accept_uni_stream<R: StreamRx>(&self, mut recv: R) -> Result<Task<SendStream, R>, Error> {
 		let header = match Header::async_unmarshal(&mut recv).await {
 			Ok(header) => header,
-			Err(err) => return Err(Error::UnmarshalUniStream(err, recv)),
+			Err(err) => return Err(Error::UnmarshalUniStream(err)),
 		};
 
 		match header {
-			Header::Authenticate(_) => Err(Error::BadCommandUniStream("authenticate", recv)),
-			Header::Connect(_) => Err(Error::BadCommandUniStream("connect", recv)),
+			Header::Authenticate(_) => Err(Error::BadCommandUniStream("authenticate")),
+			Header::Connect(_) => Err(Error::BadCommandUniStream("connect")),
 			Header::Packet(pkt) => {
 				let assoc_id = pkt.assoc_id();
 				let pkt_id = pkt.pkt_id();
@@ -175,28 +216,27 @@ impl Connection<side::Client> {
 						Ok(Task::Packet(Packet::new(pkt, PacketSource::Quic(recv))))
 					})
 			}
-			Header::Dissociate(_) => Err(Error::BadCommandUniStream("dissociate", recv)),
-			Header::Heartbeat(_) => Err(Error::BadCommandUniStream("heartbeat", recv)),
+			Header::Dissociate(_) => Err(Error::BadCommandUniStream("dissociate")),
+			Header::Heartbeat(_) => Err(Error::BadCommandUniStream("heartbeat")),
 		}
 	}
 
-	/// Try to parse a pair of `quinn::SendStream` and `quinn::RecvStream` as a
-	/// TUIC command.
+	/// Try to parse a pair of send/receive streams as a TUIC command.
 	///
-	/// The pair of stream should be accepted by
-	/// `quinn::Connection::accept_bi()` from the same `quinn::Connection`.
-	pub async fn accept_bi_stream(&self, send: SendStream, mut recv: RecvStream) -> Result<Task, Error> {
+	/// The pair of streams should be accepted by
+	/// `quinn::Connection::accept_bi()` from the same `QuinnConnection`.
+	pub async fn accept_bi_stream<S: StreamTx, R: StreamRx>(&self, _send: S, mut recv: R) -> Result<Task<S, R>, Error> {
 		let header = match Header::async_unmarshal(&mut recv).await {
 			Ok(header) => header,
-			Err(err) => return Err(Error::UnmarshalBiStream(err, send, recv)),
+			Err(err) => return Err(Error::UnmarshalBiStream(err)),
 		};
 
 		match header {
-			Header::Authenticate(_) => Err(Error::BadCommandBiStream("authenticate", send, recv)),
-			Header::Connect(_) => Err(Error::BadCommandBiStream("connect", send, recv)),
-			Header::Packet(_) => Err(Error::BadCommandBiStream("packet", send, recv)),
-			Header::Dissociate(_) => Err(Error::BadCommandBiStream("dissociate", send, recv)),
-			Header::Heartbeat(_) => Err(Error::BadCommandBiStream("heartbeat", send, recv)),
+			Header::Authenticate(_) => Err(Error::BadCommandBiStream("authenticate")),
+			Header::Connect(_) => Err(Error::BadCommandBiStream("connect")),
+			Header::Packet(_) => Err(Error::BadCommandBiStream("packet")),
+			Header::Dissociate(_) => Err(Error::BadCommandBiStream("dissociate")),
+			Header::Heartbeat(_) => Err(Error::BadCommandBiStream("heartbeat")),
 		}
 	}
 
@@ -215,22 +255,17 @@ impl Connection<side::Client> {
 		match header {
 			Header::Authenticate(_) => Err(Error::BadCommandDatagram("authenticate", dg.into_inner())),
 			Header::Connect(_) => Err(Error::BadCommandDatagram("connect", dg.into_inner())),
-			Header::Packet(pkt) => {
-				let assoc_id = pkt.assoc_id();
-				let pkt_id = pkt.pkt_id();
-				if let Some(pkt) = self.model.recv_packet(pkt) {
-					let pos = dg.position() as usize;
-					let mut buf = dg.into_inner();
-					if (pos + pkt.size() as usize) <= buf.len() {
-						buf = buf.slice(pos..pos + pkt.size() as usize);
-						Ok(Task::Packet(Packet::new(pkt, PacketSource::Native(buf))))
-					} else {
-						Err(Error::PayloadLength(pkt.size() as usize, buf.len() - pos))
-					}
+			Header::Packet(pkt) if let Some(inner_pkt) = self.model.recv_packet(pkt.clone()) => {
+				let pos = dg.position() as usize;
+				let mut buf = dg.into_inner();
+				if (pos + inner_pkt.size() as usize) <= buf.len() {
+					buf = buf.slice(pos..pos + inner_pkt.size() as usize);
+					Ok(Task::Packet(Packet::new(inner_pkt, PacketSource::Native(buf))))
 				} else {
-					Err(Error::InvalidUdpSession(assoc_id, pkt_id))
+					Err(Error::PayloadLength(inner_pkt.size() as usize, buf.len() - pos))
 				}
 			}
+			Header::Packet(pkt) => Err(Error::InvalidUdpSession(pkt.assoc_id(), pkt.pkt_id())),
 			Header::Dissociate(_) => Err(Error::BadCommandDatagram("dissociate", dg.into_inner())),
 			Header::Heartbeat(_) => Err(Error::BadCommandDatagram("heartbeat", dg.into_inner())),
 		}
@@ -247,14 +282,14 @@ impl Connection<side::Server> {
 		}
 	}
 
-	/// Try to parse a `quinn::RecvStream` as a TUIC command.
+	/// Try to parse a unidirectional stream as a TUIC command.
 	///
-	/// The `quinn::RecvStream` should be accepted by
-	/// `quinn::Connection::accept_uni()` from the same `quinn::Connection`.
-	pub async fn accept_uni_stream(&self, mut recv: RecvStream) -> Result<Task, Error> {
+	/// The stream should be accepted by `quinn::Connection::accept_uni()`
+	/// from the same `QuinnConnection`.
+	pub async fn accept_uni_stream<R: StreamRx>(&self, mut recv: R) -> Result<Task<SendStream, R>, Error> {
 		let header = match Header::async_unmarshal(&mut recv).await {
 			Ok(header) => header,
-			Err(err) => return Err(Error::UnmarshalUniStream(err, recv)),
+			Err(err) => return Err(Error::UnmarshalUniStream(err)),
 		};
 
 		match header {
@@ -262,7 +297,7 @@ impl Connection<side::Server> {
 				let model = self.model.recv_authenticate(auth);
 				Ok(Task::Authenticate(Authenticate::new(model, self.keying_material_exporter())))
 			}
-			Header::Connect(_) => Err(Error::BadCommandUniStream("connect", recv)),
+			Header::Connect(_) => Err(Error::BadCommandUniStream("connect")),
 			Header::Packet(pkt) => {
 				let model = self.model.recv_packet_unrestricted(pkt);
 				Ok(Task::Packet(Packet::new(model, PacketSource::Quic(recv))))
@@ -271,30 +306,29 @@ impl Connection<side::Server> {
 				let model = self.model.recv_dissociate(dissoc);
 				Ok(Task::Dissociate(model.assoc_id()))
 			}
-			Header::Heartbeat(_) => Err(Error::BadCommandUniStream("heartbeat", recv)),
+			Header::Heartbeat(_) => Err(Error::BadCommandUniStream("heartbeat")),
 		}
 	}
 
-	/// Try to parse a pair of `quinn::SendStream` and `quinn::RecvStream` as a
-	/// TUIC command.
+	/// Try to parse a pair of send/receive streams as a TUIC command.
 	///
-	/// The pair of stream should be accepted by
-	/// `quinn::Connection::accept_bi()` from the same `quinn::Connection`.
-	pub async fn accept_bi_stream(&self, send: SendStream, mut recv: RecvStream) -> Result<Task, Error> {
+	/// The pair of streams should be accepted by
+	/// `quinn::Connection::accept_bi()` from the same `QuinnConnection`.
+	pub async fn accept_bi_stream<S: StreamTx, R: StreamRx>(&self, send: S, mut recv: R) -> Result<Task<S, R>, Error> {
 		let header = match Header::async_unmarshal(&mut recv).await {
 			Ok(header) => header,
-			Err(err) => return Err(Error::UnmarshalBiStream(err, send, recv)),
+			Err(err) => return Err(Error::UnmarshalBiStream(err)),
 		};
 
 		match header {
-			Header::Authenticate(_) => Err(Error::BadCommandBiStream("authenticate", send, recv)),
+			Header::Authenticate(_) => Err(Error::BadCommandBiStream("authenticate")),
 			Header::Connect(conn) => {
 				let model = self.model.recv_connect(conn);
 				Ok(Task::Connect(Connect::new(Side::Server(model), send, recv)))
 			}
-			Header::Packet(_) => Err(Error::BadCommandBiStream("packet", send, recv)),
-			Header::Dissociate(_) => Err(Error::BadCommandBiStream("dissociate", send, recv)),
-			Header::Heartbeat(_) => Err(Error::BadCommandBiStream("heartbeat", send, recv)),
+			Header::Packet(_) => Err(Error::BadCommandBiStream("packet")),
+			Header::Dissociate(_) => Err(Error::BadCommandBiStream("dissociate")),
+			Header::Heartbeat(_) => Err(Error::BadCommandBiStream("heartbeat")),
 		}
 	}
 
@@ -340,12 +374,12 @@ impl<Side> Debug for Connection<Side> {
 /// A received `Authenticate` command.
 #[derive(Debug)]
 pub struct Authenticate {
-	model:    AuthenticateModel<Rx>,
+	model:    AuthenticateModel<model_side::Rx>,
 	exporter: KeyingMaterialExporter,
 }
 
 impl Authenticate {
-	fn new(model: AuthenticateModel<Rx>, exporter: KeyingMaterialExporter) -> Self {
+	fn new(model: AuthenticateModel<model_side::Rx>, exporter: KeyingMaterialExporter) -> Self {
 		Self { model, exporter }
 	}
 
@@ -366,14 +400,17 @@ impl Authenticate {
 }
 
 /// A received `Connect` command.
-pub struct Connect {
-	model:    Side<ConnectModel<Tx>, ConnectModel<Rx>>,
-	pub send: SendStream,
-	pub recv: RecvStream,
+///
+/// Generic over the QUIC send/receive stream types, allowing use with
+/// different QUIC implementations that implement `StreamTx`/`StreamRx`.
+pub struct Connect<S: StreamTx = SendStream, R: StreamRx = RecvStream> {
+	model:    Side<ConnectModel<model_side::Tx>, ConnectModel<model_side::Rx>>,
+	pub send: S,
+	pub recv: R,
 }
 
-impl Connect {
-	fn new(model: Side<ConnectModel<Tx>, ConnectModel<Rx>>, send: SendStream, recv: RecvStream) -> Self {
+impl<S: StreamTx, R: StreamRx> Connect<S, R> {
+	fn new(model: Side<ConnectModel<model_side::Tx>, ConnectModel<model_side::Rx>>, send: S, recv: R) -> Self {
 		Self { model, send, recv }
 	}
 
@@ -408,13 +445,13 @@ impl Connect {
 	}
 }
 
-impl AsyncRead for Connect {
+impl<S: StreamTx, R: StreamRx> AsyncRead for Connect<S, R> {
 	fn poll_read(self: Pin<&mut Self>, cx: &mut Context<'_>, buf: &mut ReadBuf<'_>) -> Poll<std::io::Result<()>> {
 		AsyncRead::poll_read(Pin::new(&mut self.get_mut().recv), cx, buf)
 	}
 }
 
-impl AsyncWrite for Connect {
+impl<S: StreamTx, R: StreamRx> AsyncWrite for Connect<S, R> {
 	fn poll_write(self: Pin<&mut Self>, cx: &mut Context<'_>, buf: &[u8]) -> Poll<Result<usize, IoError>> {
 		AsyncWrite::poll_write(Pin::new(&mut self.get_mut().send), cx, buf)
 	}
@@ -428,7 +465,7 @@ impl AsyncWrite for Connect {
 	}
 }
 
-impl Debug for Connect {
+impl<S: StreamTx + Debug, R: StreamRx + Debug> Debug for Connect<S, R> {
 	fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
 		let model = match &self.model {
 			Side::Client(model) => model as &dyn Debug,
@@ -443,21 +480,21 @@ impl Debug for Connect {
 	}
 }
 
-/// A received `Packet` command.
+/// Source of a received `Packet` command.
 #[derive(Debug)]
-pub struct Packet {
-	model: PacketModel<Rx, Bytes>,
-	src:   PacketSource,
-}
-
-#[derive(Debug)]
-enum PacketSource {
-	Quic(RecvStream),
+pub enum PacketSource<R: StreamRx = RecvStream> {
+	Quic(R),
 	Native(Bytes),
 }
 
-impl Packet {
-	fn new(model: PacketModel<Rx, Bytes>, src: PacketSource) -> Self {
+/// A received `Packet` command.
+pub struct Packet<R: StreamRx = RecvStream> {
+	model: PacketModel<model_side::Rx, Bytes>,
+	src:   PacketSource<R>,
+}
+
+impl<R: StreamRx> Packet<R> {
+	fn new(model: PacketModel<model_side::Rx, Bytes>, src: PacketSource<R>) -> Self {
 		Self { src, model }
 	}
 
@@ -513,13 +550,22 @@ impl Packet {
 	}
 }
 
+impl<R: StreamRx + Debug> Debug for Packet<R> {
+	fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
+		f.debug_struct("Packet")
+			.field("model", &self.model)
+			.field("src", &self.src)
+			.finish()
+	}
+}
+
 /// Type of tasks that can be received.
 #[non_exhaustive]
 #[derive(Debug)]
-pub enum Task {
+pub enum Task<S: StreamTx = SendStream, R: StreamRx = RecvStream> {
 	Authenticate(Authenticate),
-	Connect(Connect),
-	Packet(Packet),
+	Connect(Connect<S, R>),
+	Packet(Packet<R>),
 	Dissociate(u16),
 	Heartbeat,
 }
@@ -554,15 +600,15 @@ pub enum Error {
 	#[error(transparent)]
 	Assemble(#[from] AssembleError),
 	#[error("error unmarshalling uni_stream: {0}")]
-	UnmarshalUniStream(UnmarshalError, RecvStream),
+	UnmarshalUniStream(UnmarshalError),
 	#[error("error unmarshalling bi_stream: {0}")]
-	UnmarshalBiStream(UnmarshalError, SendStream, RecvStream),
+	UnmarshalBiStream(UnmarshalError),
 	#[error("error unmarshalling datagram: {0}")]
 	UnmarshalDatagram(UnmarshalError, Bytes),
 	#[error("bad command `{0}` from uni_stream")]
-	BadCommandUniStream(&'static str, RecvStream),
+	BadCommandUniStream(&'static str),
 	#[error("bad command `{0}` from bi_stream")]
-	BadCommandBiStream(&'static str, SendStream, RecvStream),
+	BadCommandBiStream(&'static str),
 	#[error("bad command `{0}` from datagram")]
 	BadCommandDatagram(&'static str, Bytes),
 	#[error(transparent)]

@@ -105,6 +105,17 @@ release-name = "armv7-linux-muslhf"
 tool = "cross"
 extra-args = "--no-default-features --features ring"
 
+# ==================== Android Targets ====================
+
+# ARM64 Android
+[[target]]
+os = "ubuntu-latest"
+target = "aarch64-linux-android"
+release-name = "aarch64-android"
+tool = "cross"
+skip-test = true
+extra-args = "--no-default-features --features ring"
+
 # ==================== Windows Targets ====================
 
 # 64-bit Windows

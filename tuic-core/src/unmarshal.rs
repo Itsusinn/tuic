@@ -4,8 +4,8 @@ use std::{
 	string::FromUtf8Error,
 };
 
-use futures_util::{AsyncRead, AsyncReadExt};
 use thiserror::Error;
+use tokio::io::{AsyncRead, AsyncReadExt};
 use uuid::{Error as UuidError, Uuid};
 
 use crate::{Address, Authenticate, Connect, Dissociate, Header, Heartbeat, Packet, VERSION};
