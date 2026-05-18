@@ -13,8 +13,8 @@ use tokio::{
 use tracing::{info, warn};
 use tuic_core::{
 	Address, is_private_ip,
-	quinn::{Authenticate, Connect, Packet, StreamRx, StreamTx},
 };
+use tuic_core::quinn::{Authenticate, Connect, Packet, StreamRx, StreamTx};
 
 use super::{Connection, ERROR_CODE, UdpSession};
 use crate::{

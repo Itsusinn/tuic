@@ -1,6 +1,6 @@
 use std::ops::Deref;
 
-use quinn::Connection as QuinnConnection;
+use tuic_core::quinn::QuinnConnection;
 
 #[derive(Clone)]
 pub struct QuicClient(QuinnConnection);

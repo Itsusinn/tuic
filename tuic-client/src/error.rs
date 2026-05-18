@@ -1,6 +1,6 @@
 use std::io::Error as IoError;
 
-use quinn::{ConnectError, ConnectionError};
+use tuic_core::quinn::{ConnectError, ConnectionError};
 use rustls::Error as RustlsError;
 use thiserror::Error;
 use tuic_core::quinn::Error as ModelError;

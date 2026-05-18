@@ -5,12 +5,12 @@ use std::{
 };
 
 use eyre::Context;
-use quinn::{
+use tuic_core::quinn::{
 	Endpoint, EndpointConfig, IdleTimeout, ServerConfig, TokioRuntime, TransportConfig, VarInt,
 	congestion::{Bbr3Config, CubicConfig, NewRenoConfig},
 	crypto::rustls::QuicServerConfig,
+	bbr::BbrConfig,
 };
-use quinn_congestions::bbr::BbrConfig;
 use rustls::{
 	ServerConfig as RustlsServerConfig,
 	pki_types::{CertificateDer, PrivateKeyDer, PrivatePkcs8KeyDer},

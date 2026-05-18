@@ -3495,7 +3495,7 @@ checksum = "e421abadd41a4225275504ea4d6566923418b7f05506fbc9c0fe86ba7396114b"
 
 [[package]]
 name = "tuic-client"
-version = "1.8.0"
+version = "1.8.1"
 dependencies = [
  "anyhow",
  "aws-lc-rs",
@@ -3513,8 +3513,6 @@ dependencies = [
  "moka",
  "num_cpus",
  "once_cell",
- "quinn 0.12.0",
- "quinn-congestions",
  "register-count",
  "rustls",
  "rustls-native-certs",
@@ -3539,7 +3537,7 @@ dependencies = [
 
 [[package]]
 name = "tuic-core"
-version = "1.8.0"
+version = "1.8.1"
 dependencies = [
  "bytes",
  "eyre",
@@ -3547,6 +3545,7 @@ dependencies = [
  "parking_lot",
  "peekable",
  "quinn 0.12.0",
+ "quinn-congestions",
  "rcgen 0.14.7",
  "register-count",
  "rustls",
@@ -3562,7 +3561,7 @@ dependencies = [
 
 [[package]]
 name = "tuic-server"
-version = "1.8.0"
+version = "1.8.1"
 dependencies = [
  "arc-swap",
  "aws-lc-rs",
@@ -3591,8 +3590,6 @@ dependencies = [
  "peekable",
  "pest",
  "pest_derive",
- "quinn 0.12.0",
- "quinn-congestions",
  "rand 0.10.1",
  "rcgen 0.14.7",
  "regex",
@@ -3625,7 +3622,7 @@ dependencies = [
 
 [[package]]
 name = "tuic-tests"
-version = "1.8.0"
+version = "1.8.1"
 dependencies = [
  "aws-lc-rs",
  "eyre",

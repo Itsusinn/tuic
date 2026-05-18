@@ -15,7 +15,7 @@ use axum_extra::{
 	headers::{Authorization, authorization::Bearer},
 };
 use moka::future::Cache;
-use quinn::{Connection as QuinnConnection, VarInt};
+use tuic_core::quinn::{QuinnConnection, VarInt};
 use serde_json::json;
 use tracing::warn;
 use uuid::Uuid;

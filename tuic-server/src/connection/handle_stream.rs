@@ -1,7 +1,7 @@
 use std::sync::atomic::Ordering;
 
 use bytes::Bytes;
-use quinn::VarInt;
+use tuic_core::quinn::VarInt;
 use register_count::Register;
 use tokio::time;
 use tracing::{debug, warn};

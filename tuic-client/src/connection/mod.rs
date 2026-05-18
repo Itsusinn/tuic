@@ -9,13 +9,13 @@ use std::{
 use anyhow::Context;
 use crossbeam_utils::atomic::AtomicCell;
 use moka::future::Cache;
-use quinn::{
-	ClientConfig, Connection as QuinnConnection, Endpoint as QuinnEndpoint, EndpointConfig, TokioRuntime, TransportConfig,
+use tuic_core::quinn::{
+	ClientConfig, QuinnConnection, Endpoint as QuinnEndpoint, EndpointConfig, TokioRuntime, TransportConfig,
 	VarInt, ZeroRttAccepted,
 	congestion::{Bbr3Config, CubicConfig, NewRenoConfig},
 	crypto::rustls::QuicClientConfig,
+	bbr::BbrConfig,
 };
-use quinn_congestions::bbr::BbrConfig;
 use register_count::Counter;
 use rustls::{
 	ClientConfig as RustlsClientConfig,

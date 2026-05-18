@@ -7,7 +7,7 @@ use arc_swap::ArcSwap;
 use bytes::Bytes;
 use moka::future::Cache;
 use peekable::tokio::AsyncPeekExt;
-use quinn::{Connecting, Connection as QuinnConnection, VarInt};
+use tuic_core::quinn::{Connecting, QuinnConnection, VarInt};
 use register_count::Counter;
 use smallvec::SmallVec;
 use tokio::time;
@@ -34,8 +34,8 @@ enum H3Dispatch {
 }
 
 enum FirstEvent {
-	Uni(quinn::RecvStream),
-	Bi(quinn::SendStream, quinn::RecvStream),
+	Uni(tuic_core::quinn::RecvStream),
+	Bi(tuic_core::quinn::SendStream, tuic_core::quinn::RecvStream),
 	Datagram(Bytes),
 }
 
@@ -47,7 +47,7 @@ enum ClassifiedRecvStream {
 enum PrefetchedFirstEventTuic {
 	Uni(crate::h3_quinn_compat::PeekableRecvStream),
 	Bi {
-		send: quinn::SendStream,
+		send: tuic_core::quinn::SendStream,
 		recv: crate::h3_quinn_compat::PeekableRecvStream,
 	},
 	Datagram(Bytes),
@@ -291,7 +291,7 @@ impl Connection {
 		}
 	}
 
-	async fn classify_recv_stream(&self, recv: quinn::RecvStream, timeout: Duration) -> Result<ClassifiedRecvStream, Error> {
+	async fn classify_recv_stream(&self, recv: tuic_core::quinn::RecvStream, timeout: Duration) -> Result<ClassifiedRecvStream, Error> {
 		let mut recv = recv.peekable_with_buffer::<SmallVec<[u8; 4]>>();
 		let mut prefix = [0u8; 2];
 		let read = time::timeout(timeout, recv.peek_exact(&mut prefix))
