@@ -9,13 +9,13 @@ use std::{
 use bytes::{BufMut, Bytes, BytesMut};
 use peekable::{buffer::Buffer, tokio::AsyncPeekable};
 pub use quinn_congestions::{self, bbr};
-#[allow(hidden_glob_reexports)]
 pub use quinn_crate::{Connection as QuinnConnection, *};
 use thiserror::Error;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, ReadBuf};
 use tracing::warn;
 use uuid::Uuid;
 
+#[allow(hidden_glob_reexports)]
 use self::side::Side;
 use crate::{
 	Address, Header, UnmarshalError,
