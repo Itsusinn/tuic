@@ -17,8 +17,8 @@ use h3::{
 	quic::{self, ConnectionErrorIncoming, StreamErrorIncoming, StreamId, WriteBuf},
 };
 use peekable::tokio::AsyncPeekable;
-use tuic_core::quinn::{AcceptBi, AcceptUni, OpenBi, OpenUni, ReadError, VarInt};
 use tokio_util::sync::ReusableBoxFuture;
+use tuic_core::quinn::{AcceptBi, AcceptUni, OpenBi, OpenUni, ReadError, VarInt};
 
 type BoxStreamSync<'a, T> = Pin<Box<dyn Stream<Item = T> + Sync + Send + 'a>>;
 
@@ -302,7 +302,13 @@ pub struct RecvStream {
 	read_chunk_fut:    ReadChunkFuture,
 }
 
-type ReadChunkFuture = ReusableBoxFuture<'static, (PeekableRecvStream, Result<Option<tuic_core::quinn::Chunk>, tuic_core::quinn::ReadError>)>;
+type ReadChunkFuture = ReusableBoxFuture<
+	'static,
+	(
+		PeekableRecvStream,
+		Result<Option<tuic_core::quinn::Chunk>, tuic_core::quinn::ReadError>,
+	),
+>;
 
 impl RecvStream {
 	fn new(stream: tuic_core::quinn::RecvStream) -> Self {

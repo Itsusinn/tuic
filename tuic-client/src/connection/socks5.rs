@@ -6,12 +6,12 @@ use std::{
 	task::{Context, Poll},
 };
 
+use tokio::{io::ReadBuf, net::UdpSocket};
+use tracing::debug;
 use tuic_core::quinn::{
 	AsyncUdpSocket, UdpSender,
 	udp::{RecvMeta, Transmit},
 };
-use tokio::{io::ReadBuf, net::UdpSocket};
-use tracing::debug;
 
 #[derive(Debug, Clone)]
 pub struct Socks5UdpSocket {

@@ -6,12 +6,11 @@ use std::{
 	time::Duration,
 };
 
-pub use quinn_crate::*;
-pub use quinn_crate::Connection as QuinnConnection;
-pub use quinn_congestions;
-pub use quinn_congestions::bbr;
 use bytes::{BufMut, Bytes, BytesMut};
 use peekable::{buffer::Buffer, tokio::AsyncPeekable};
+pub use quinn_congestions::{self, bbr};
+#[allow(hidden_glob_reexports)]
+pub use quinn_crate::{Connection as QuinnConnection, *};
 use thiserror::Error;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, ReadBuf};
 use tracing::warn;
@@ -45,7 +44,9 @@ pub trait StreamTx: tokio::io::AsyncWrite + futures_util::AsyncWrite + Unpin + S
 	/// Notify the peer that no more data will be written to this stream.
 	fn finish(&mut self) -> Result<(), quinn_crate::ClosedStream>;
 	/// Wait for the stream to be stopped or read to completion by the peer.
-	fn stopped(&mut self) -> impl std::future::Future<Output = Result<Option<quinn_crate::VarInt>, quinn_crate::StoppedError>> + Send;
+	fn stopped(
+		&mut self,
+	) -> impl std::future::Future<Output = Result<Option<quinn_crate::VarInt>, quinn_crate::StoppedError>> + Send;
 	/// Close the send stream immediately with the given error code.
 	fn reset(&mut self, error_code: quinn_crate::VarInt) -> Result<(), quinn_crate::ClosedStream>;
 }
@@ -61,7 +62,9 @@ impl StreamTx for quinn_crate::SendStream {
 		quinn_crate::SendStream::finish(self)
 	}
 
-	fn stopped(&mut self) -> impl std::future::Future<Output = Result<Option<quinn_crate::VarInt>, quinn_crate::StoppedError>> + Send {
+	fn stopped(
+		&mut self,
+	) -> impl std::future::Future<Output = Result<Option<quinn_crate::VarInt>, quinn_crate::StoppedError>> + Send {
 		quinn_crate::SendStream::stopped(self)
 	}
 

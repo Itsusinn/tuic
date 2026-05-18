@@ -7,12 +7,11 @@ use arc_swap::ArcSwap;
 use bytes::Bytes;
 use moka::future::Cache;
 use peekable::tokio::AsyncPeekExt;
-use tuic_core::quinn::{Connecting, QuinnConnection, VarInt};
 use register_count::Counter;
 use smallvec::SmallVec;
 use tokio::time;
 use tracing::{Instrument, Span, debug, info, info_span, warn};
-use tuic_core::quinn::{Authenticate, Connection as Model, side};
+use tuic_core::quinn::{Authenticate, Connecting, Connection as Model, QuinnConnection, VarInt, side};
 
 use self::{authenticated::Authenticated, udp_session::UdpSession};
 use crate::{AppContext, camouflage, error::Error, restful, utils::UdpRelayMode};
@@ -291,7 +290,11 @@ impl Connection {
 		}
 	}
 
-	async fn classify_recv_stream(&self, recv: tuic_core::quinn::RecvStream, timeout: Duration) -> Result<ClassifiedRecvStream, Error> {
+	async fn classify_recv_stream(
+		&self,
+		recv: tuic_core::quinn::RecvStream,
+		timeout: Duration,
+	) -> Result<ClassifiedRecvStream, Error> {
 		let mut recv = recv.peekable_with_buffer::<SmallVec<[u8; 4]>>();
 		let mut prefix = [0u8; 2];
 		let read = time::timeout(timeout, recv.peek_exact(&mut prefix))
