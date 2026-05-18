@@ -1,3 +1,5 @@
+pub extern crate quinn as quinn_crate;
+
 mod protocol;
 
 pub use self::protocol::{Address, Authenticate, Connect, Dissociate, Header, Heartbeat, Packet, VERSION};
@@ -18,7 +20,10 @@ pub mod model;
 mod tests;
 
 // Quinn integration module
-pub mod quinn;
+mod quinn_impl;
+pub mod quinn {
+	pub use super::quinn_impl::*;
+}
 
 // Utility types
 mod utils;

@@ -15,8 +15,8 @@ repository.workspace = true
 async_marshal = ["futures-util"]
 marshal = []
 model = ["parking_lot", "register-count"]
-ring = ["rustls/ring", "tokio-rustls/ring"]
-aws-lc-rs = ["rustls/aws-lc-rs", "tokio-rustls/aws-lc-rs"]
+ring = ["rustls/ring", "tokio-rustls/ring", "quinn/rustls-ring"]
+aws-lc-rs = ["rustls/aws-lc-rs", "tokio-rustls/aws-lc-rs", "quinn/rustls-aws-lc-rs"]
 
 [dependencies]
 # From tuic
@@ -31,7 +31,8 @@ serde = { version = "1", default-features = false, features = ["derive", "std"] 
 
 # From tuic-quinn
 tracing = { version = "0.1", default-features = false}
-quinn = { workspace = true, default-features = false, features = ["futures-io"]}
+quinn = { workspace = true, default-features = false, features = ["futures-io", "runtime-tokio"]}
+quinn-congestions = { workspace = true }
 tokio = { version = "1", default-features = false, features = ["io-util"] }
 eyre = { version = "0.6" }
 

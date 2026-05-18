@@ -1,11 +1,10 @@
 use std::sync::atomic::Ordering;
 
 use bytes::Bytes;
-use quinn::VarInt;
 use register_count::Register;
 use tokio::time;
 use tracing::{debug, warn};
-use tuic_core::quinn::{StreamRx, StreamTx, Task};
+use tuic_core::quinn::{StreamRx, StreamTx, Task, VarInt};
 
 use super::Connection;
 use crate::{error::Error, utils::UdpRelayMode};

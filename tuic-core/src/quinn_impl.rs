@@ -6,15 +6,16 @@ use std::{
 	time::Duration,
 };
 
-pub use ::quinn;
-use ::quinn::{Connection as QuinnConnection, ConnectionError, RecvStream, SendDatagramError, SendStream, VarInt};
 use bytes::{BufMut, Bytes, BytesMut};
 use peekable::{buffer::Buffer, tokio::AsyncPeekable};
+pub use quinn_congestions::{self, bbr};
+pub use quinn_crate::{Connection as QuinnConnection, *};
 use thiserror::Error;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, ReadBuf};
 use tracing::warn;
 use uuid::Uuid;
 
+#[allow(hidden_glob_reexports)]
 use self::side::Side;
 use crate::{
 	Address, Header, UnmarshalError,
@@ -41,41 +42,45 @@ pub mod side {
 /// Trait abstracting QUIC send stream operations.
 pub trait StreamTx: tokio::io::AsyncWrite + futures_util::AsyncWrite + Unpin + Send {
 	/// Notify the peer that no more data will be written to this stream.
-	fn finish(&mut self) -> Result<(), ::quinn::ClosedStream>;
+	fn finish(&mut self) -> Result<(), quinn_crate::ClosedStream>;
 	/// Wait for the stream to be stopped or read to completion by the peer.
-	fn stopped(&mut self) -> impl std::future::Future<Output = Result<Option<VarInt>, ::quinn::StoppedError>> + Send;
+	fn stopped(
+		&mut self,
+	) -> impl std::future::Future<Output = Result<Option<quinn_crate::VarInt>, quinn_crate::StoppedError>> + Send;
 	/// Close the send stream immediately with the given error code.
-	fn reset(&mut self, error_code: VarInt) -> Result<(), ::quinn::ClosedStream>;
+	fn reset(&mut self, error_code: quinn_crate::VarInt) -> Result<(), quinn_crate::ClosedStream>;
 }
 
 /// Trait abstracting QUIC receive stream operations.
 pub trait StreamRx: tokio::io::AsyncRead + Unpin + Send {
 	/// Stop accepting data and notify the peer to stop transmitting.
-	fn stop(&mut self, error_code: VarInt) -> Result<(), ::quinn::ClosedStream>;
+	fn stop(&mut self, error_code: quinn_crate::VarInt) -> Result<(), quinn_crate::ClosedStream>;
 }
 
-impl StreamTx for ::quinn::SendStream {
-	fn finish(&mut self) -> Result<(), ::quinn::ClosedStream> {
-		SendStream::finish(self)
+impl StreamTx for quinn_crate::SendStream {
+	fn finish(&mut self) -> Result<(), quinn_crate::ClosedStream> {
+		quinn_crate::SendStream::finish(self)
 	}
 
-	fn stopped(&mut self) -> impl std::future::Future<Output = Result<Option<VarInt>, ::quinn::StoppedError>> + Send {
-		SendStream::stopped(self)
+	fn stopped(
+		&mut self,
+	) -> impl std::future::Future<Output = Result<Option<quinn_crate::VarInt>, quinn_crate::StoppedError>> + Send {
+		quinn_crate::SendStream::stopped(self)
 	}
 
-	fn reset(&mut self, error_code: VarInt) -> Result<(), ::quinn::ClosedStream> {
-		SendStream::reset(self, error_code)
+	fn reset(&mut self, error_code: quinn_crate::VarInt) -> Result<(), quinn_crate::ClosedStream> {
+		quinn_crate::SendStream::reset(self, error_code)
 	}
 }
 
-impl StreamRx for ::quinn::RecvStream {
-	fn stop(&mut self, error_code: VarInt) -> Result<(), ::quinn::ClosedStream> {
-		RecvStream::stop(self, error_code)
+impl StreamRx for quinn_crate::RecvStream {
+	fn stop(&mut self, error_code: quinn_crate::VarInt) -> Result<(), quinn_crate::ClosedStream> {
+		quinn_crate::RecvStream::stop(self, error_code)
 	}
 }
 
 impl<R: StreamRx, B: Buffer + Send> StreamRx for AsyncPeekable<R, B> {
-	fn stop(&mut self, error_code: VarInt) -> Result<(), ::quinn::ClosedStream> {
+	fn stop(&mut self, error_code: quinn_crate::VarInt) -> Result<(), quinn_crate::ClosedStream> {
 		let (_, inner) = self.get_mut();
 		inner.stop(error_code)
 	}
@@ -87,7 +92,7 @@ impl<R: StreamRx, B: Buffer + Send> StreamRx for AsyncPeekable<R, B> {
 /// operations.
 #[derive(Clone)]
 pub struct Connection<Side> {
-	conn:    QuinnConnection,
+	conn:    quinn_crate::Connection,
 	model:   ConnectionModel<Bytes>,
 	_marker: Side,
 }
@@ -96,7 +101,7 @@ impl<Side> Connection<Side> {
 	/// Sends a `Packet` using UDP relay mode `native`.
 	pub fn packet_native(&self, pkt: impl AsRef<[u8]>, addr: Address, assoc_id: u16) -> eyre::Result<()> {
 		let Some(max_pkt_size) = self.conn.max_datagram_size() else {
-			return Err(Error::SendDatagram(SendDatagramError::Disabled))?;
+			return Err(Error::SendDatagram(quinn_crate::SendDatagramError::Disabled))?;
 		};
 
 		let model = self.model.send_packet(assoc_id, addr, max_pkt_size);
@@ -148,7 +153,7 @@ impl<Side> Connection<Side> {
 
 impl Connection<side::Client> {
 	/// Creates a new client side `Connection`.
-	pub fn new(conn: QuinnConnection) -> Self {
+	pub fn new(conn: quinn_crate::Connection) -> Self {
 		Self {
 			conn,
 			model: ConnectionModel::new(),
@@ -198,7 +203,7 @@ impl Connection<side::Client> {
 	///
 	/// The stream should be accepted by `quinn::Connection::accept_uni()`
 	/// from the same `QuinnConnection`.
-	pub async fn accept_uni_stream<R: StreamRx>(&self, mut recv: R) -> Result<Task<SendStream, R>, Error> {
+	pub async fn accept_uni_stream<R: StreamRx>(&self, mut recv: R) -> Result<Task<quinn_crate::SendStream, R>, Error> {
 		let header = match Header::async_unmarshal(&mut recv).await {
 			Ok(header) => header,
 			Err(err) => return Err(Error::UnmarshalUniStream(err)),
@@ -274,7 +279,7 @@ impl Connection<side::Client> {
 
 impl Connection<side::Server> {
 	/// Creates a new server side `Connection`.
-	pub fn new(conn: QuinnConnection) -> Self {
+	pub fn new(conn: quinn_crate::Connection) -> Self {
 		Self {
 			conn,
 			model: ConnectionModel::new(),
@@ -286,7 +291,7 @@ impl Connection<side::Server> {
 	///
 	/// The stream should be accepted by `quinn::Connection::accept_uni()`
 	/// from the same `QuinnConnection`.
-	pub async fn accept_uni_stream<R: StreamRx>(&self, mut recv: R) -> Result<Task<SendStream, R>, Error> {
+	pub async fn accept_uni_stream<R: StreamRx>(&self, mut recv: R) -> Result<Task<quinn_crate::SendStream, R>, Error> {
 		let header = match Header::async_unmarshal(&mut recv).await {
 			Ok(header) => header,
 			Err(err) => return Err(Error::UnmarshalUniStream(err)),
@@ -403,7 +408,7 @@ impl Authenticate {
 ///
 /// Generic over the QUIC send/receive stream types, allowing use with
 /// different QUIC implementations that implement `StreamTx`/`StreamRx`.
-pub struct Connect<S: StreamTx = SendStream, R: StreamRx = RecvStream> {
+pub struct Connect<S: StreamTx = quinn_crate::SendStream, R: StreamRx = quinn_crate::RecvStream> {
 	model:    Side<ConnectModel<model_side::Tx>, ConnectModel<model_side::Rx>>,
 	pub send: S,
 	pub recv: R,
@@ -430,7 +435,7 @@ impl<S: StreamTx, R: StreamRx> Connect<S, R> {
 	/// Immediately closes the `Connect` streams with the given error code.
 	/// Returns the result of closing the send and receive streams,
 	/// respectively.
-	pub fn reset(&mut self, error_code: VarInt) -> eyre::Result<()> {
+	pub fn reset(&mut self, error_code: quinn_crate::VarInt) -> eyre::Result<()> {
 		self.send.reset(error_code)?;
 		self.recv.stop(error_code)?;
 		Ok(())
@@ -440,7 +445,7 @@ impl<S: StreamTx, R: StreamRx> Connect<S, R> {
 	/// Rx: refuse accepting data
 	pub async fn finish(&mut self) -> eyre::Result<()> {
 		self.send.finish()?;
-		self.recv.stop(VarInt::from_u32(0))?;
+		self.recv.stop(quinn_crate::VarInt::from_u32(0))?;
 		Ok(())
 	}
 }
@@ -482,13 +487,13 @@ impl<S: StreamTx + Debug, R: StreamRx + Debug> Debug for Connect<S, R> {
 
 /// Source of a received `Packet` command.
 #[derive(Debug)]
-pub enum PacketSource<R: StreamRx = RecvStream> {
+pub enum PacketSource<R: StreamRx = quinn_crate::RecvStream> {
 	Quic(R),
 	Native(Bytes),
 }
 
 /// A received `Packet` command.
-pub struct Packet<R: StreamRx = RecvStream> {
+pub struct Packet<R: StreamRx = quinn_crate::RecvStream> {
 	model: PacketModel<model_side::Rx, Bytes>,
 	src:   PacketSource<R>,
 }
@@ -562,7 +567,7 @@ impl<R: StreamRx + Debug> Debug for Packet<R> {
 /// Type of tasks that can be received.
 #[non_exhaustive]
 #[derive(Debug)]
-pub enum Task<S: StreamTx = SendStream, R: StreamRx = RecvStream> {
+pub enum Task<S: StreamTx = quinn_crate::SendStream, R: StreamRx = quinn_crate::RecvStream> {
 	Authenticate(Authenticate),
 	Connect(Connect<S, R>),
 	Packet(Packet<R>),
@@ -571,7 +576,7 @@ pub enum Task<S: StreamTx = SendStream, R: StreamRx = RecvStream> {
 }
 
 #[derive(Debug)]
-struct KeyingMaterialExporter(QuinnConnection);
+struct KeyingMaterialExporter(quinn_crate::Connection);
 
 impl KeyingMaterialExporterImpl for KeyingMaterialExporter {
 	fn export_keying_material(&self, label: &[u8], context: &[u8]) -> [u8; 32] {
@@ -590,9 +595,9 @@ pub enum Error {
 	#[error(transparent)]
 	IoError(#[from] IoError),
 	#[error(transparent)]
-	Connection(#[from] ConnectionError),
+	Connection(#[from] quinn_crate::ConnectionError),
 	#[error(transparent)]
-	SendDatagram(#[from] SendDatagramError),
+	SendDatagram(#[from] quinn_crate::SendDatagramError),
 	#[error("expecting payload length {0} but got {1}")]
 	PayloadLength(usize, usize),
 	#[error("packet {1:#06x} on invalid udp session {0:#06x}")]
@@ -612,5 +617,5 @@ pub enum Error {
 	#[error("bad command `{0}` from datagram")]
 	BadCommandDatagram(&'static str, Bytes),
 	#[error(transparent)]
-	QuicWriteError(#[from] ::quinn::WriteError),
+	QuicWriteError(#[from] quinn_crate::WriteError),
 }
