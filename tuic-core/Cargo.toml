@@ -31,7 +31,7 @@ serde = { version = "1", default-features = false, features = ["derive", "std"] 
 
 # From tuic-quinn
 tracing = { version = "0.1", default-features = false}
-quinn = { workspace = true, default-features = false, features = ["futures-io", "runtime-tokio", "rustls-aws-lc-rs"]}
+quinn = { workspace = true, default-features = false, features = ["futures-io", "runtime-tokio"]}
 quinn-congestions = { workspace = true }
 tokio = { version = "1", default-features = false, features = ["io-util"] }
 eyre = { version = "0.6" }
