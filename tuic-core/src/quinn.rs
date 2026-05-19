@@ -7,7 +7,12 @@ use std::{
 };
 
 pub use ::quinn;
-use ::quinn::{Connection as QuinnConnection, ConnectionError, RecvStream, SendDatagramError, SendStream, VarInt};
+pub use ::quinn::{
+    ClientConfig, Connection as QuinnConnection, ConnectionError, Endpoint, EndpointConfig,
+    RecvStream, SendDatagramError, SendStream, TokioRuntime, TransportConfig, VarInt,
+    ZeroRttAccepted,
+};
+pub use ::quinn::{congestion, crypto, transport};
 use bytes::{BufMut, Bytes, BytesMut};
 use peekable::{buffer::Buffer, tokio::AsyncPeekable};
 use thiserror::Error;
