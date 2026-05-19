@@ -1,13 +1,12 @@
 use std::time::Duration;
 
 use bytes::Bytes;
-use quinn::ZeroRttAccepted;
 use socks5_proto::Address as Socks5Address;
 use tokio::time;
 use tracing::{debug, info, warn};
 use tuic_core::{
 	Address,
-	quinn::{Connect, Packet},
+	quinn::{Connect, Packet, ZeroRttAccepted},
 };
 
 use super::Connection;

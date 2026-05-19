@@ -5,18 +5,18 @@ use std::{
 };
 
 use eyre::Context;
-use quinn::{
-	Endpoint, EndpointConfig, IdleTimeout, ServerConfig, TokioRuntime, TransportConfig, VarInt,
-	congestion::{Bbr3Config, CubicConfig, NewRenoConfig},
-	crypto::rustls::QuicServerConfig,
-};
-use quinn_congestions::bbr::BbrConfig;
 use rustls::{
 	ServerConfig as RustlsServerConfig,
 	pki_types::{CertificateDer, PrivateKeyDer, PrivatePkcs8KeyDer},
 };
 use socket2::{Domain, Protocol, SockAddr, Socket, Type};
 use tracing::{debug, info, warn};
+use tuic_core::quinn::{
+	Endpoint, EndpointConfig, IdleTimeout, ServerConfig, TokioRuntime, TransportConfig, VarInt,
+	bbr::BbrConfig,
+	congestion::{Bbr3Config, CubicConfig, NewRenoConfig},
+	crypto::rustls::QuicServerConfig,
+};
 
 use crate::{
 	AppContext,
