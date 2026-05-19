@@ -9,13 +9,6 @@ use std::{
 use anyhow::Context;
 use crossbeam_utils::atomic::AtomicCell;
 use moka::future::Cache;
-use quinn::{
-	ClientConfig, Connection as QuinnConnection, Endpoint as QuinnEndpoint, EndpointConfig, TokioRuntime, TransportConfig,
-	VarInt, ZeroRttAccepted,
-	congestion::{Bbr3Config, CubicConfig, NewRenoConfig},
-	crypto::rustls::QuicClientConfig,
-};
-use quinn_congestions::bbr::BbrConfig;
 use register_count::Counter;
 use rustls::{
 	ClientConfig as RustlsClientConfig,
@@ -23,6 +16,13 @@ use rustls::{
 };
 use tokio::{sync::RwLock as AsyncRwLock, time};
 use tracing::{debug, info, warn};
+use tuic_core::quinn::{
+	ClientConfig, Endpoint as QuinnEndpoint, EndpointConfig, QuinnConnection, TokioRuntime, TransportConfig, VarInt,
+	ZeroRttAccepted,
+	bbr::BbrConfig,
+	congestion::{Bbr3Config, CubicConfig, NewRenoConfig},
+	crypto::rustls::QuicClientConfig,
+};
 // Importing custom QUIC connection model and side marker
 use tuic_core::quinn::{Connection as Model, side};
 use uuid::Uuid;

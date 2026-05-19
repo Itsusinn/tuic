@@ -6,12 +6,12 @@ use std::{
 	task::{Context, Poll},
 };
 
-use quinn::{
+use tokio::{io::ReadBuf, net::UdpSocket};
+use tracing::debug;
+use tuic_core::quinn::{
 	AsyncUdpSocket, UdpSender,
 	udp::{RecvMeta, Transmit},
 };
-use tokio::{io::ReadBuf, net::UdpSocket};
-use tracing::debug;
 
 #[derive(Debug, Clone)]
 pub struct Socks5UdpSocket {
@@ -70,7 +70,7 @@ impl UdpSender for Socks5UdpSender {
 }
 
 impl AsyncUdpSocket for Socks5UdpSocket {
-	fn create_sender(&self) -> Pin<Box<dyn quinn::UdpSender>> {
+	fn create_sender(&self) -> Pin<Box<dyn tuic_core::quinn::UdpSender>> {
 		Box::pin(Socks5UdpSender(Arc::new(self.clone())))
 	}
 

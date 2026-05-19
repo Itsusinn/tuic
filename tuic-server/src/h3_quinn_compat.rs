@@ -17,20 +17,20 @@ use h3::{
 	quic::{self, ConnectionErrorIncoming, StreamErrorIncoming, StreamId, WriteBuf},
 };
 use peekable::tokio::AsyncPeekable;
-use quinn::{AcceptBi, AcceptUni, OpenBi, OpenUni, ReadError, VarInt};
 use tokio_util::sync::ReusableBoxFuture;
+use tuic_core::quinn::{AcceptBi, AcceptUni, OpenBi, OpenUni, ReadError, VarInt};
 
 type BoxStreamSync<'a, T> = Pin<Box<dyn Stream<Item = T> + Sync + Send + 'a>>;
 
-pub type PeekableRecvStream = AsyncPeekable<quinn::RecvStream, smallvec::SmallVec<[u8; 4]>>;
+pub type PeekableRecvStream = AsyncPeekable<tuic_core::quinn::RecvStream, smallvec::SmallVec<[u8; 4]>>;
 
 pub struct PrefetchedBiRecv {
-	pub send: quinn::SendStream,
+	pub send: tuic_core::quinn::SendStream,
 	pub recv: PeekableRecvStream,
 }
 
 pub struct Connection {
-	conn:           quinn::Connection,
+	conn:           tuic_core::quinn::QuinnConnection,
 	incoming_bi:    BoxStreamSync<'static, <AcceptBi<'static> as Future>::Output>,
 	opening_bi:     Option<BoxStreamSync<'static, <OpenBi<'static> as Future>::Output>>,
 	incoming_uni:   BoxStreamSync<'static, <AcceptUni<'static> as Future>::Output>,
@@ -40,7 +40,7 @@ pub struct Connection {
 }
 
 impl Connection {
-	pub fn new(conn: quinn::Connection) -> Self {
+	pub fn new(conn: tuic_core::quinn::QuinnConnection) -> Self {
 		Self {
 			conn:           conn.clone(),
 			incoming_bi:    Box::pin(stream::unfold(conn.clone(), |conn| async {
@@ -57,7 +57,7 @@ impl Connection {
 	}
 
 	pub fn new_with_prefetched(
-		conn: quinn::Connection,
+		conn: tuic_core::quinn::QuinnConnection,
 		prefetched_uni: Option<PeekableRecvStream>,
 		prefetched_bi: Option<PrefetchedBiRecv>,
 	) -> Self {
@@ -112,18 +112,18 @@ where
 	}
 }
 
-fn convert_connection_error(err: quinn::ConnectionError) -> ConnectionErrorIncoming {
+fn convert_connection_error(err: tuic_core::quinn::ConnectionError) -> ConnectionErrorIncoming {
 	match err {
-		quinn::ConnectionError::ApplicationClosed(close) => ConnectionErrorIncoming::ApplicationClose {
+		tuic_core::quinn::ConnectionError::ApplicationClosed(close) => ConnectionErrorIncoming::ApplicationClose {
 			error_code: close.error_code.into(),
 		},
-		quinn::ConnectionError::TimedOut => ConnectionErrorIncoming::Timeout,
-		error @ quinn::ConnectionError::VersionMismatch
-		| error @ quinn::ConnectionError::TransportError(_)
-		| error @ quinn::ConnectionError::ConnectionClosed(_)
-		| error @ quinn::ConnectionError::Reset
-		| error @ quinn::ConnectionError::LocallyClosed
-		| error @ quinn::ConnectionError::CidsExhausted => ConnectionErrorIncoming::Undefined(Arc::new(error)),
+		tuic_core::quinn::ConnectionError::TimedOut => ConnectionErrorIncoming::Timeout,
+		error @ tuic_core::quinn::ConnectionError::VersionMismatch
+		| error @ tuic_core::quinn::ConnectionError::TransportError(_)
+		| error @ tuic_core::quinn::ConnectionError::ConnectionClosed(_)
+		| error @ tuic_core::quinn::ConnectionError::Reset
+		| error @ tuic_core::quinn::ConnectionError::LocallyClosed
+		| error @ tuic_core::quinn::ConnectionError::CidsExhausted => ConnectionErrorIncoming::Undefined(Arc::new(error)),
 	}
 }
 
@@ -175,7 +175,7 @@ where
 }
 
 pub struct OpenStreams {
-	conn:        quinn::Connection,
+	conn:        tuic_core::quinn::QuinnConnection,
 	opening_bi:  Option<BoxStreamSync<'static, <OpenBi<'static> as Future>::Output>>,
 	opening_uni: Option<BoxStreamSync<'static, <OpenUni<'static> as Future>::Output>>,
 }
@@ -302,10 +302,16 @@ pub struct RecvStream {
 	read_chunk_fut:    ReadChunkFuture,
 }
 
-type ReadChunkFuture = ReusableBoxFuture<'static, (PeekableRecvStream, Result<Option<quinn::Chunk>, quinn::ReadError>)>;
+type ReadChunkFuture = ReusableBoxFuture<
+	'static,
+	(
+		PeekableRecvStream,
+		Result<Option<tuic_core::quinn::Chunk>, tuic_core::quinn::ReadError>,
+	),
+>;
 
 impl RecvStream {
-	fn new(stream: quinn::RecvStream) -> Self {
+	fn new(stream: tuic_core::quinn::RecvStream) -> Self {
 		let num: u64 = stream.id().into();
 		Self::new_inner(AsyncPeekable::with_buffer(stream), num)
 	}
@@ -384,27 +390,27 @@ fn convert_read_error_to_stream_error(error: ReadError) -> StreamErrorIncoming {
 	}
 }
 
-fn convert_write_error_to_stream_error(error: quinn::WriteError) -> StreamErrorIncoming {
+fn convert_write_error_to_stream_error(error: tuic_core::quinn::WriteError) -> StreamErrorIncoming {
 	match error {
-		quinn::WriteError::Stopped(var_int) => StreamErrorIncoming::StreamTerminated {
+		tuic_core::quinn::WriteError::Stopped(var_int) => StreamErrorIncoming::StreamTerminated {
 			error_code: var_int.into_inner(),
 		},
-		quinn::WriteError::ConnectionLost(connection_error) => StreamErrorIncoming::ConnectionErrorIncoming {
+		tuic_core::quinn::WriteError::ConnectionLost(connection_error) => StreamErrorIncoming::ConnectionErrorIncoming {
 			connection_error: convert_connection_error(connection_error),
 		},
-		error @ quinn::WriteError::ClosedStream | error @ quinn::WriteError::ZeroRttRejected => {
+		error @ tuic_core::quinn::WriteError::ClosedStream | error @ tuic_core::quinn::WriteError::ZeroRttRejected => {
 			StreamErrorIncoming::Unknown(Box::new(error))
 		}
 	}
 }
 
 pub struct SendStream<B: Buf> {
-	stream:  quinn::SendStream,
+	stream:  tuic_core::quinn::SendStream,
 	writing: Option<WriteBuf<B>>,
 }
 
 impl<B: Buf> SendStream<B> {
-	fn new(stream: quinn::SendStream) -> Self {
+	fn new(stream: tuic_core::quinn::SendStream) -> Self {
 		Self { stream, writing: None }
 	}
 }

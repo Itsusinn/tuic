@@ -1,10 +1,9 @@
 use std::sync::atomic::Ordering;
 
 use bytes::Bytes;
-use quinn::{RecvStream, SendStream, VarInt};
 use register_count::Register;
 use tracing::{debug, warn};
-use tuic_core::quinn::Task;
+use tuic_core::quinn::{RecvStream, SendStream, Task, VarInt};
 
 use super::Connection;
 use crate::{error::Error, utils::UdpRelayMode};

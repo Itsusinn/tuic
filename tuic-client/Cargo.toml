@@ -13,8 +13,8 @@ repository.workspace = true
 
 [features]
 default = ["aws-lc-rs"]
-ring = ["tuic-core/ring", "rustls/ring", "quinn/rustls-ring"]
-aws-lc-rs = ["tuic-core/aws-lc-rs", "dep:aws-lc-rs", "rustls/aws-lc-rs", "quinn/rustls-aws-lc-rs"]
+ring = ["tuic-core/ring", "rustls/ring"]
+aws-lc-rs = ["tuic-core/aws-lc-rs", "dep:aws-lc-rs", "rustls/aws-lc-rs"]
 jemallocator = ["tikv-jemallocator"]
 
 [dependencies]
@@ -38,10 +38,6 @@ socks5-proto = { version = "0.3", default-features = false }
 socks5-server = { version = "0.8", default-features = false }
 
 uuid = { version = "1", default-features = false, features = ["serde", "std"] }
-
-# QUIC
-quinn = { workspace = true, default-features = false, features = ["runtime-tokio","qlog"] }
-quinn-congestions = { workspace = true }
 
 # TUIC
 tuic-core = { path = "../tuic-core", default-features = false, features = ["async_marshal", "marshal", "model"] }

@@ -7,9 +7,9 @@ use axum::http::{
 use bytes::{Buf, Bytes};
 use futures_util::StreamExt;
 use h3::server;
-use quinn::Connection;
 use reqwest::{Client, Method, Url};
 use tracing::{debug, info, warn};
+use tuic_core::quinn::QuinnConnection;
 
 use crate::{AppContext, config::CamouflageConfig};
 
@@ -18,7 +18,7 @@ const MAX_RESPONSE_BODY_SIZE: usize = 64 * 1024 * 1024;
 
 pub async fn handle(
 	ctx: Arc<AppContext>,
-	conn: Connection,
+	conn: QuinnConnection,
 	prefetched_uni: Option<crate::h3_quinn_compat::PeekableRecvStream>,
 	prefetched_bi: Option<crate::h3_quinn_compat::PrefetchedBiRecv>,
 ) -> eyre::Result<()> {
