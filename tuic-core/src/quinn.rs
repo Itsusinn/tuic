@@ -12,7 +12,7 @@ pub use ::quinn::{
     RecvStream, SendDatagramError, SendStream, TokioRuntime, TransportConfig, VarInt,
     ZeroRttAccepted,
 };
-pub use ::quinn::{congestion, crypto, transport};
+pub use ::quinn::{congestion, crypto};
 use bytes::{BufMut, Bytes, BytesMut};
 use peekable::{buffer::Buffer, tokio::AsyncPeekable};
 use thiserror::Error;
