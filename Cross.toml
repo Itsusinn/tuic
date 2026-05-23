@@ -1,8 +1,23 @@
-[build]
+# Use clang as the C/C++ compiler to avoid the aws-lc-sys GCC memcmp bug
+# https://gcc.gnu.org/bugzilla/show_bug.cgi?id=95189
+# The custom Dockerfile installs clang/llvm and sets CC=clang, CXX=clang++, AR=llvm-ar
+# sccache is also baked into the image for distributed compilation via host TCP server
+
+[build.dockerfile]
+file = ".cross/Dockerfile"
 
 [build.env]
-volumes = ["/var/run/docker.sock=/var/run/docker.sock", "/tmp=/tmp"] # Docker in docker
-passthrough = ["RUSTFLAGS", "RUST_LOG", "CARGO_DOCKER_TEST", "RUSTC_BOOTSTRAP"]
+volumes = [
+    "/tmp=/tmp",
+]
+passthrough = [
+    "RUSTFLAGS",
+    "RUST_LOG",
+    "RUSTC_BOOTSTRAP",
+    "RUSTC_WRAPPER",
+    "SCCACHE_DIR",
+    "SCCACHE_SERVER_PORT",
+]
 
 [target.mips-unknown-linux-musl]
 image = "ghcr.io/cross-rs/mips-unknown-linux-musl:edge"
