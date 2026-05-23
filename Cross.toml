@@ -17,7 +17,6 @@ passthrough = [
     "RUSTC_BOOTSTRAP",
     "RUSTC_WRAPPER",
     "SCCACHE_DIR",
-    "SCCACHE_SERVER_PORT",
 ]
 
 [target.mips-unknown-linux-musl]

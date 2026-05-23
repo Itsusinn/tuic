@@ -13,3 +13,6 @@ ENV AR=llvm-ar
 ARG SCCACHE_VERSION=0.15.0
 RUN curl -LSfs https://github.com/mozilla/sccache/releases/download/v${SCCACHE_VERSION}/sccache-v${SCCACHE_VERSION}-x86_64-unknown-linux-musl.tar.gz \
     | tar xzf - -C /usr/local/bin --strip-components=1
+
+# Connect to host sccache server via network host mode
+ENV SCCACHE_ENDPOINT=tcp://127.0.0.1:14266
