@@ -9,6 +9,7 @@ file = ".cross/Dockerfile"
 [build.env]
 volumes = [
     "/tmp=/tmp",
+    "/var/run/docker.sock=/var/run/docker.sock",
 ]
 passthrough = [
     "RUSTFLAGS",
@@ -16,7 +17,6 @@ passthrough = [
     "RUSTC_BOOTSTRAP",
     "RUSTC_WRAPPER",
     "SCCACHE_DIR",
-    "SCCACHE_SERVER_PORT",
 ]
 
 [target.mips-unknown-linux-musl]
