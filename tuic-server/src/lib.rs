@@ -34,8 +34,15 @@ pub struct AppContext {
 	pub cancel:         CancellationToken,
 }
 
-/// Run the TUIC server with the given configuration
-pub async fn run(cfg: Config) -> eyre::Result<()> {
+pub struct ServerGuard {
+	pub local_addr: std::net::SocketAddr,
+	pub cancel:     CancellationToken,
+}
+
+/// Run the TUIC server with the given configuration.
+/// Returns a [`ServerGuard`] containing the actual bound address and
+/// a cancellation token for graceful shutdown.
+pub async fn run(cfg: Config) -> eyre::Result<ServerGuard> {
 	let mut online_counter = HashMap::new();
 	for (user, _) in cfg.users.iter() {
 		online_counter.insert(user.to_owned(), AtomicUsize::new(0));
@@ -54,7 +61,11 @@ pub async fn run(cfg: Config) -> eyre::Result<()> {
 		cancel: CancellationToken::new(),
 	});
 	let server = server::Server::init(ctx.clone()).await?;
-	server.start().await;
-	Ok(())
+	let local_addr = server.local_addr()?;
+	let cancel = ctx.cancel.clone();
+	tokio::spawn(async move {
+		server.start().await;
+	});
+	Ok(ServerGuard { local_addr, cancel })
 }
 pub mod h3_quinn_compat;

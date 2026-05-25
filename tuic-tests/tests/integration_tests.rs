@@ -270,7 +270,7 @@ async fn test_server_client_integration() -> eyre::Result<()> {
 	let server_handle = tokio::spawn(async move {
 		// Run server with a timeout
 		match timeout(Duration::from_secs(30), tuic_server::run(server_config)).await {
-			Ok(Ok(())) => info!("[Integration Test] Server completed successfully"),
+			Ok(Ok(_guard)) => info!("[Integration Test] Server completed successfully"),
 			Ok(Err(e)) => error!("[Integration Test] Server error: {}", e),
 			Err(_) => error!("[Integration Test] Server timeout"),
 		}
@@ -588,7 +588,7 @@ async fn test_ipv6_server_client_integration() -> eyre::Result<()> {
 	info!("[IPv6 Test] Starting TUIC server on [::1]:8444...");
 	let server_handle = tokio::spawn(async move {
 		match timeout(Duration::from_secs(30), tuic_server::run(server_config)).await {
-			Ok(Ok(())) => info!("[IPv6 Test] Server completed successfully"),
+			Ok(Ok(_guard)) => info!("[IPv6 Test] Server completed successfully"),
 			Ok(Err(e)) => error!("[IPv6 Test] Server error: {}", e),
 			Err(_) => error!("[IPv6 Test] Server timeout"),
 		}
@@ -879,5 +879,61 @@ async fn test_client_proxy_configuration() -> eyre::Result<()> {
 	server_handle.abort();
 	tokio::time::sleep(Duration::from_millis(100)).await;
 
+	Ok(())
+}
+
+// Test that server on port 0 returns the OS-assigned port via ServerGuard
+#[tokio::test(flavor = "current_thread")]
+#[serial]
+#[tracing_test::traced_test]
+async fn test_server_port_zero() -> eyre::Result<()> {
+	use std::{collections::HashMap, net::SocketAddr, path::PathBuf};
+
+	#[cfg(feature = "aws-lc-rs")]
+	let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
+	#[cfg(feature = "ring")]
+	let _ = rustls::crypto::ring::default_provider().install_default();
+
+	let server_config = tuic_server::Config {
+		log_level: tuic_server::config::LogLevel::Debug,
+		server: "127.0.0.1:0".parse::<SocketAddr>()?,
+		users: {
+			let mut users = HashMap::new();
+			users.insert(
+				Uuid::parse_str("00000000-0000-0000-0000-000000000000")?,
+				"test_password".to_string(),
+			);
+			users
+		},
+		tls: tuic_server::config::TlsConfig {
+			self_sign:   true,
+			certificate: PathBuf::from("./test_cert.pem"),
+			private_key: PathBuf::from("./test_key.pem"),
+			alpn:        vec!["h3".to_string()],
+			hostname:    "localhost".to_string(),
+			auto_ssl:    false,
+			acme_email:  "admin@example.com".to_string(),
+		},
+		data_dir: std::env::temp_dir(),
+		dual_stack: false,
+		..Default::default()
+	};
+
+	let guard = tuic_server::run(server_config).await?;
+
+	assert!(
+		guard.local_addr.port() != 0,
+		"Expected a non-zero port from OS when binding to port 0, got {}",
+		guard.local_addr
+	);
+	assert_eq!(
+		guard.local_addr.ip(),
+		"127.0.0.1".parse::<std::net::IpAddr>()?,
+		"Expected server to bind to 127.0.0.1"
+	);
+
+	info!("Server bound to: {}", guard.local_addr);
+
+	guard.cancel.cancel();
 	Ok(())
 }

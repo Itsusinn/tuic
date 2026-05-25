@@ -33,6 +33,10 @@ pub struct Server {
 }
 
 impl Server {
+	pub fn local_addr(&self) -> std::io::Result<SocketAddr> {
+		self.ep.local_addr()
+	}
+
 	pub async fn init(ctx: Arc<AppContext>) -> Result<Self, Error> {
 		let mut crypto: RustlsServerConfig;
 		let hostname = ctx.cfg.tls.hostname.clone();

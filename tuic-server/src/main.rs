@@ -53,22 +53,10 @@ fn main() -> eyre::Result<()> {
 	let rt = builder.enable_all().build()?;
 
 	rt.block_on(async move {
-		tokio::select! {
-			res = tuic_server::run(cfg) => {
-				if let Err(err) = res {
-					tracing::error!("Server exited with error: {err}");
-					return Err(err);
-				}
-			}
-			res = tokio::signal::ctrl_c() => {
-				if let Err(err) = res {
-					tracing::error!("Failed to listen for Ctrl-C: {err}");
-					return Err(eyre::eyre!("Failed to listen for Ctrl-C: {err}"));
-				} else {
-					tracing::info!("Received Ctrl-C, shutting down.");
-				}
-			}
-		}
+		let guard = tuic_server::run(cfg).await?;
+		tokio::signal::ctrl_c().await?;
+		guard.cancel.cancel();
+		tracing::info!("Received Ctrl-C, shutting down.");
 		Ok(())
 	})
 }
