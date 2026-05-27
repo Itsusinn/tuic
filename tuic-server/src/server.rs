@@ -21,14 +21,14 @@ use tuic_core::quinn::{
 use crate::{
 	AppContext,
 	acme::{is_valid_domain, start_acme},
-	connection::{Connection, INIT_CONCURRENT_STREAMS},
+	connection::Connection,
 	error::Error,
 	tls::CertResolver,
 	utils::CongestionController,
 };
 
 pub struct Server {
-	ep:  Endpoint,
+	ep: Endpoint,
 	ctx: Arc<AppContext>,
 }
 
@@ -90,8 +90,8 @@ impl Server {
 		let mut tp_cfg = TransportConfig::default();
 
 		tp_cfg
-			.max_concurrent_bidi_streams(VarInt::from(INIT_CONCURRENT_STREAMS))
-			.max_concurrent_uni_streams(VarInt::from(INIT_CONCURRENT_STREAMS))
+			.max_concurrent_bidi_streams(VarInt::from(ctx.cfg.quic.max_concurrent_streams))
+			.max_concurrent_uni_streams(VarInt::from(ctx.cfg.quic.max_concurrent_streams))
 			.send_window(ctx.cfg.quic.send_window)
 			.stream_receive_window(VarInt::from_u32(ctx.cfg.quic.receive_window))
 			.max_idle_timeout(Some(

@@ -20,8 +20,8 @@ use_field_init_shorthand = true         # Use field init shorthand where possibl
 use_try_shorthand = true                # Use ? instead of try! macro
 
 # Alignment thresholds
-enum_discrim_align_threshold = 20       # Align enum discriminants if <= threshold
-struct_field_align_threshold = 20       # Align struct fields if <= threshold
+enum_discrim_align_threshold = 0        # Disabled: do not align enum discriminants
+struct_field_align_threshold = 0        # Disabled: do not align struct fields
 
 # Formatting options
 reorder_impl_items = true               # Reorder items in impl blocks

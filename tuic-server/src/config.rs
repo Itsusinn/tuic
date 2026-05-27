@@ -28,8 +28,8 @@ use crate::{
 /// Environment state for configuration parsing
 #[derive(Debug, Clone, Default)]
 pub struct EnvState {
-	pub in_docker:          bool,
-	pub tuic_force_toml:    bool,
+	pub in_docker: bool,
+	pub tuic_force_toml: bool,
 	pub tuic_config_format: Option<String>,
 }
 
@@ -37,8 +37,8 @@ impl EnvState {
 	/// Create EnvState from system environment variables
 	pub fn from_system() -> Self {
 		Self {
-			in_docker:          std::env::var("IN_DOCKER").unwrap_or_default().to_lowercase() == "true",
-			tuic_force_toml:    std::env::var("TUIC_FORCE_TOML").is_ok(),
+			in_docker: std::env::var("IN_DOCKER").unwrap_or_default().to_lowercase() == "true",
+			tuic_force_toml: std::env::var("TUIC_FORCE_TOML").is_ok(),
 			tuic_config_format: std::env::var("TUIC_CONFIG_FORMAT").ok().map(|v| v.to_lowercase()),
 		}
 	}
@@ -79,11 +79,11 @@ pub struct Cli {
 #[educe(Default)]
 #[serde(default, deny_unknown_fields)]
 pub struct Config {
-	pub log_level:  LogLevel,
+	pub log_level: LogLevel,
 	#[educe(Default(expression = "[::]:8443".parse().unwrap()))]
-	pub server:     SocketAddr,
-	pub users:      HashMap<Uuid, String>,
-	pub tls:        TlsConfig,
+	pub server: SocketAddr,
+	pub users: HashMap<Uuid, String>,
+	pub tls: TlsConfig,
 	#[educe(Default = None)]
 	pub camouflage: Option<CamouflageConfig>,
 
@@ -147,74 +147,74 @@ pub struct Config {
 	/// Old configuration fields
 	#[serde(default, rename = "self_sign")]
 	#[deprecated]
-	pub __self_sign:          Option<bool>,
+	pub __self_sign: Option<bool>,
 	#[serde(default, rename = "certificate")]
 	#[deprecated]
-	pub __certificate:        Option<PathBuf>,
+	pub __certificate: Option<PathBuf>,
 	#[serde(default, rename = "private_key")]
 	#[deprecated]
-	pub __private_key:        Option<PathBuf>,
+	pub __private_key: Option<PathBuf>,
 	#[serde(default, rename = "auto_ssl")]
 	#[deprecated]
-	pub __auto_ssl:           Option<bool>,
+	pub __auto_ssl: Option<bool>,
 	#[serde(default, rename = "hostname")]
 	#[deprecated]
-	pub __hostname:           Option<String>,
+	pub __hostname: Option<String>,
 	#[serde(default, rename = "acme_email")]
 	#[deprecated]
-	pub __acme_email:         Option<String>,
+	pub __acme_email: Option<String>,
 	#[serde(default, rename = "congestion_control")]
 	#[deprecated]
 	pub __congestion_control: Option<CongestionController>,
 	#[serde(default, rename = "alpn")]
 	#[deprecated]
-	pub __alpn:               Option<Vec<String>>,
+	pub __alpn: Option<Vec<String>>,
 	#[serde(default, rename = "max_idle_time", with = "humantime_serde")]
 	#[deprecated]
-	pub __max_idle_time:      Option<Duration>,
+	pub __max_idle_time: Option<Duration>,
 	#[serde(default, rename = "initial_window")]
 	#[deprecated]
-	pub __initial_window:     Option<u64>,
+	pub __initial_window: Option<u64>,
 	#[serde(default, rename = "receive_window")]
 	#[deprecated]
-	pub __send_window:        Option<u64>,
+	pub __send_window: Option<u64>,
 	#[serde(default, rename = "send_window")]
 	#[deprecated]
-	pub __receive_window:     Option<u32>,
+	pub __receive_window: Option<u32>,
 	#[serde(default, rename = "initial_mtu")]
 	#[deprecated]
-	pub __initial_mtu:        Option<u16>,
+	pub __initial_mtu: Option<u16>,
 	#[serde(default, rename = "min_mtu")]
 	#[deprecated]
-	pub __min_mtu:            Option<u16>,
+	pub __min_mtu: Option<u16>,
 	#[serde(default, rename = "gso")]
 	#[deprecated]
-	pub __gso:                Option<bool>,
+	pub __gso: Option<bool>,
 	#[serde(default, rename = "pmtu")]
 	#[deprecated]
-	pub __pmtu:               Option<bool>,
+	pub __pmtu: Option<bool>,
 	#[serde(rename = "restful_server")]
 	#[deprecated]
-	pub __restful_server:     Option<SocketAddr>,
+	pub __restful_server: Option<SocketAddr>,
 }
 
 #[derive(Deserialize, Serialize, Educe)]
 #[educe(Default)]
 #[serde(default, deny_unknown_fields)]
 pub struct TlsConfig {
-	pub self_sign:   bool,
+	pub self_sign: bool,
 	#[educe(Default(expression = ""))]
 	pub certificate: PathBuf,
 	#[educe(Default(expression = ""))]
 	pub private_key: PathBuf,
 	#[educe(Default(expression = Vec::new()))]
-	pub alpn:        Vec<String>,
+	pub alpn: Vec<String>,
 	#[educe(Default(expression = "localhost"))]
-	pub hostname:    String,
+	pub hostname: String,
 	#[educe(Default(expression = false))]
-	pub auto_ssl:    bool,
+	pub auto_ssl: bool,
 	#[educe(Default(expression = ""))]
-	pub acme_email:  String,
+	pub acme_email: String,
 }
 
 #[derive(Deserialize, Serialize, Educe)]
@@ -244,6 +244,9 @@ pub struct QuicConfig {
 	#[serde(with = "humantime_serde")]
 	#[educe(Default(expression = Duration::from_secs(30)))]
 	pub max_idle_time: Duration,
+
+	#[educe(Default(expression = 1280u32))]
+	pub max_concurrent_streams: u32,
 }
 
 #[derive(Deserialize, Serialize, Educe, Clone, Debug)]
@@ -251,14 +254,14 @@ pub struct QuicConfig {
 #[serde(default, deny_unknown_fields)]
 pub struct CamouflageConfig {
 	#[educe(Default = false)]
-	pub enabled:                 bool,
+	pub enabled: bool,
 	#[educe(Default(expression = "".to_string()))]
-	pub reverse_proxy_url:       String,
+	pub reverse_proxy_url: String,
 	#[educe(Default = None)]
-	pub reverse_proxy_hostname:  Option<String>,
+	pub reverse_proxy_hostname: Option<String>,
 	#[serde(with = "humantime_serde")]
 	#[educe(Default(expression = Duration::from_secs(10)))]
-	pub request_timeout:         Duration,
+	pub request_timeout: Duration,
 	#[educe(Default = false)]
 	pub skip_backend_tls_verify: bool,
 }
@@ -332,7 +335,7 @@ pub struct OutboundRule {
 #[educe(Default)]
 #[serde(default, deny_unknown_fields)]
 pub struct CongestionControlConfig {
-	pub controller:     CongestionController,
+	pub controller: CongestionController,
 	#[educe(Default = 1048576)]
 	pub initial_window: u64,
 }
@@ -342,9 +345,9 @@ pub struct CongestionControlConfig {
 #[serde(default, deny_unknown_fields)]
 pub struct RestfulConfig {
 	#[educe(Default(expression = "127.0.0.1:8443".parse().unwrap()))]
-	pub addr:                     SocketAddr,
+	pub addr: SocketAddr,
 	#[educe(Default = "YOUR_SECRET_HERE")]
-	pub secret:                   String,
+	pub secret: String,
 	#[educe(Default = 0)]
 	pub maximum_clients_per_user: usize,
 }
@@ -356,7 +359,7 @@ pub struct ExperimentalConfig {
 	#[educe(Default = true)]
 	pub drop_loopback: bool,
 	#[educe(Default = true)]
-	pub drop_private:  bool,
+	pub drop_private: bool,
 }
 
 fn deserialize_single_or_vec<'de, D, T>(deserializer: D) -> Result<Vec<T>, D::Error>
@@ -1645,9 +1648,9 @@ reverse_proxy_url = "https://127.0.0.1:443"
 		let config_content = include_str!("../tests/config/env_force_toml.toml");
 
 		let env_state = EnvState {
-			tuic_force_toml:    true,
+			tuic_force_toml: true,
 			tuic_config_format: None,
-			in_docker:          false,
+			in_docker: false,
 		};
 
 		// Use .json extension but content is TOML
@@ -1662,9 +1665,9 @@ reverse_proxy_url = "https://127.0.0.1:443"
 		let config_content = include_str!("../tests/config/env_format_yaml.yaml");
 
 		let env_state = EnvState {
-			tuic_force_toml:    false,
+			tuic_force_toml: false,
 			tuic_config_format: Some("yaml".to_string()),
-			in_docker:          false,
+			in_docker: false,
 		};
 
 		// Use .toml extension but content is YAML
@@ -1682,9 +1685,9 @@ reverse_proxy_url = "https://127.0.0.1:443"
 		let config_content = include_str!("../tests/config/env_format_json.json");
 
 		let env_state = EnvState {
-			tuic_force_toml:    false,
+			tuic_force_toml: false,
 			tuic_config_format: Some("json".to_string()),
-			in_docker:          false,
+			in_docker: false,
 		};
 
 		// Use .toml extension but content is JSON
@@ -1699,9 +1702,9 @@ reverse_proxy_url = "https://127.0.0.1:443"
 		let config_content = include_str!("../tests/config/env_docker_inference.config");
 
 		let env_state = EnvState {
-			tuic_force_toml:    false,
+			tuic_force_toml: false,
 			tuic_config_format: None,
-			in_docker:          true,
+			in_docker: true,
 		};
 
 		// Use unknown extension to trigger inference
@@ -1718,9 +1721,9 @@ reverse_proxy_url = "https://127.0.0.1:443"
 		let config_content = include_str!("../tests/config/env_force_toml.toml");
 
 		let env_state = EnvState {
-			tuic_force_toml:    true,
+			tuic_force_toml: true,
 			tuic_config_format: Some("json".to_string()), // This should be ignored
-			in_docker:          false,
+			in_docker: false,
 		};
 
 		let result = test_parse_config_with_env(config_content, ".yaml", env_state).await.unwrap();
@@ -1733,9 +1736,9 @@ reverse_proxy_url = "https://127.0.0.1:443"
 		let config_content = include_str!("../tests/config/env_format_yaml.yaml");
 
 		let env_state = EnvState {
-			tuic_force_toml:    false,
+			tuic_force_toml: false,
 			tuic_config_format: Some("yaml".to_string()),
-			in_docker:          false,
+			in_docker: false,
 		};
 
 		// File extension says .json but env says yaml
@@ -1749,9 +1752,9 @@ reverse_proxy_url = "https://127.0.0.1:443"
 		let config_content = include_str!("../tests/config/env_format_json.json");
 
 		let env_state = EnvState {
-			tuic_force_toml:    false,
+			tuic_force_toml: false,
 			tuic_config_format: Some("json".to_string()),
-			in_docker:          true, // This should be ignored when config_format is set
+			in_docker: true, // This should be ignored when config_format is set
 		};
 
 		let result = test_parse_config_with_env(config_content, ".unknown", env_state)
@@ -1776,9 +1779,9 @@ reverse_proxy_url = "https://127.0.0.1:443"
 		let config_content = include_str!("../tests/config/env_format_yaml.yaml");
 
 		let env_state = EnvState {
-			tuic_force_toml:    false,
+			tuic_force_toml: false,
 			tuic_config_format: Some("YAML".to_string()), // Uppercase
-			in_docker:          false,
+			in_docker: false,
 		};
 
 		let result = test_parse_config_with_env(config_content, ".toml", env_state).await.unwrap();
@@ -1791,9 +1794,9 @@ reverse_proxy_url = "https://127.0.0.1:443"
 		let config_content = include_str!("../tests/config/env_force_toml.toml");
 
 		let env_state = EnvState {
-			tuic_force_toml:    false,
+			tuic_force_toml: false,
 			tuic_config_format: Some("invalid_format".to_string()),
-			in_docker:          false,
+			in_docker: false,
 		};
 
 		// Should try to infer from content

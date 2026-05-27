@@ -43,7 +43,7 @@ async fn kick(
 	Json(users): Json<Vec<Uuid>>,
 ) -> StatusCode {
 	if let Some(restful) = &ctx.cfg.restful
-		&& restful.secret.is_empty()
+		&& !restful.secret.is_empty()
 		&& restful.secret != token.token()
 	{
 		return StatusCode::UNAUTHORIZED;
@@ -63,7 +63,7 @@ async fn list_online(
 	token: TypedHeader<Authorization<Bearer>>,
 ) -> (StatusCode, Json<HashMap<Uuid, usize>>) {
 	if let Some(restful) = &ctx.cfg.restful
-		&& restful.secret.is_empty()
+		&& !restful.secret.is_empty()
 		&& restful.secret != token.token()
 	{
 		return (StatusCode::UNAUTHORIZED, Json(HashMap::new()));
@@ -84,7 +84,7 @@ async fn list_detailed_online(
 	token: TypedHeader<Authorization<Bearer>>,
 ) -> (StatusCode, Json<HashMap<Uuid, Vec<SocketAddr>>>) {
 	if let Some(restful) = &ctx.cfg.restful
-		&& restful.secret.is_empty()
+		&& !restful.secret.is_empty()
 		&& restful.secret != token.token()
 	{
 		return (StatusCode::UNAUTHORIZED, Json(HashMap::new()));
@@ -107,7 +107,7 @@ async fn list_traffic(
 	token: TypedHeader<Authorization<Bearer>>,
 ) -> (StatusCode, Json<HashMap<Uuid, serde_json::Value>>) {
 	if let Some(restful) = &ctx.cfg.restful
-		&& restful.secret.is_empty()
+		&& !restful.secret.is_empty()
 		&& restful.secret != token.token()
 	{
 		return (StatusCode::UNAUTHORIZED, Json(HashMap::new()));
@@ -129,7 +129,7 @@ async fn reset_traffic(
 	token: TypedHeader<Authorization<Bearer>>,
 ) -> (StatusCode, Json<HashMap<Uuid, serde_json::Value>>) {
 	if let Some(restful) = &ctx.cfg.restful
-		&& restful.secret.is_empty()
+		&& !restful.secret.is_empty()
 		&& restful.secret != token.token()
 	{
 		return (StatusCode::UNAUTHORIZED, Json(HashMap::new()));
@@ -148,11 +148,12 @@ async fn reset_traffic(
 
 pub async fn client_connect(ctx: &AppContext, uuid: &Uuid, conn: QuinnConnection) {
 	if let Some(cfg) = ctx.cfg.restful.as_ref() {
-		let current = ctx
-			.online_counter
-			.get(uuid)
-			.expect("Authorized UUID not present in users table")
-			.fetch_add(1, Ordering::Release);
+		let Some(counter) = ctx.online_counter.get(uuid) else {
+			warn!("UUID {uuid} not in users table during client_connect, closing connection");
+			conn.close(VarInt::from_u32(6003), b"Internal error");
+			return;
+		};
+		let current = counter.fetch_add(1, Ordering::Release);
 		if cfg.maximum_clients_per_user != 0 && current > cfg.maximum_clients_per_user {
 			conn.close(VarInt::from_u32(6001), b"Reached maximum clients limitation");
 			return;
@@ -169,10 +170,11 @@ pub async fn client_connect(ctx: &AppContext, uuid: &Uuid, conn: QuinnConnection
 	}
 }
 pub async fn client_disconnect(ctx: &AppContext, uuid: &Uuid, conn: QuinnConnection) {
-	ctx.online_counter
-		.get(uuid)
-		.expect("Authorized UUID not present in users table")
-		.fetch_sub(1, Ordering::SeqCst);
+	if let Some(counter) = ctx.online_counter.get(uuid) {
+		counter.fetch_sub(1, Ordering::SeqCst);
+	} else {
+		warn!("UUID {uuid} not in users table during client_disconnect");
+	}
 
 	if let Some(cache) = ctx.online_clients.get(uuid).await {
 		let client: crate::compat::QuicClient = conn.into();

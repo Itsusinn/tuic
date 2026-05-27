@@ -1,47 +1,24 @@
-use std::sync::atomic::Ordering;
-
 use bytes::Bytes;
-use register_count::Register;
 use tracing::{debug, warn};
-use tuic_core::quinn::{RecvStream, SendStream, Task, VarInt};
+use tuic_core::quinn::{RecvStream, SendStream, Task};
 
 use super::Connection;
 use crate::{error::Error, utils::UdpRelayMode};
 
 impl Connection {
-	pub async fn accept_uni_stream(&self) -> Result<(RecvStream, Register), Error> {
-		let max = self.max_concurrent_uni_streams.load(Ordering::Relaxed);
-
-		if self.remote_uni_stream_cnt.count() >= (max as f32 * 0.8) as usize {
-			self.max_concurrent_uni_streams.store(max * 2, Ordering::Relaxed);
-
-			self.conn.set_max_concurrent_uni_streams(VarInt::from(max * 2));
-		}
-
-		let recv = self.conn.accept_uni().await?;
-		let reg = self.remote_uni_stream_cnt.reg();
-		Ok((recv, reg))
+	pub async fn accept_uni_stream(&self) -> Result<RecvStream, Error> {
+		Ok(self.conn.accept_uni().await?)
 	}
 
-	pub async fn accept_bi_stream(&self) -> Result<(SendStream, RecvStream, Register), Error> {
-		let max = self.max_concurrent_bi_streams.load(Ordering::Relaxed);
-
-		if self.remote_bi_stream_cnt.count() >= (max as f32 * 0.8) as usize {
-			self.max_concurrent_bi_streams.store(max * 2, Ordering::Relaxed);
-
-			self.conn.set_max_concurrent_bi_streams(VarInt::from(max * 2));
-		}
-
-		let (send, recv) = self.conn.accept_bi().await?;
-		let reg = self.remote_bi_stream_cnt.reg();
-		Ok((send, recv, reg))
+	pub async fn accept_bi_stream(&self) -> Result<(SendStream, RecvStream), Error> {
+		Ok(self.conn.accept_bi().await?)
 	}
 
 	pub async fn accept_datagram(&self) -> Result<Bytes, Error> {
 		Ok(self.conn.read_datagram().await?)
 	}
 
-	pub async fn handle_uni_stream(self, recv: RecvStream, reg: Register) {
+	pub async fn handle_uni_stream(self, recv: RecvStream) {
 		debug!("[relay] incoming unidirectional stream");
 
 		let res = match self.model.accept_uni_stream(recv).await {
@@ -53,27 +30,25 @@ impl Connection {
 				}
 				UdpRelayMode::Native => Err(Error::WrongPacketSource),
 			},
-			_ => unreachable!(), // already filtered in `tuic_quinn`
+			_ => unreachable!(),
 		};
 
 		if let Err(err) = res {
 			warn!("[relay] incoming unidirectional stream error: {err}");
 		}
-		drop(reg);
 	}
 
-	pub async fn handle_bi_stream(self, send: SendStream, recv: RecvStream, reg: Register) {
+	pub async fn handle_bi_stream(self, send: SendStream, recv: RecvStream) {
 		debug!("[relay] incoming bidirectional stream");
 
 		let res = match self.model.accept_bi_stream(send, recv).await {
 			Err(err) => Err::<(), _>(Error::Model(err)),
-			_ => unreachable!(), // already filtered in `tuic_quinn`
+			_ => unreachable!(),
 		};
 
 		if let Err(err) = res {
 			warn!("[relay] incoming bidirectional stream error: {err}");
 		}
-		drop(reg);
 	}
 
 	pub async fn handle_datagram(self, dg: Bytes) {
@@ -88,7 +63,7 @@ impl Connection {
 				}
 				UdpRelayMode::Quic => Err(Error::WrongPacketSource),
 			},
-			_ => unreachable!(), // already filtered in `tuic_quinn`
+			_ => unreachable!(),
 		};
 
 		if let Err(err) = res {

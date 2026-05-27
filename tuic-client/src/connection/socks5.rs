@@ -15,10 +15,10 @@ use tuic_core::quinn::{
 
 #[derive(Debug, Clone)]
 pub struct Socks5UdpSocket {
-	socket:      Arc<UdpSocket>,
-	relay_addr:  SocketAddr,
+	socket: Arc<UdpSocket>,
+	relay_addr: SocketAddr,
 	buffer_size: usize,
-	is_ipv6:     bool,
+	is_ipv6: bool,
 }
 
 impl Socks5UdpSocket {
@@ -157,6 +157,14 @@ fn unwrap_socks5_udp(data: &[u8]) -> Option<(SocketAddr, &[u8])> {
 			let ip = Ipv6Addr::from(octets);
 			let port = u16::from_be_bytes([data[20], data[21]]);
 			Some((SocketAddr::new(IpAddr::V6(ip), port), &data[22..]))
+		}
+		3 => {
+			// Domain name address type — requires async DNS resolution.
+			// Since poll_recv is synchronous, domain-bound UDP packets
+			// from the SOCKS5 proxy cannot be resolved here and must be
+			// dropped. The QUIC endpoint should only receive IP-addressed
+			// responses from the SOCKS5 relay in practice.
+			None
 		}
 		_ => None,
 	}

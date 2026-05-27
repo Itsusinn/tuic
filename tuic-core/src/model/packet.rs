@@ -12,21 +12,21 @@ use super::{
 use crate::{Address, Header, Packet as PacketHeader};
 
 pub struct Packet<M, B> {
-	inner:   Side<Tx, Rx<B>>,
+	inner: Side<Tx, Rx<B>>,
 	_marker: M,
 }
 
 struct Tx {
-	assoc_id:     u16,
-	pkt_id:       u16,
-	addr:         Address,
+	assoc_id: u16,
+	pkt_id: u16,
+	addr: Address,
 	max_pkt_size: usize,
 }
 
 impl<B> Packet<side::Tx, B> {
 	pub(super) fn new(assoc_id: u16, pkt_id: u16, addr: Address, max_pkt_size: usize) -> Self {
 		Self {
-			inner:   Side::Tx(Tx {
+			inner: Side::Tx(Tx {
 				assoc_id,
 				pkt_id,
 				addr,
@@ -75,13 +75,13 @@ impl Debug for Packet<side::Tx, ()> {
 }
 
 struct Rx<B> {
-	sessions:   Arc<Mutex<UdpSessions<B>>>,
-	assoc_id:   u16,
-	pkt_id:     u16,
+	sessions: Arc<Mutex<UdpSessions<B>>>,
+	assoc_id: u16,
+	pkt_id: u16,
 	frag_total: u8,
-	frag_id:    u8,
-	size:       u16,
-	addr:       Address,
+	frag_id: u8,
+	size: u16,
+	addr: Address,
 }
 
 impl<B> Packet<side::Rx, B>
@@ -98,7 +98,7 @@ where
 		addr: Address,
 	) -> Self {
 		Self {
-			inner:   Side::Rx(Rx {
+			inner: Side::Rx(Rx {
 				sessions,
 				assoc_id,
 				pkt_id,
@@ -174,14 +174,14 @@ impl<B> Debug for Packet<side::Rx, B> {
 /// Iterator over fragments of a packet
 #[derive(Debug)]
 pub struct Fragments<'a> {
-	assoc_id:        u16,
-	pkt_id:          u16,
-	addr:            Address,
-	max_pkt_size:    usize,
-	frag_total:      u8,
-	next_frag_id:    u8,
+	assoc_id: u16,
+	pkt_id: u16,
+	addr: Address,
+	max_pkt_size: usize,
+	frag_total: u8,
+	next_frag_id: u8,
 	next_frag_start: usize,
-	payload:         &'a [u8],
+	payload: &'a [u8],
 }
 
 impl<'a> Fragments<'a> {
@@ -197,8 +197,10 @@ impl<'a> Fragments<'a> {
 		};
 		let (_, _, _, _, _, addr) = pkt.into();
 
-		let frag_total = if first_frag_size < payload.as_ref().len() {
-			(1 + (payload.as_ref().len() - first_frag_size) / frag_size_addr_none + 1) as u8
+		let remaining = payload.len().saturating_sub(first_frag_size);
+		let frag_total = if remaining > 0 {
+			let n = 1 + remaining.div_ceil(frag_size_addr_none);
+			n.min(u8::MAX as usize) as u8
 		} else {
 			1u8
 		};

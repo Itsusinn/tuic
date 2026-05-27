@@ -2,6 +2,7 @@
 //! and task counters. No I/O operation is involved internally
 
 use std::{
+	cell::Cell,
 	collections::HashMap,
 	fmt::{Debug, Formatter, Result as FmtResult},
 	mem,
@@ -29,7 +30,7 @@ mod heartbeat;
 mod packet;
 
 pub use self::{
-	authenticate::{Authenticate, KeyingMaterialExporter},
+	authenticate::{Authenticate, ExportError, KeyingMaterialExporter},
 	connect::Connect,
 	dissociate::Dissociate,
 	heartbeat::Heartbeat,
@@ -40,8 +41,8 @@ pub use self::{
 /// and task counters. No I/O operation is involved internally
 #[derive(Clone)]
 pub struct Connection<B> {
-	udp_sessions:         Arc<Mutex<UdpSessions<B>>>,
-	task_connect_count:   Counter,
+	udp_sessions: Arc<Mutex<UdpSessions<B>>>,
+	task_connect_count: Counter,
 	task_associate_count: Counter,
 }
 
@@ -62,12 +63,14 @@ where
 	}
 
 	/// Sends an `Authenticate`
+	///
+	/// Returns `Err(ExportError)` if TLS keying material export fails.
 	pub fn send_authenticate(
 		&self,
 		uuid: Uuid,
 		password: impl AsRef<[u8]>,
 		exporter: &impl KeyingMaterialExporter,
-	) -> Authenticate<side::Tx> {
+	) -> Result<Authenticate<side::Tx>, ExportError> {
 		Authenticate::<side::Tx>::new(uuid, password, exporter)
 	}
 
@@ -181,7 +184,7 @@ pub mod side {
 }
 
 struct UdpSessions<B> {
-	sessions:             HashMap<u16, UdpSession<B>>,
+	sessions: HashMap<u16, UdpSession<B>>,
 	task_associate_count: Counter,
 }
 
@@ -267,6 +270,9 @@ where
 		for (_, session) in self.sessions.iter_mut() {
 			session.collect_garbage(timeout);
 		}
+		// Remove sessions that are empty and have been idle past the timeout.
+		// This prevents unbounded accumulation of stale UDP sessions.
+		self.sessions.retain(|_, session| !session.is_idle(timeout));
 	}
 }
 
@@ -280,9 +286,10 @@ where
 }
 
 struct UdpSession<B> {
-	pkt_buf:     HashMap<u16, PacketBuffer<B>>,
+	pkt_buf: HashMap<u16, PacketBuffer<B>>,
 	next_pkt_id: AtomicU16,
-	_task_reg:   Register,
+	_task_reg: Register,
+	last_active: Cell<Instant>,
 }
 
 impl<B> UdpSession<B>
@@ -291,13 +298,15 @@ where
 {
 	fn new(task_reg: Register) -> Self {
 		Self {
-			pkt_buf:     HashMap::new(),
+			pkt_buf: HashMap::new(),
 			next_pkt_id: AtomicU16::new(0),
-			_task_reg:   task_reg,
+			_task_reg: task_reg,
+			last_active: Cell::new(Instant::now()),
 		}
 	}
 
 	fn send_packet(&self, assoc_id: u16, addr: Address, max_pkt_size: usize) -> Packet<side::Tx, B> {
+		self.last_active.set(Instant::now());
 		Packet::<side::Tx, B>::new(assoc_id, self.next_pkt_id.fetch_add(1, Ordering::AcqRel), addr, max_pkt_size)
 	}
 
@@ -332,6 +341,8 @@ where
 			.or_insert_with(|| PacketBuffer::new(frag_total))
 			.insert(assoc_id, frag_total, frag_id, size, addr, data)?;
 
+		self.last_active.set(Instant::now());
+
 		if res.is_some() {
 			self.pkt_buf.remove(&pkt_id);
 		}
@@ -341,6 +352,10 @@ where
 
 	fn collect_garbage(&mut self, timeout: Duration) {
 		self.pkt_buf.retain(|_, buf| buf.c_time.elapsed() < timeout);
+	}
+
+	fn is_idle(&self, timeout: Duration) -> bool {
+		self.pkt_buf.is_empty() && self.last_active.get().elapsed() >= timeout
 	}
 }
 
@@ -358,11 +373,11 @@ where
 
 #[derive(Debug)]
 struct PacketBuffer<B> {
-	buf:           Vec<Option<B>>,
-	frag_total:    u8,
+	buf: Vec<Option<B>>,
+	frag_total: u8,
 	frag_received: u8,
-	addr:          Address,
-	c_time:        Instant,
+	addr: Address,
+	c_time: Instant,
 }
 
 impl<B> PacketBuffer<B>
@@ -427,8 +442,8 @@ where
 /// A complete packet that can be assembled
 #[derive(Debug)]
 pub struct Assemblable<B> {
-	buf:      Vec<Option<B>>,
-	addr:     Address,
+	buf: Vec<Option<B>>,
+	addr: Address,
 	assoc_id: u16,
 }
 

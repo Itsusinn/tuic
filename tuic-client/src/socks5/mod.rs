@@ -22,9 +22,9 @@ mod udp_session;
 pub use self::udp_session::UdpSession;
 
 pub struct Server {
-	inner:         Socks5Server,
-	dual_stack:    Option<bool>,
-	max_pkt_size:  usize,
+	inner: Socks5Server,
+	dual_stack: Option<bool>,
+	max_pkt_size: usize,
 	next_assoc_id: AtomicU16,
 }
 

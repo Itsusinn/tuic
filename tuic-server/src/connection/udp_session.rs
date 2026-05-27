@@ -18,12 +18,12 @@ use super::Connection;
 use crate::{AppContext, error::Error, utils::FutResultExt};
 
 pub struct UdpSession {
-	ctx:          Arc<AppContext>,
-	assoc_id:     u16,
+	ctx: Arc<AppContext>,
+	assoc_id: u16,
 	udp_sessions: Cache<u16, Arc<UdpSession>>,
-	socket_v4:    UdpSocket,
-	socket_v6:    Option<UdpSocket>,
-	close:        AsyncRwLock<Option<oneshot::Sender<()>>>,
+	socket_v4: UdpSocket,
+	socket_v6: Option<UdpSocket>,
+	close: AsyncRwLock<Option<oneshot::Sender<()>>>,
 }
 
 impl UdpSession {

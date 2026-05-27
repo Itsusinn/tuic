@@ -19,12 +19,12 @@ use super::Address;
 /// - `ADDR` - target (from client) or source (from server) address
 #[derive(Clone, Debug)]
 pub struct Packet {
-	assoc_id:   u16,
-	pkt_id:     u16,
+	assoc_id: u16,
+	pkt_id: u16,
 	frag_total: u8,
-	frag_id:    u8,
-	size:       u16,
-	addr:       Address,
+	frag_id: u8,
+	size: u16,
+	addr: Address,
 }
 
 impl Packet {

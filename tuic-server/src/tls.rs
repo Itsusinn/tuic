@@ -19,9 +19,9 @@ use tracing::warn;
 #[derive(Debug)]
 pub struct CertResolver {
 	cert_path: PathBuf,
-	key_path:  PathBuf,
-	cert_key:  RwLock<Arc<CertifiedKey>>,
-	hash:      ArcSwap<[u8; 32]>,
+	key_path: PathBuf,
+	cert_key: RwLock<Arc<CertifiedKey>>,
+	hash: ArcSwap<[u8; 32]>,
 }
 impl CertResolver {
 	pub async fn new(cert_path: &Path, key_path: &Path, interval: Duration) -> Result<Arc<Self>> {
@@ -29,9 +29,9 @@ impl CertResolver {
 		let hash = Self::calc_hash(cert_path, key_path).await?;
 		let resolver = Arc::new(Self {
 			cert_path: cert_path.to_owned(),
-			key_path:  key_path.to_owned(),
-			cert_key:  RwLock::new(cert_key),
-			hash:      ArcSwap::new(Arc::new(hash)),
+			key_path: key_path.to_owned(),
+			cert_key: RwLock::new(cert_key),
+			hash: ArcSwap::new(Arc::new(hash)),
 		});
 		// Start file watcher in background
 		let resolver_clone = resolver.clone();

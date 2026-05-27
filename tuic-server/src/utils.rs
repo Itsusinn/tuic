@@ -1,7 +1,6 @@
 // Re-export common types from tuic-core
 pub use tuic_core::{StackPrefer, UdpRelayMode};
 
-// Type alias for backward compatibility
 pub type CongestionController = tuic_core::CongestionControl;
 
 pub trait FutResultExt<T, E, Fut> {
