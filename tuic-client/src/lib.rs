@@ -26,23 +26,22 @@ pub use config::Config;
 /// Passed as `Arc<AppContext>` throughout the client; eliminates global
 /// statics.
 pub struct AppContext {
-	/// Manages the QUIC endpoint and current connection
-	pub conn_mgr:            Arc<connection::ConnectionManager>,
+	pub conn_mgr: Arc<connection::ConnectionManager>,
 	/// SOCKS5 proxy server
-	pub socks5:              Arc<socks5::Server>,
+	pub socks5: Arc<socks5::Server>,
 	/// UDP session registry for SOCKS5 UDP associate
 	pub socks5_udp_sessions: Cache<u16, socks5::UdpSession>,
 	/// UDP session registry for TCP/UDP port forwarding
-	pub fwd_udp_sessions:    Cache<u16, forward::ForwardUdpSession>,
+	pub fwd_udp_sessions: Cache<u16, forward::ForwardUdpSession>,
 	/// Next association ID counter for UDP forwarding (high bit set to avoid
 	/// collisions with SOCKS5 IDs)
-	pub next_fwd_assoc_id:   AtomicU16,
+	pub next_fwd_assoc_id: AtomicU16,
 	/// Startup connection behavior.
-	pub startup_mode:        config::StartupMode,
+	pub startup_mode: config::StartupMode,
 	/// Whether the first relay connection has been established at least once.
-	pub first_connected:     AtomicBool,
+	pub first_connected: AtomicBool,
 	/// Serializes first-connection logic under non-eager modes.
-	pub first_connect_lock:  AsyncMutex<()>,
+	pub first_connect_lock: AsyncMutex<()>,
 }
 
 impl AppContext {

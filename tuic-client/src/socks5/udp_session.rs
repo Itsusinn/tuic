@@ -15,8 +15,8 @@ use crate::error::Error;
 
 #[derive(Clone)]
 pub struct UdpSession {
-	socket:    Arc<AssociatedUdpSocket>,
-	assoc_id:  u16,
+	socket: Arc<AssociatedUdpSocket>,
+	assoc_id: u16,
 	ctrl_addr: SocketAddr,
 }
 

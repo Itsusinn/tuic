@@ -7,20 +7,20 @@ use crate::{Address, Connect as ConnectHeader, Header};
 
 /// The model of the `Connect` command
 pub struct Connect<M> {
-	inner:   Side<Tx, Rx>,
+	inner: Side<Tx, Rx>,
 	_marker: M,
 }
 
 struct Tx {
-	header:    Header,
+	header: Header,
 	_task_reg: Register,
 }
 
 impl Connect<side::Tx> {
 	pub(super) fn new(task_reg: Register, addr: Address) -> Self {
 		Self {
-			inner:   Side::Tx(Tx {
-				header:    Header::Connect(ConnectHeader::new(addr)),
+			inner: Side::Tx(Tx {
+				header: Header::Connect(ConnectHeader::new(addr)),
 				_task_reg: task_reg,
 			}),
 			_marker: side::Tx,
@@ -42,14 +42,14 @@ impl Debug for Connect<side::Tx> {
 }
 
 struct Rx {
-	addr:      Address,
+	addr: Address,
 	_task_reg: Register,
 }
 
 impl Connect<side::Rx> {
 	pub(super) fn new(task_reg: Register, addr: Address) -> Self {
 		Self {
-			inner:   Side::Rx(Rx {
+			inner: Side::Rx(Rx {
 				addr,
 				_task_reg: task_reg,
 			}),

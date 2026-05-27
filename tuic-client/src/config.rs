@@ -26,7 +26,7 @@ use crate::utils::{CongestionControl, StackPrefer, UdpRelayMode};
 /// Environment state for configuration parsing
 #[derive(Debug, Clone, Default)]
 pub struct EnvState {
-	pub tuic_force_toml:    bool,
+	pub tuic_force_toml: bool,
 	pub tuic_config_format: Option<String>,
 }
 
@@ -34,7 +34,7 @@ impl EnvState {
 	/// Create EnvState from system environment variables
 	pub fn from_system() -> Self {
 		Self {
-			tuic_force_toml:    std::env::var("TUIC_FORCE_TOML").is_ok(),
+			tuic_force_toml: std::env::var("TUIC_FORCE_TOML").is_ok(),
 			tuic_config_format: std::env::var("TUIC_CONFIG_FORMAT").ok().map(|v| v.to_lowercase()),
 		}
 	}
@@ -190,6 +190,9 @@ pub struct Relay {
 	#[serde(with = "humantime_serde")]
 	pub gc_lifetime: Duration,
 
+	#[educe(Default(expression = 1280u32))]
+	pub max_concurrent_streams: u32,
+
 	#[educe(Default = false)]
 	pub skip_cert_verify: bool,
 
@@ -263,9 +266,9 @@ pub struct TcpForward {
 #[derive(Debug, Clone, Deserialize, serde::Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct UdpForward {
-	pub listen:  SocketAddr,
+	pub listen: SocketAddr,
 	#[serde(deserialize_with = "deserialize_server")]
-	pub remote:  (String, u16),
+	pub remote: (String, u16),
 	#[serde(default = "default_udp_timeout", deserialize_with = "deserialize_duration")]
 	pub timeout: Duration,
 }
@@ -958,7 +961,7 @@ server = "127.0.0.1:1081"
 
 		// Create EnvState with force_toml enabled
 		let env_state = EnvState {
-			tuic_force_toml:    true,
+			tuic_force_toml: true,
 			tuic_config_format: None,
 		};
 
@@ -973,7 +976,7 @@ server = "127.0.0.1:1081"
 
 		// Create EnvState with config_format set to YAML
 		let env_state = EnvState {
-			tuic_force_toml:    false,
+			tuic_force_toml: false,
 			tuic_config_format: Some("yaml".to_string()),
 		};
 

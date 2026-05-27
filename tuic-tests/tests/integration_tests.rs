@@ -245,13 +245,13 @@ async fn test_server_client_integration() -> eyre::Result<()> {
 			users
 		},
 		tls: tuic_server::config::TlsConfig {
-			self_sign:   true,
+			self_sign: true,
 			certificate: PathBuf::from("./test_cert.pem"),
 			private_key: PathBuf::from("./test_key.pem"),
-			alpn:        vec!["h3".to_string()],
-			hostname:    "localhost".to_string(),
-			auto_ssl:    false,
-			acme_email:  "admin@example.com".to_string(),
+			alpn: vec!["h3".to_string()],
+			hostname: "localhost".to_string(),
+			auto_ssl: false,
+			acme_email: "admin@example.com".to_string(),
 		},
 		data_dir: std::env::temp_dir(),
 		quic: tuic_server::config::QuicConfig::default(),
@@ -284,7 +284,7 @@ async fn test_server_client_integration() -> eyre::Result<()> {
 	// Create a client configuration that connects to the test server
 	let client_config = tuic_client::Config {
 		tokio_runtime: Default::default(),
-		relay:         tuic_client::config::Relay {
+		relay: tuic_client::config::Relay {
 			server: ("127.0.0.1".to_string(), 8443),
 			uuid: Uuid::parse_str("00000000-0000-0000-0000-000000000000")?,
 			password: std::sync::Arc::from(b"test_password".to_vec().into_boxed_slice()),
@@ -302,16 +302,16 @@ async fn test_server_client_integration() -> eyre::Result<()> {
 			skip_cert_verify: true,
 			..Default::default()
 		},
-		local:         tuic_client::config::Local {
-			server:          "127.0.0.1:1080".parse()?,
-			username:        None,
-			password:        None,
-			dual_stack:      Some(false),
+		local: tuic_client::config::Local {
+			server: "127.0.0.1:1080".parse()?,
+			username: None,
+			password: None,
+			dual_stack: Some(false),
 			max_packet_size: 1500,
-			tcp_forward:     Vec::new(),
-			udp_forward:     Vec::new(),
+			tcp_forward: Vec::new(),
+			udp_forward: Vec::new(),
 		},
-		log_level:     "debug".to_string(),
+		log_level: "debug".to_string(),
 	};
 
 	// Spawn client in background with timeout
@@ -553,13 +553,13 @@ async fn test_ipv6_server_client_integration() -> eyre::Result<()> {
 			users
 		},
 		tls: tuic_server::config::TlsConfig {
-			self_sign:   true,
+			self_sign: true,
 			certificate: PathBuf::from("./test_cert_ipv6.pem"),
 			private_key: PathBuf::from("./test_key_ipv6.pem"),
-			alpn:        vec!["h3".to_string()],
-			hostname:    "localhost".to_string(),
-			auto_ssl:    false,
-			acme_email:  "admin@example.com".to_string(),
+			alpn: vec!["h3".to_string()],
+			hostname: "localhost".to_string(),
+			auto_ssl: false,
+			acme_email: "admin@example.com".to_string(),
 		},
 		data_dir: std::env::temp_dir(),
 		restful: None,
@@ -577,9 +577,9 @@ async fn test_ipv6_server_client_integration() -> eyre::Result<()> {
 		// Allow localhost connections for testing
 		acl: vec![tuic_server::acl::AclRule {
 			outbound: "allow".to_string(),
-			addr:     tuic_server::acl::AclAddress::Localhost,
-			ports:    None,
-			hijack:   None,
+			addr: tuic_server::acl::AclAddress::Localhost,
+			ports: None,
+			hijack: None,
 		}],
 		..Default::default()
 	};
@@ -602,44 +602,45 @@ async fn test_ipv6_server_client_integration() -> eyre::Result<()> {
 	// Create client configuration connecting to IPv6 server
 	let client_config = tuic_client::Config {
 		tokio_runtime: Default::default(),
-		relay:         tuic_client::config::Relay {
-			server:               ("[::1]".to_string(), 8444),
-			uuid:                 Uuid::parse_str("00000000-0000-0000-0000-000000000000")?,
-			password:             std::sync::Arc::from(b"test_password".to_vec().into_boxed_slice()),
-			ip:                   None,
-			ipstack_prefer:       tuic_client::utils::StackPrefer::V6first,
-			certificates:         Vec::new(),
-			udp_relay_mode:       tuic_client::utils::UdpRelayMode::Native,
-			congestion_control:   tuic_client::utils::CongestionControl::Cubic,
-			alpn:                 vec![b"h3".to_vec()],
-			zero_rtt_handshake:   false,
-			disable_sni:          true,
-			sni:                  None,
-			timeout:              Duration::from_secs(8),
-			startup_mode:         tuic_client::config::StartupMode::Lazy,
-			heartbeat:            Duration::from_secs(3),
+		relay: tuic_client::config::Relay {
+			server: ("[::1]".to_string(), 8444),
+			uuid: Uuid::parse_str("00000000-0000-0000-0000-000000000000")?,
+			password: std::sync::Arc::from(b"test_password".to_vec().into_boxed_slice()),
+			ip: None,
+			ipstack_prefer: tuic_client::utils::StackPrefer::V6first,
+			certificates: Vec::new(),
+			udp_relay_mode: tuic_client::utils::UdpRelayMode::Native,
+			congestion_control: tuic_client::utils::CongestionControl::Cubic,
+			alpn: vec![b"h3".to_vec()],
+			zero_rtt_handshake: false,
+			disable_sni: true,
+			sni: None,
+			timeout: Duration::from_secs(8),
+			startup_mode: tuic_client::config::StartupMode::Lazy,
+			heartbeat: Duration::from_secs(3),
 			disable_native_certs: true,
-			send_window:          8 * 1024 * 1024 * 2,
-			receive_window:       8 * 1024 * 1024,
-			initial_mtu:          1200,
-			min_mtu:              1200,
-			gso:                  false,
-			pmtu:                 false,
-			gc_interval:          Duration::from_secs(3),
-			gc_lifetime:          Duration::from_secs(15),
-			skip_cert_verify:     true,
-			proxy:                None,
+			send_window: 8 * 1024 * 1024 * 2,
+			receive_window: 8 * 1024 * 1024,
+			initial_mtu: 1200,
+			min_mtu: 1200,
+			gso: false,
+			pmtu: false,
+			gc_interval: Duration::from_secs(3),
+			gc_lifetime: Duration::from_secs(15),
+			skip_cert_verify: true,
+			proxy: None,
+			max_concurrent_streams: 1280,
 		},
-		local:         tuic_client::config::Local {
-			server:          "[::1]:1081".parse()?,
-			username:        None,
-			password:        None,
-			dual_stack:      Some(false),
+		local: tuic_client::config::Local {
+			server: "[::1]:1081".parse()?,
+			username: None,
+			password: None,
+			dual_stack: Some(false),
 			max_packet_size: 1500,
-			tcp_forward:     Vec::new(),
-			udp_forward:     Vec::new(),
+			tcp_forward: Vec::new(),
+			udp_forward: Vec::new(),
 		},
-		log_level:     "debug".to_string(),
+		log_level: "debug".to_string(),
 	};
 
 	// Spawn client with IPv6 SOCKS5 server
@@ -774,13 +775,13 @@ async fn test_client_proxy_configuration() -> eyre::Result<()> {
 			users
 		},
 		tls: tuic_server::config::TlsConfig {
-			self_sign:   true,
+			self_sign: true,
 			certificate: PathBuf::from("./test_cert.pem"),
 			private_key: PathBuf::from("./test_key.pem"),
-			alpn:        vec!["h3".to_string()],
-			hostname:    "localhost".to_string(),
-			auto_ssl:    false,
-			acme_email:  "admin@example.com".to_string(),
+			alpn: vec!["h3".to_string()],
+			hostname: "localhost".to_string(),
+			auto_ssl: false,
+			acme_email: "admin@example.com".to_string(),
 		},
 		data_dir: std::env::temp_dir(),
 		udp_relay_ipv6: true,
@@ -791,9 +792,9 @@ async fn test_client_proxy_configuration() -> eyre::Result<()> {
 		outbound: tuic_server::config::OutboundConfig::default(),
 		acl: vec![tuic_server::acl::AclRule {
 			outbound: "allow".to_string(),
-			addr:     tuic_server::acl::AclAddress::Localhost,
-			ports:    None,
-			hijack:   None,
+			addr: tuic_server::acl::AclAddress::Localhost,
+			ports: None,
+			hijack: None,
 		}],
 		..Default::default()
 	};
@@ -818,25 +819,25 @@ async fn test_client_proxy_configuration() -> eyre::Result<()> {
 	// Build config directly
 	let config = tuic_client::config::Config {
 		tokio_runtime: Default::default(),
-		relay:         tuic_client::config::Relay {
+		relay: tuic_client::config::Relay {
 			server: ("127.0.0.1".to_string(), 8445),
 			uuid: Uuid::parse_str("00000000-0000-0000-0000-000000000000")?,
 			password: std::sync::Arc::from("test_password".as_bytes()),
 			skip_cert_verify: true,
 			proxy: Some(tuic_client::config::ProxyConfig {
-				server:          (socks5_addr.ip().to_string(), socks5_addr.port()),
-				username:        Some("proxy_user".to_string()),
-				password:        Some("proxy_pass".to_string()),
+				server: (socks5_addr.ip().to_string(), socks5_addr.port()),
+				username: Some("proxy_user".to_string()),
+				password: Some("proxy_pass".to_string()),
 				udp_buffer_size: 4096,
 			}),
 			alpn: vec![b"h3".to_vec()],
 			..Default::default()
 		},
-		local:         tuic_client::config::Local {
+		local: tuic_client::config::Local {
 			server: "127.0.0.1:1082".parse()?,
 			..Default::default()
 		},
-		log_level:     "debug".to_string(),
+		log_level: "debug".to_string(),
 	};
 	let local_socks = "127.0.0.1:1082";
 	info!("[Proxy Config Test] ✓ Config built successfully");
@@ -906,13 +907,13 @@ async fn test_server_port_zero() -> eyre::Result<()> {
 			users
 		},
 		tls: tuic_server::config::TlsConfig {
-			self_sign:   true,
+			self_sign: true,
 			certificate: PathBuf::from("./test_cert.pem"),
 			private_key: PathBuf::from("./test_key.pem"),
-			alpn:        vec!["h3".to_string()],
-			hostname:    "localhost".to_string(),
-			auto_ssl:    false,
-			acme_email:  "admin@example.com".to_string(),
+			alpn: vec!["h3".to_string()],
+			hostname: "localhost".to_string(),
+			auto_ssl: false,
+			acme_email: "admin@example.com".to_string(),
 		},
 		data_dir: std::env::temp_dir(),
 		dual_stack: false,

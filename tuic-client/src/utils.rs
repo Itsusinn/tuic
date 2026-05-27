@@ -37,11 +37,11 @@ pub fn load_certs(paths: Vec<PathBuf>, disable_native: bool) -> Result<RootCertS
 }
 
 pub struct ServerAddr {
-	domain:             String,
-	port:               u16,
-	ip:                 Option<IpAddr>,
+	domain: String,
+	port: u16,
+	ip: Option<IpAddr>,
 	pub ipstack_prefer: StackPrefer,
-	sni:                Option<String>,
+	sni: Option<String>,
 }
 
 impl ServerAddr {

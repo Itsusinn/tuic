@@ -31,7 +31,6 @@ sha2 = "0.11"
 
 # TUIC
 tuic-core = { path = "../tuic-core", default-features = false, features = ["async_marshal", "marshal", "model"] }
-register-count = { version = "0.1.0", default-features = false, features = ["std"] }
 
 # Tokio/Async
 tokio = { version = "1", default-features = false, features = ["io-util", "macros", "net", "parking_lot", "rt-multi-thread", "time", "fs", "signal"] }

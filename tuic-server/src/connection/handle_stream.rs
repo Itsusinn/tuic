@@ -1,19 +1,14 @@
-use std::sync::atomic::Ordering;
-
 use bytes::Bytes;
-use register_count::Register;
 use tokio::time;
 use tracing::{debug, warn};
-use tuic_core::quinn::{StreamRx, StreamTx, Task, VarInt};
+use tuic_core::quinn::{StreamRx, StreamTx, Task};
 
 use super::Connection;
 use crate::{error::Error, utils::UdpRelayMode};
 
 impl Connection {
-	pub async fn handle_uni_stream<R: StreamRx>(self, recv: R, reg: Register) {
+	pub async fn handle_uni_stream<R: StreamRx>(self, recv: R) {
 		debug!("incoming unidirectional stream");
-
-		self.maybe_expand_uni_stream_limit();
 
 		let pre_process = async {
 			let task = time::timeout(self.ctx.cfg.task_negotiation_timeout, self.model.accept_uni_stream(recv))
@@ -48,13 +43,10 @@ impl Connection {
 				self.close();
 			}
 		}
-		drop(reg);
 	}
 
-	pub async fn handle_bi_stream<S: StreamTx, R: StreamRx>(self, (send, recv): (S, R), reg: Register) {
+	pub async fn handle_bi_stream<S: StreamTx, R: StreamRx>(self, (send, recv): (S, R)) {
 		debug!("incoming bidirectional stream");
-
-		self.maybe_expand_bi_stream_limit();
 
 		let pre_process = async {
 			let task = time::timeout(self.ctx.cfg.task_negotiation_timeout, self.model.accept_bi_stream(send, recv))
@@ -78,43 +70,6 @@ impl Connection {
 				warn!("handling incoming bidirectional stream error: {err}");
 				self.close();
 			}
-		}
-		drop(reg);
-	}
-
-	fn maybe_expand_uni_stream_limit(&self) {
-		let current_max = self.max_concurrent_uni_streams.load(Ordering::Relaxed);
-
-		if self.remote_uni_stream_cnt.count() >= (current_max as f32 * 0.7) as usize
-			&& let Ok(_) = self.max_concurrent_uni_streams.compare_exchange(
-				current_max,
-				current_max * 2,
-				Ordering::AcqRel,
-				Ordering::Acquire,
-			) {
-			debug!(
-				"reached max concurrent uni_streams, setting bigger limitation={num}",
-				num = current_max * 2
-			);
-			self.inner.set_max_concurrent_uni_streams(VarInt::from(current_max * 2));
-		}
-	}
-
-	fn maybe_expand_bi_stream_limit(&self) {
-		let current_max = self.max_concurrent_bi_streams.load(Ordering::Relaxed);
-
-		if self.remote_bi_stream_cnt.count() >= (current_max as f32 * 0.7) as usize
-			&& let Ok(_) = self.max_concurrent_bi_streams.compare_exchange(
-				current_max,
-				current_max * 2,
-				Ordering::AcqRel,
-				Ordering::Acquire,
-			) {
-			debug!(
-				"reached max concurrent bi_streams, setting bigger limitation={num}",
-				num = current_max * 2
-			);
-			self.inner.set_max_concurrent_bi_streams(VarInt::from(current_max * 2));
 		}
 	}
 

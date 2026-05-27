@@ -5,7 +5,7 @@ use crate::{Dissociate as DissociateHeader, Header};
 
 /// The model of the `Dissociate` command
 pub struct Dissociate<M> {
-	inner:   Side<Tx, Rx>,
+	inner: Side<Tx, Rx>,
 	_marker: M,
 }
 
@@ -16,7 +16,7 @@ struct Tx {
 impl Dissociate<side::Tx> {
 	pub(super) fn new(assoc_id: u16) -> Self {
 		Self {
-			inner:   Side::Tx(Tx {
+			inner: Side::Tx(Tx {
 				header: Header::Dissociate(DissociateHeader::new(assoc_id)),
 			}),
 			_marker: side::Tx,
@@ -44,7 +44,7 @@ struct Rx {
 impl Dissociate<side::Rx> {
 	pub(super) fn new(assoc_id: u16) -> Self {
 		Self {
-			inner:   Side::Rx(Rx { assoc_id }),
+			inner: Side::Rx(Rx { assoc_id }),
 			_marker: side::Rx,
 		}
 	}

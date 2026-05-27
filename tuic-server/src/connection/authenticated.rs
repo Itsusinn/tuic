@@ -15,8 +15,8 @@ pub struct Authenticated(Arc<AuthenticatedInner>);
 
 struct AuthenticatedInner {
 	/// uuid that waiting for auth
-	uuid:             ArcSwapOption<Uuid>,
-	notify:           Notify,
+	uuid: ArcSwapOption<Uuid>,
+	notify: Notify,
 	is_authenticated: AtomicBool,
 }
 
@@ -24,8 +24,8 @@ struct AuthenticatedInner {
 impl Authenticated {
 	pub fn new() -> Self {
 		Self(Arc::new(AuthenticatedInner {
-			uuid:             ArcSwapOption::new(None),
-			notify:           Notify::new(),
+			uuid: ArcSwapOption::new(None),
+			notify: Notify::new(),
 			is_authenticated: AtomicBool::new(false),
 		}))
 	}

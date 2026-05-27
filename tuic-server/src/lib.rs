@@ -27,16 +27,16 @@ pub mod utils;
 pub use config::{Cli, Config, Control};
 
 pub struct AppContext {
-	pub cfg:            Config,
+	pub cfg: Config,
 	pub online_counter: HashMap<Uuid, AtomicUsize>,
 	pub online_clients: Cache<Uuid, Arc<Cache<usize, compat::QuicClient>>>,
-	pub traffic_stats:  HashMap<Uuid, (AtomicUsize, AtomicUsize)>,
-	pub cancel:         CancellationToken,
+	pub traffic_stats: HashMap<Uuid, (AtomicUsize, AtomicUsize)>,
+	pub cancel: CancellationToken,
 }
 
 pub struct ServerGuard {
 	pub local_addr: std::net::SocketAddr,
-	pub cancel:     CancellationToken,
+	pub cancel: CancellationToken,
 }
 
 /// Run the TUIC server with the given configuration.

@@ -416,20 +416,20 @@ mod model_tests {
 
 	use crate::{
 		Address,
-		model::{Connection, KeyingMaterialExporter},
+		model::{Connection, ExportError, KeyingMaterialExporter},
 	};
 
 	/// A mock keying material exporter for testing
 	struct MockExporter;
 
 	impl KeyingMaterialExporter for MockExporter {
-		fn export_keying_material(&self, label: &[u8], context: &[u8]) -> [u8; 32] {
+		fn export_keying_material(&self, label: &[u8], context: &[u8]) -> Result<[u8; 32], ExportError> {
 			let mut result = [0u8; 32];
 			// Simple deterministic hash for testing
 			for (i, b) in label.iter().chain(context.iter()).enumerate() {
 				result[i % 32] ^= b;
 			}
-			result
+			Ok(result)
 		}
 	}
 
@@ -447,7 +447,7 @@ mod model_tests {
 		let password = "test_password";
 		let exporter = MockExporter;
 
-		let auth_tx = conn.send_authenticate(uuid, password, &exporter);
+		let auth_tx = conn.send_authenticate(uuid, password, &exporter).unwrap();
 		let header = auth_tx.header();
 		assert_eq!(header.type_code(), 0x00); // Authenticate
 	}
@@ -459,12 +459,12 @@ mod model_tests {
 		let password = "test_password";
 		let exporter = MockExporter;
 
-		let token = exporter.export_keying_material(uuid.as_ref(), password.as_ref());
+		let token = exporter.export_keying_material(uuid.as_ref(), password.as_ref()).unwrap();
 		let header = crate::Authenticate::new(uuid, token);
 
 		let auth_rx = conn.recv_authenticate(header);
 		assert_eq!(auth_rx.uuid(), uuid);
-		assert!(auth_rx.is_valid(password, &exporter));
+		assert!(auth_rx.is_valid(password, &exporter).unwrap());
 	}
 
 	#[test]
@@ -478,7 +478,7 @@ mod model_tests {
 
 		let auth_rx = conn.recv_authenticate(header);
 		assert_eq!(auth_rx.uuid(), uuid);
-		assert!(!auth_rx.is_valid("test_password", &exporter));
+		assert!(!auth_rx.is_valid("test_password", &exporter).unwrap());
 	}
 
 	#[test]
@@ -753,20 +753,26 @@ mod model_tests {
 		let pkt = conn.recv_packet_unrestricted(header);
 		pkt.assemble(vec![1, 2, 3, 4, 5]).unwrap();
 
-		// Wait a tiny bit so elapsed > 0
+		// Wait so elapsed > 0
 		std::thread::sleep(Duration::from_millis(10));
 
-		// Garbage collect with very short timeout should remove incomplete packets
+		// GC with very short timeout removes the incomplete packet buffer
 		conn.collect_garbage(Duration::from_nanos(1));
 
-		// The session still exists, so recv_packet should find it.
-		// But the old packet buffer for pkt_id=0 should be gone (GC'd).
-		// Sending a new complete single-fragment packet should succeed.
+		// The session is still active (send_packet touches last_active),
+		// so recv_packet should find it after a new packet is created.
+		let _tx = conn.send_packet(1, Address::DomainAddress("new.com".to_string(), 80), 1200);
 		let header_new = crate::Packet::new(1, 1, 1, 0, 3, Address::DomainAddress("new.com".to_string(), 80));
 		let pkt_new = conn.recv_packet(header_new);
 		assert!(pkt_new.is_some());
 		let result = pkt_new.unwrap().assemble(vec![10, 20, 30]).unwrap();
 		assert!(result.is_some()); // single fragment completes immediately
+
+		// After a long idle period with GC, the session should be removed
+		std::thread::sleep(Duration::from_millis(50));
+		conn.collect_garbage(Duration::from_millis(1));
+		let header_stale = crate::Packet::new(1, 2, 1, 0, 3, Address::DomainAddress("stale.com".to_string(), 80));
+		assert!(conn.recv_packet(header_stale).is_none());
 	}
 
 	#[test]
@@ -808,5 +814,44 @@ mod model_tests {
 		let expected_len = fragments.len();
 		let actual: Vec<_> = fragments.collect();
 		assert_eq!(actual.len(), expected_len);
+	}
+
+	/// Verify the fix for the exact-division edge case.
+	/// When remaining is evenly divisible by frag_size_addr_none,
+	/// the old formula overcounted by one, producing an empty fragment.
+	#[test]
+	fn test_fragment_count_exact_division() {
+		let conn = Connection::<Vec<u8>>::new();
+		let pkt = conn.send_packet(1, Address::DomainAddress("t.co".to_string(), 53), 50);
+		// first_frag = 50-18 = 32, frag_none = 50-11 = 39
+		// payload = 32 + 39 = 71 → remaining 39 exactly divisible by 39
+		// Old: 1+39/39+1 = 3, New: 1+ceil(39/39) = 2
+		let payload = vec![0xCD; 71];
+		let fragments: Vec<_> = pkt.into_fragments(&payload).collect();
+
+		assert_eq!(fragments.len(), 2);
+		for (_, data) in &fragments {
+			assert!(!data.is_empty());
+		}
+		let total: usize = fragments.iter().map(|(_, d)| d.len()).sum();
+		assert_eq!(total, 71);
+	}
+
+	/// Verify that extremely large payloads clamp fragment count
+	/// to u8::MAX instead of silently overflowing.
+	#[test]
+	fn test_fragment_count_overflow_clamp() {
+		let conn = Connection::<Vec<u8>>::new();
+		let pkt = conn.send_packet(1, Address::None, 20);
+		// Each frag = 20-11 = 9 bytes.
+		// payload = 10 + 256*9 = 2314 → 1+ceil(2305/9) = 258 → clamped to 255
+		let payload = vec![0xEE; 2314];
+		let fragments = pkt.into_fragments(&payload);
+		assert_eq!(fragments.len(), u8::MAX as usize);
+
+		let collected: Vec<_> = fragments.collect();
+		assert_eq!(collected.len(), u8::MAX as usize);
+		let total: usize = collected.iter().map(|(_, d)| d.len()).sum();
+		assert_eq!(total, (u8::MAX as usize) * 9);
 	}
 }

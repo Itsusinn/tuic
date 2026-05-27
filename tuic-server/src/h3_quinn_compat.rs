@@ -30,28 +30,28 @@ pub struct PrefetchedBiRecv {
 }
 
 pub struct Connection {
-	conn:           tuic_core::quinn::QuinnConnection,
-	incoming_bi:    BoxStreamSync<'static, <AcceptBi<'static> as Future>::Output>,
-	opening_bi:     Option<BoxStreamSync<'static, <OpenBi<'static> as Future>::Output>>,
-	incoming_uni:   BoxStreamSync<'static, <AcceptUni<'static> as Future>::Output>,
-	opening_uni:    Option<BoxStreamSync<'static, <OpenUni<'static> as Future>::Output>>,
-	prefetched_bi:  Option<PrefetchedBiRecv>,
+	conn: tuic_core::quinn::QuinnConnection,
+	incoming_bi: BoxStreamSync<'static, <AcceptBi<'static> as Future>::Output>,
+	opening_bi: Option<BoxStreamSync<'static, <OpenBi<'static> as Future>::Output>>,
+	incoming_uni: BoxStreamSync<'static, <AcceptUni<'static> as Future>::Output>,
+	opening_uni: Option<BoxStreamSync<'static, <OpenUni<'static> as Future>::Output>>,
+	prefetched_bi: Option<PrefetchedBiRecv>,
 	prefetched_uni: Option<RecvStream>,
 }
 
 impl Connection {
 	pub fn new(conn: tuic_core::quinn::QuinnConnection) -> Self {
 		Self {
-			conn:           conn.clone(),
-			incoming_bi:    Box::pin(stream::unfold(conn.clone(), |conn| async {
+			conn: conn.clone(),
+			incoming_bi: Box::pin(stream::unfold(conn.clone(), |conn| async {
 				Some((conn.accept_bi().await, conn))
 			})),
-			opening_bi:     None,
-			incoming_uni:   Box::pin(stream::unfold(conn.clone(), |conn| async {
+			opening_bi: None,
+			incoming_uni: Box::pin(stream::unfold(conn.clone(), |conn| async {
 				Some((conn.accept_uni().await, conn))
 			})),
-			opening_uni:    None,
-			prefetched_bi:  None,
+			opening_uni: None,
+			prefetched_bi: None,
 			prefetched_uni: None,
 		}
 	}
@@ -105,8 +105,8 @@ where
 
 	fn opener(&self) -> Self::OpenStreams {
 		OpenStreams {
-			conn:        self.conn.clone(),
-			opening_bi:  None,
+			conn: self.conn.clone(),
+			opening_bi: None,
 			opening_uni: None,
 		}
 	}
@@ -175,8 +175,8 @@ where
 }
 
 pub struct OpenStreams {
-	conn:        tuic_core::quinn::QuinnConnection,
-	opening_bi:  Option<BoxStreamSync<'static, <OpenBi<'static> as Future>::Output>>,
+	conn: tuic_core::quinn::QuinnConnection,
+	opening_bi: Option<BoxStreamSync<'static, <OpenBi<'static> as Future>::Output>>,
 	opening_uni: Option<BoxStreamSync<'static, <OpenUni<'static> as Future>::Output>>,
 }
 
@@ -230,8 +230,8 @@ where
 impl Clone for OpenStreams {
 	fn clone(&self) -> Self {
 		Self {
-			conn:        self.conn.clone(),
-			opening_bi:  None,
+			conn: self.conn.clone(),
+			opening_bi: None,
 			opening_uni: None,
 		}
 	}
@@ -296,10 +296,10 @@ impl<B: Buf> quic::SendStreamUnframed<B> for BidiStream<B> {
 }
 
 pub struct RecvStream {
-	stream:            Option<PeekableRecvStream>,
-	recv_id:           StreamId,
+	stream: Option<PeekableRecvStream>,
+	recv_id: StreamId,
 	pending_stop_code: Option<u64>,
-	read_chunk_fut:    ReadChunkFuture,
+	read_chunk_fut: ReadChunkFuture,
 }
 
 type ReadChunkFuture = ReusableBoxFuture<
@@ -323,10 +323,10 @@ impl RecvStream {
 
 	fn new_inner(stream: PeekableRecvStream, stream_id: u64) -> Self {
 		Self {
-			stream:            Some(stream),
-			recv_id:           stream_id.try_into().expect("invalid stream id"),
+			stream: Some(stream),
+			recv_id: stream_id.try_into().expect("invalid stream id"),
 			pending_stop_code: None,
-			read_chunk_fut:    ReusableBoxFuture::new(async { unreachable!() }),
+			read_chunk_fut: ReusableBoxFuture::new(async { unreachable!() }),
 		}
 	}
 }
@@ -405,7 +405,7 @@ fn convert_write_error_to_stream_error(error: tuic_core::quinn::WriteError) -> S
 }
 
 pub struct SendStream<B: Buf> {
-	stream:  tuic_core::quinn::SendStream,
+	stream: tuic_core::quinn::SendStream,
 	writing: Option<WriteBuf<B>>,
 }
 

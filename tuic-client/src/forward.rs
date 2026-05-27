@@ -32,7 +32,7 @@ pub async fn start(ctx: Arc<crate::AppContext>, tcp: Vec<TcpForward>, udp: Vec<U
 
 #[derive(Clone)]
 pub struct ForwardUdpSession {
-	socket:   Arc<UdpSocket>,
+	socket: Arc<UdpSocket>,
 	src_addr: SocketAddr,
 	assoc_id: u16,
 }

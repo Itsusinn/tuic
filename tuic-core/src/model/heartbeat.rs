@@ -4,7 +4,7 @@ use super::side::{self, Side};
 use crate::{Header, Heartbeat as HeartbeatHeader};
 
 pub struct Heartbeat<M> {
-	inner:   Side<Tx, Rx>,
+	inner: Side<Tx, Rx>,
 	_marker: M,
 }
 
@@ -15,7 +15,7 @@ struct Tx {
 impl Heartbeat<side::Tx> {
 	pub(super) fn new() -> Self {
 		Self {
-			inner:   Side::Tx(Tx {
+			inner: Side::Tx(Tx {
 				header: Header::Heartbeat(HeartbeatHeader::new()),
 			}),
 			_marker: side::Tx,
@@ -41,7 +41,7 @@ struct Rx;
 impl Heartbeat<side::Rx> {
 	pub(super) fn new() -> Self {
 		Self {
-			inner:   Side::Rx(Rx),
+			inner: Side::Rx(Rx),
 			_marker: side::Rx,
 		}
 	}

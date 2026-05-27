@@ -41,7 +41,6 @@ uuid = { version = "1", default-features = false, features = ["serde", "std"] }
 
 # TUIC
 tuic-core = { path = "../tuic-core", default-features = false, features = ["async_marshal", "marshal", "model"] }
-register-count = { version = "0.1.0", default-features = false, features = ["std"] }
 
 # Tokio/Async
 crossbeam-utils = { version = "0.8", default-features = false, features = ["std"] }

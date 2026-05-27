@@ -86,14 +86,10 @@ impl<R: StreamRx, B: Buffer + Send> StreamRx for AsyncPeekable<R, B> {
 	}
 }
 
-/// The TUIC Connection.
-///
-/// This struct takes a clone of `quinn::Connection` for performing TUIC
-/// operations.
 #[derive(Clone)]
 pub struct Connection<Side> {
-	conn:    quinn_crate::Connection,
-	model:   ConnectionModel<Bytes>,
+	conn: quinn_crate::Connection,
+	model: ConnectionModel<Bytes>,
 	_marker: Side,
 }
 
@@ -163,7 +159,10 @@ impl Connection<side::Client> {
 
 	/// Sends an `Authenticate` command.
 	pub async fn authenticate(&self, uuid: Uuid, password: impl AsRef<[u8]>) -> eyre::Result<()> {
-		let model = self.model.send_authenticate(uuid, password, &self.keying_material_exporter());
+		let model = self
+			.model
+			.send_authenticate(uuid, password, &self.keying_material_exporter())
+			.map_err(|_| eyre::eyre!("TLS keying material export failed"))?;
 
 		let mut send = self.conn.open_uni().await?;
 		model.header().async_marshal(&mut send).await?;
@@ -379,7 +378,7 @@ impl<Side> Debug for Connection<Side> {
 /// A received `Authenticate` command.
 #[derive(Debug)]
 pub struct Authenticate {
-	model:    AuthenticateModel<model_side::Rx>,
+	model: AuthenticateModel<model_side::Rx>,
 	exporter: KeyingMaterialExporter,
 }
 
@@ -399,7 +398,10 @@ impl Authenticate {
 	}
 
 	/// Validates if the given password is matching the hashed token.
-	pub fn validate(&self, password: impl AsRef<[u8]>) -> bool {
+	///
+	/// Returns `Err(ExportError)` if the TLS keying material export
+	/// fails — authentication MUST be rejected in that case.
+	pub fn validate(&self, password: impl AsRef<[u8]>) -> Result<bool, crate::model::ExportError> {
 		self.model.is_valid(password, &self.exporter)
 	}
 }
@@ -409,7 +411,7 @@ impl Authenticate {
 /// Generic over the QUIC send/receive stream types, allowing use with
 /// different QUIC implementations that implement `StreamTx`/`StreamRx`.
 pub struct Connect<S: StreamTx = quinn_crate::SendStream, R: StreamRx = quinn_crate::RecvStream> {
-	model:    Side<ConnectModel<model_side::Tx>, ConnectModel<model_side::Rx>>,
+	model: Side<ConnectModel<model_side::Tx>, ConnectModel<model_side::Rx>>,
 	pub send: S,
 	pub recv: R,
 }
@@ -495,7 +497,7 @@ pub enum PacketSource<R: StreamRx = quinn_crate::RecvStream> {
 /// A received `Packet` command.
 pub struct Packet<R: StreamRx = quinn_crate::RecvStream> {
 	model: PacketModel<model_side::Rx, Bytes>,
-	src:   PacketSource<R>,
+	src: PacketSource<R>,
 }
 
 impl<R: StreamRx> Packet<R> {
@@ -579,13 +581,13 @@ pub enum Task<S: StreamTx = quinn_crate::SendStream, R: StreamRx = quinn_crate::
 struct KeyingMaterialExporter(quinn_crate::Connection);
 
 impl KeyingMaterialExporterImpl for KeyingMaterialExporter {
-	fn export_keying_material(&self, label: &[u8], context: &[u8]) -> [u8; 32] {
+	fn export_keying_material(&self, label: &[u8], context: &[u8]) -> Result<[u8; 32], crate::model::ExportError> {
 		let mut buf = [0; 32];
-		if let Err(err) = self.0.export_keying_material(&mut buf, label, context) {
+		self.0.export_keying_material(&mut buf, label, context).map_err(|err| {
 			warn!("export keying material error {:#?}", err);
-			buf = [0; 32];
-		}
-		buf
+			crate::model::ExportError
+		})?;
+		Ok(buf)
 	}
 }
 

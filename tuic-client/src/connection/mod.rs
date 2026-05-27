@@ -1,15 +1,12 @@
-// Standard library imports for networking, synchronization, and timing
 use std::{
 	net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, UdpSocket},
-	sync::{Arc, Mutex, atomic::AtomicU32},
+	sync::{Arc, Mutex},
 	time::Duration,
 };
 
-// Error handling and utility crates
 use anyhow::Context;
 use crossbeam_utils::atomic::AtomicCell;
 use moka::future::Cache;
-use register_count::Counter;
 use rustls::{
 	ClientConfig as RustlsClientConfig,
 	pki_types::{CertificateDer, ServerName, UnixTime},
@@ -17,14 +14,13 @@ use rustls::{
 use tokio::{sync::RwLock as AsyncRwLock, time};
 use tracing::{debug, info, warn};
 use tuic_core::quinn::{
-	ClientConfig, Endpoint as QuinnEndpoint, EndpointConfig, QuinnConnection, TokioRuntime, TransportConfig, VarInt,
-	ZeroRttAccepted,
+	ClientConfig, Connection as Model, Endpoint as QuinnEndpoint, EndpointConfig, QuinnConnection, TokioRuntime,
+	TransportConfig, VarInt, ZeroRttAccepted,
 	bbr::BbrConfig,
 	congestion::{Bbr3Config, CubicConfig, NewRenoConfig},
 	crypto::rustls::QuicClientConfig,
+	side,
 };
-// Importing custom QUIC connection model and side marker
-use tuic_core::quinn::{Connection as Model, side};
 use uuid::Uuid;
 
 use crate::{
@@ -45,42 +41,21 @@ type FwdSessions = Cache<u16, crate::forward::ForwardUdpSession>;
 
 /// Default error code for QUIC connection
 pub const ERROR_CODE: VarInt = VarInt::from_u32(0);
-/// Default maximum concurrent streams
-const DEFAULT_CONCURRENT_STREAMS: u32 = 512;
 
-/// Manages the QUIC endpoint and the current connection.
-/// Holds no global state — create one per `run()` invocation.
 pub struct ConnectionManager {
-	endpoint:   Arc<AsyncRwLock<Endpoint>>,
+	endpoint: Arc<AsyncRwLock<Endpoint>>,
 	connection: Arc<Mutex<Option<Arc<AsyncRwLock<Connection>>>>>,
-	timeout:    AtomicCell<Duration>,
+	timeout: AtomicCell<Duration>,
 }
 
-/// Represents a client QUIC connection, including stream counters and
-/// configuration
 #[derive(Clone)]
 pub struct Connection {
-	/// Underlying QUIC connection
 	conn: QuinnConnection,
-	/// Model for handling protocol logic
 	model: Model<side::Client>,
-	/// Unique identifier for the connection
 	uuid: Uuid,
-	/// Password for authentication
 	password: Arc<[u8]>,
-	/// UDP relay mode
 	udp_relay_mode: UdpRelayMode,
-	/// Counter for remote unidirectional streams
-	remote_uni_stream_cnt: Counter,
-	/// Counter for remote bidirectional streams
-	remote_bi_stream_cnt: Counter,
-	/// Max concurrent unidirectional streams
-	max_concurrent_uni_streams: Arc<AtomicU32>,
-	/// Max concurrent bidirectional streams
-	max_concurrent_bi_streams: Arc<AtomicU32>,
-	/// SOCKS5 UDP session map (shared with AppContext)
 	pub(crate) socks5_udp_sessions: Socks5Sessions,
-	/// Forward UDP session map (shared with AppContext)
 	pub(crate) fwd_udp_sessions: FwdSessions,
 }
 
@@ -164,8 +139,8 @@ impl ConnectionManager {
 		let mut tp_cfg = TransportConfig::default();
 
 		tp_cfg
-            .max_concurrent_bidi_streams(VarInt::from(DEFAULT_CONCURRENT_STREAMS))
-            .max_concurrent_uni_streams(VarInt::from(DEFAULT_CONCURRENT_STREAMS))
+            .max_concurrent_bidi_streams(VarInt::from(cfg.max_concurrent_streams))
+            .max_concurrent_uni_streams(VarInt::from(cfg.max_concurrent_streams))
             .send_window(cfg.send_window)
             .stream_receive_window(VarInt::from_u32(cfg.receive_window))
             .max_idle_timeout(None)
@@ -238,13 +213,12 @@ impl ConnectionManager {
 		};
 
 		Ok(Self {
-			endpoint:   Arc::new(AsyncRwLock::new(ep)),
+			endpoint: Arc::new(AsyncRwLock::new(ep)),
 			connection: Arc::new(Mutex::new(None)),
-			timeout:    AtomicCell::new(cfg.timeout),
+			timeout: AtomicCell::new(cfg.timeout),
 		})
 	}
 
-	/// Get a connection, establishing a new one if needed
 	pub async fn get_conn(
 		&self,
 		socks5_udp_sessions: Socks5Sessions,
@@ -293,7 +267,6 @@ impl ConnectionManager {
 }
 
 impl Connection {
-	/// Create a new Connection instance and spawn background tasks
 	#[allow(clippy::too_many_arguments)]
 	fn new(
 		conn: QuinnConnection,
@@ -313,10 +286,7 @@ impl Connection {
 			uuid,
 			password,
 			udp_relay_mode,
-			remote_uni_stream_cnt: Counter::new(),
-			remote_bi_stream_cnt: Counter::new(),
-			max_concurrent_uni_streams: Arc::new(AtomicU32::new(DEFAULT_CONCURRENT_STREAMS)),
-			max_concurrent_bi_streams: Arc::new(AtomicU32::new(DEFAULT_CONCURRENT_STREAMS)),
+
 			socks5_udp_sessions,
 			fwd_udp_sessions,
 		};
@@ -344,11 +314,11 @@ impl Connection {
 		let err = loop {
 			tokio::select! {
 				res = self.accept_uni_stream() => match res {
-					Ok((recv, reg)) => tokio::spawn(self.clone().handle_uni_stream(recv, reg)),
+					Ok(recv) => tokio::spawn(self.clone().handle_uni_stream(recv)),
 					Err(err) => break err,
 				},
 				res = self.accept_bi_stream() => match res {
-					Ok((send, recv, reg)) => tokio::spawn(self.clone().handle_bi_stream(send, recv, reg)),
+					Ok((send, recv)) => tokio::spawn(self.clone().handle_bi_stream(send, recv)),
 					Err(err) => break err,
 				},
 				res = self.accept_datagram() => match res {
@@ -383,18 +353,18 @@ impl Connection {
 
 /// Represents a QUIC endpoint and its configuration
 struct Endpoint {
-	ep:                 QuinnEndpoint,
-	server:             ServerAddr,
-	uuid:               Uuid,
-	password:           Arc<[u8]>,
-	udp_relay_mode:     UdpRelayMode,
+	ep: QuinnEndpoint,
+	server: ServerAddr,
+	uuid: Uuid,
+	password: Arc<[u8]>,
+	udp_relay_mode: UdpRelayMode,
 	zero_rtt_handshake: bool,
-	heartbeat:          Duration,
-	gc_interval:        Duration,
-	gc_lifetime:        Duration,
+	heartbeat: Duration,
+	gc_interval: Duration,
+	gc_lifetime: Duration,
 	// SOCKS5 control TCP stream for UDP ASSOCIATE: this must be kept alive to
 	// maintain the UDP relay session, since closing it invalidates the relay address.
-	socks5_ctrl:        Option<tokio::net::TcpStream>,
+	socks5_ctrl: Option<tokio::net::TcpStream>,
 }
 
 impl Endpoint {

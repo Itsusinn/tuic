@@ -1,13 +1,9 @@
-use std::{
-	sync::{Arc, atomic::AtomicU32},
-	time::Duration,
-};
+use std::{sync::Arc, time::Duration};
 
 use arc_swap::ArcSwap;
 use bytes::Bytes;
 use moka::future::Cache;
 use peekable::tokio::AsyncPeekExt;
-use register_count::Counter;
 use smallvec::SmallVec;
 use tokio::time;
 use tracing::{Instrument, Span, debug, info, info_span, warn};
@@ -22,13 +18,12 @@ mod handle_task;
 mod udp_session;
 
 pub const ERROR_CODE: VarInt = VarInt::from_u32(0);
-pub const INIT_CONCURRENT_STREAMS: u32 = 512;
 
 enum H3Dispatch {
 	Tuic(Option<PrefetchedFirstEventTuic>),
 	Camouflage {
 		prefetched_uni: Option<crate::h3_quinn_compat::PeekableRecvStream>,
-		prefetched_bi:  Option<crate::h3_quinn_compat::PrefetchedBiRecv>,
+		prefetched_bi: Option<crate::h3_quinn_compat::PrefetchedBiRecv>,
 	},
 }
 
@@ -60,10 +55,6 @@ pub struct Connection {
 	auth: Authenticated,
 	udp_sessions: Cache<u16, Arc<UdpSession>>,
 	udp_relay_mode: Arc<ArcSwap<Option<UdpRelayMode>>>,
-	remote_uni_stream_cnt: Counter,
-	remote_bi_stream_cnt: Counter,
-	max_concurrent_uni_streams: Arc<AtomicU32>,
-	max_concurrent_bi_streams: Arc<AtomicU32>,
 }
 
 impl Connection {
@@ -117,18 +108,10 @@ impl Connection {
 								let span = conn_span.clone();
 								match first_event {
 									PrefetchedFirstEventTuic::Uni(recv) => {
-										tokio::spawn(
-											conn.clone()
-												.handle_uni_stream(recv, conn.remote_uni_stream_cnt.reg())
-												.instrument(span),
-										);
+										tokio::spawn(conn.clone().handle_uni_stream(recv).instrument(span));
 									}
 									PrefetchedFirstEventTuic::Bi { send, recv } => {
-										tokio::spawn(
-											conn.clone()
-												.handle_bi_stream((send, recv), conn.remote_bi_stream_cnt.reg())
-												.instrument(span),
-										);
+										tokio::spawn(conn.clone().handle_bi_stream((send, recv)).instrument(span));
 									}
 									PrefetchedFirstEventTuic::Datagram(dg) => {
 										tokio::spawn(conn.clone().handle_datagram(dg).instrument(span));
@@ -173,10 +156,6 @@ impl Connection {
 			auth: Authenticated::new(),
 			udp_sessions: Cache::new(u16::MAX as u64),
 			udp_relay_mode: Arc::new(ArcSwap::new(None.into())),
-			remote_uni_stream_cnt: Counter::new(),
-			remote_bi_stream_cnt: Counter::new(),
-			max_concurrent_uni_streams: Arc::new(AtomicU32::new(INIT_CONCURRENT_STREAMS)),
-			max_concurrent_bi_streams: Arc::new(AtomicU32::new(INIT_CONCURRENT_STREAMS)),
 		}
 	}
 
@@ -188,7 +167,7 @@ impl Connection {
 			.cfg
 			.users
 			.get(&auth.uuid())
-			.is_some_and(|password| auth.validate(password))
+			.is_some_and(|password| auth.validate(password).unwrap_or(false))
 		{
 			self.auth.set(auth.uuid()).await;
 			Span::current().record("user", auth.uuid().to_string());
@@ -257,7 +236,7 @@ impl Connection {
 			Err(_) => {
 				return Ok(H3Dispatch::Camouflage {
 					prefetched_uni: None,
-					prefetched_bi:  None,
+					prefetched_bi: None,
 				});
 			}
 		};
@@ -267,14 +246,14 @@ impl Connection {
 				ClassifiedRecvStream::Tuic(recv) => Ok(H3Dispatch::Tuic(Some(PrefetchedFirstEventTuic::Uni(recv)))),
 				ClassifiedRecvStream::Camouflage(recv) => Ok(H3Dispatch::Camouflage {
 					prefetched_uni: Some(recv),
-					prefetched_bi:  None,
+					prefetched_bi: None,
 				}),
 			},
 			FirstEvent::Bi(send, recv) => match self.classify_recv_stream(recv, classify_timeout).await? {
 				ClassifiedRecvStream::Tuic(recv) => Ok(H3Dispatch::Tuic(Some(PrefetchedFirstEventTuic::Bi { send, recv }))),
 				ClassifiedRecvStream::Camouflage(recv) => Ok(H3Dispatch::Camouflage {
 					prefetched_uni: None,
-					prefetched_bi:  Some(crate::h3_quinn_compat::PrefetchedBiRecv { send, recv }),
+					prefetched_bi: Some(crate::h3_quinn_compat::PrefetchedBiRecv { send, recv }),
 				}),
 			},
 			FirstEvent::Datagram(dg) => {
@@ -283,7 +262,7 @@ impl Connection {
 				} else {
 					Ok(H3Dispatch::Camouflage {
 						prefetched_uni: None,
-						prefetched_bi:  None,
+						prefetched_bi: None,
 					})
 				}
 			}
@@ -329,9 +308,9 @@ impl Connection {
 			let handle_incoming = async {
 				tokio::select! {
 					res = self.inner.accept_uni() =>
-						tokio::spawn(self.clone().handle_uni_stream(res?, self.remote_uni_stream_cnt.reg()).instrument(span.clone())),
+						tokio::spawn(self.clone().handle_uni_stream(res?, ).instrument(span.clone())),
 					res = self.inner.accept_bi() =>
-						tokio::spawn(self.clone().handle_bi_stream(res?, self.remote_bi_stream_cnt.reg()).instrument(span.clone())),
+						tokio::spawn(self.clone().handle_bi_stream(res?, ).instrument(span.clone())),
 					res = self.inner.read_datagram() =>
 						tokio::spawn(self.clone().handle_datagram(res?).instrument(span.clone())),
 				};
