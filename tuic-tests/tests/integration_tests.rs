@@ -308,6 +308,7 @@ async fn test_server_client_integration() -> eyre::Result<()> {
 			password: None,
 			dual_stack: Some(false),
 			max_packet_size: 1500,
+			socks5_udp_idle_timeout: Duration::from_secs(300),
 			tcp_forward: Vec::new(),
 			udp_forward: Vec::new(),
 		},
@@ -514,6 +515,246 @@ async fn test_server_client_integration() -> eyre::Result<()> {
 	Ok(())
 }
 
+// Integration test for the client's TCP/UDP port forwarders
+//
+// This validates the `local.tcp_forward` and `local.udp_forward` paths:
+// packets sent directly to a local listen port get tunneled through the TUIC
+// relay and delivered to the configured remote, and the response makes the
+// round-trip back to the client. The UDP side specifically exercises the
+// production session lifecycle — assoc_id allocation in the `0x8000..` half,
+// `src_map` registration on the first packet, and reply delivery via
+// `handle_packet` -> `fwd_udp_sessions.get` -> `session.send`.
+#[tokio::test(flavor = "current_thread")]
+#[serial]
+#[tracing_test::traced_test]
+#[cfg_attr(not(any(target_arch = "x86", target_arch = "x86_64")), ignore)]
+async fn test_tcp_udp_forward_integration() -> eyre::Result<()> {
+	use std::{collections::HashMap, net::SocketAddr, path::PathBuf};
+	#[cfg(feature = "aws-lc-rs")]
+	let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
+	#[cfg(feature = "ring")]
+	let _ = rustls::crypto::ring::default_provider().install_default();
+
+	let _ = tracing_subscriber::fmt()
+		.with_max_level(tracing::Level::DEBUG)
+		.with_test_writer()
+		.try_init();
+
+	// Bind echo listener sockets eagerly so we have stable ports to plug into
+	// the client's `tcp_forward`/`udp_forward` config — but defer the actual
+	// accept/recv until just before the forward dial. The shared
+	// `run_*_echo_server` helpers wrap accept in a 5s timeout, which would race
+	// the 5s relay-warmup sleep below; inlining the handlers gives us control
+	// over that window.
+	let tcp_echo_listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
+	let tcp_echo_addr = tcp_echo_listener.local_addr()?;
+	info!("[Forward TCP Echo] Bound at {tcp_echo_addr}");
+	let udp_echo_socket = tokio::net::UdpSocket::bind("127.0.0.1:0").await?;
+	let udp_echo_addr = udp_echo_socket.local_addr()?;
+	info!("[Forward UDP Echo] Bound at {udp_echo_addr}");
+
+	// Fixed forwarder listen ports. `#[serial]` keeps these from colliding with
+	// the other integration tests in this file.
+	let tcp_forward_listen: SocketAddr = "127.0.0.1:18080".parse()?;
+	let udp_forward_listen: SocketAddr = "127.0.0.1:18053".parse()?;
+
+	let server_config = tuic_server::Config {
+		log_level: tuic_server::config::LogLevel::Debug,
+		server: "127.0.0.1:8445".parse::<SocketAddr>()?,
+		users: {
+			let mut users = HashMap::new();
+			users.insert(
+				Uuid::parse_str("00000000-0000-0000-0000-000000000000")?,
+				"test_password".to_string(),
+			);
+			users
+		},
+		tls: tuic_server::config::TlsConfig {
+			self_sign: true,
+			certificate: PathBuf::from("./test_cert.pem"),
+			private_key: PathBuf::from("./test_key.pem"),
+			alpn: vec!["h3".to_string()],
+			hostname: "localhost".to_string(),
+			auto_ssl: false,
+			acme_email: "admin@example.com".to_string(),
+		},
+		data_dir: std::env::temp_dir(),
+		quic: tuic_server::config::QuicConfig::default(),
+		udp_relay_ipv6: true,
+		zero_rtt_handshake: false,
+		dual_stack: false,
+		experimental: ExperimentalConfig {
+			drop_loopback: false,
+			..Default::default()
+		},
+		..Default::default()
+	};
+
+	info!("[Forward Test] Starting TUIC server on 127.0.0.1:8445...");
+	let server_handle = tokio::spawn(async move {
+		match timeout(Duration::from_secs(30), tuic_server::run(server_config)).await {
+			Ok(Ok(_guard)) => info!("[Forward Test] Server completed successfully"),
+			Ok(Err(e)) => error!("[Forward Test] Server error: {}", e),
+			Err(_) => error!("[Forward Test] Server timeout"),
+		}
+	});
+
+	tokio::time::sleep(Duration::from_secs(1)).await;
+
+	let client_config = tuic_client::Config {
+		tokio_runtime: Default::default(),
+		relay: tuic_client::config::Relay {
+			server: ("127.0.0.1".to_string(), 8445),
+			uuid: Uuid::parse_str("00000000-0000-0000-0000-000000000000")?,
+			password: std::sync::Arc::from(b"test_password".to_vec().into_boxed_slice()),
+			ip: None,
+			ipstack_prefer: StackPrefer::V4first,
+			certificates: Vec::new(),
+			udp_relay_mode: tuic_client::utils::UdpRelayMode::Native,
+			congestion_control: tuic_client::utils::CongestionControl::Cubic,
+			alpn: vec![b"h3".to_vec()],
+			zero_rtt_handshake: false,
+			disable_sni: true,
+			disable_native_certs: true,
+			gso: false,
+			pmtu: false,
+			skip_cert_verify: true,
+			..Default::default()
+		},
+		local: tuic_client::config::Local {
+			// The SOCKS5 listener is required by the client runtime even though
+			// this test doesn't exercise it; pick a port distinct from the other
+			// integration tests.
+			server: "127.0.0.1:1083".parse()?,
+			username: None,
+			password: None,
+			dual_stack: Some(false),
+			max_packet_size: 1500,
+			socks5_udp_idle_timeout: Duration::from_secs(300),
+			tcp_forward: vec![tuic_client::config::TcpForward {
+				listen: tcp_forward_listen,
+				remote: ("127.0.0.1".to_string(), tcp_echo_addr.port()),
+			}],
+			udp_forward: vec![tuic_client::config::UdpForward {
+				listen: udp_forward_listen,
+				remote: ("127.0.0.1".to_string(), udp_echo_addr.port()),
+				timeout: Duration::from_secs(10),
+			}],
+		},
+		log_level: "debug".to_string(),
+	};
+
+	info!("[Forward Test] Starting TUIC client with TCP/UDP forwarders...");
+	let client_handle = tokio::spawn(async move {
+		match timeout(Duration::from_secs(30), tuic_client::run(client_config)).await {
+			Ok(Ok(())) => info!("[Forward Test] Client completed successfully"),
+			Ok(Err(e)) => error!("[Forward Test] Client error: {}", e),
+			Err(_) => error!("[Forward Test] Client timeout"),
+		}
+	});
+
+	// Allow the relay handshake to settle and the forwarder listeners to bind.
+	tokio::time::sleep(Duration::from_secs(5)).await;
+
+	// Spawn the echo handlers NOW (after the relay-warmup sleep) so the accept
+	// window covers the actual dial — not the warmup. The kernel queues SYNs
+	// against the bound TCP listener, and UDP packets against the bound socket,
+	// so dispatch is reliable even though accept/recv start late.
+	let tcp_echo_task = tokio::spawn(async move {
+		use tokio::io::{AsyncReadExt, AsyncWriteExt};
+		match timeout(Duration::from_secs(20), tcp_echo_listener.accept()).await {
+			Ok(Ok((mut sock, peer))) => {
+				info!("[Forward TCP Echo] Accepted {peer}");
+				let mut buf = vec![0u8; 1024];
+				if let Ok(Ok(n)) = timeout(Duration::from_secs(10), sock.read(&mut buf)).await {
+					let _ = sock.write_all(&buf[..n]).await;
+				}
+			}
+			Ok(Err(e)) => error!("[Forward TCP Echo] accept error: {e}"),
+			Err(_) => error!("[Forward TCP Echo] accept timeout"),
+		}
+	});
+
+	let udp_echo_socket_for_task = std::sync::Arc::new(udp_echo_socket);
+	let udp_echo_socket_for_keep = udp_echo_socket_for_task.clone();
+	let udp_echo_task = tokio::spawn(async move {
+		let mut buf = vec![0u8; 1024];
+		match timeout(Duration::from_secs(20), udp_echo_socket_for_task.recv_from(&mut buf)).await {
+			Ok(Ok((n, peer))) => {
+				info!("[Forward UDP Echo] Received {n}B from {peer}");
+				let _ = udp_echo_socket_for_task.send_to(&buf[..n], peer).await;
+			}
+			Ok(Err(e)) => error!("[Forward UDP Echo] recv error: {e}"),
+			Err(_) => error!("[Forward UDP Echo] recv timeout"),
+		}
+	});
+
+	// ----------------------------------------------------------------------
+	// TCP forward: dial the local listen port directly, expect echo back.
+	// No SOCKS5 handshake — this is the whole point of the forward feature.
+	// ----------------------------------------------------------------------
+	let tcp_test = async {
+		use tokio::{
+			io::{AsyncReadExt, AsyncWriteExt},
+			net::TcpStream,
+		};
+		info!("[Forward TCP] Connecting to local TCP forward {tcp_forward_listen}...");
+		let mut stream = TcpStream::connect(tcp_forward_listen)
+			.await
+			.expect("connect to tcp_forward listener");
+		let test_data = b"forward over TCP";
+		stream.write_all(test_data).await.expect("write test data");
+		let mut buf = vec![0u8; test_data.len()];
+		timeout(Duration::from_secs(10), stream.read_exact(&mut buf))
+			.await
+			.expect("read echo within 10s")
+			.expect("read ok");
+		assert_eq!(&buf[..], test_data, "TCP forward must echo data unchanged");
+		info!("[Forward TCP] ✓ TCP forward echo matches");
+	};
+	timeout(Duration::from_secs(15), tcp_test)
+		.await
+		.expect("[Forward TCP] test timed out");
+
+	// ----------------------------------------------------------------------
+	// UDP forward: send one packet to the local listen port. The forwarder
+	// allocates a session id in the `0x8000..` half, registers it in
+	// `fwd_udp_sessions` + `src_map`, ships the packet via the relay; the
+	// echo server replies, and `handle_packet` must look the session up by
+	// assoc_id and deliver back to our client socket — confirming the full
+	// inbound path on this PR's UDP session lifecycle changes.
+	// ----------------------------------------------------------------------
+	let udp_test = async {
+		use tokio::net::UdpSocket;
+		info!("[Forward UDP] Sending to local UDP forward {udp_forward_listen}...");
+		let client_sock = UdpSocket::bind("127.0.0.1:0").await.expect("bind ephemeral");
+		let test_data = b"forward over UDP";
+		client_sock
+			.send_to(test_data, udp_forward_listen)
+			.await
+			.expect("send to udp_forward");
+		let mut buf = vec![0u8; 1024];
+		let (n, _) = timeout(Duration::from_secs(10), client_sock.recv_from(&mut buf))
+			.await
+			.expect("recv echo within 10s")
+			.expect("recv ok");
+		assert_eq!(&buf[..n], test_data, "UDP forward must echo data unchanged");
+		info!("[Forward UDP] ✓ UDP forward echo matches");
+	};
+	timeout(Duration::from_secs(15), udp_test)
+		.await
+		.expect("[Forward UDP] test timed out");
+
+	drop(udp_echo_socket_for_keep);
+	tcp_echo_task.abort();
+	udp_echo_task.abort();
+	client_handle.abort();
+	server_handle.abort();
+	tokio::time::sleep(Duration::from_millis(100)).await;
+
+	Ok(())
+}
+
 // Integration test for IPv6 connectivity
 //
 // This test validates TUIC with IPv6 addresses:
@@ -637,6 +878,7 @@ async fn test_ipv6_server_client_integration() -> eyre::Result<()> {
 			password: None,
 			dual_stack: Some(false),
 			max_packet_size: 1500,
+			socks5_udp_idle_timeout: Duration::from_secs(300),
 			tcp_forward: Vec::new(),
 			udp_forward: Vec::new(),
 		},

@@ -42,6 +42,8 @@ pub struct AppContext {
 	pub first_connected: AtomicBool,
 	/// Serializes first-connection logic under non-eager modes.
 	pub first_connect_lock: AsyncMutex<()>,
+	/// Idle timeout applied to each SOCKS5 UDP ASSOCIATE session.
+	pub socks5_udp_idle_timeout: Duration,
 }
 
 impl AppContext {
@@ -106,15 +108,32 @@ pub async fn run(cfg: Config) -> eyre::Result<()> {
 		cfg.local.username,
 		cfg.local.password,
 	)?);
+
+	let socks5_idle = cfg.local.socks5_udp_idle_timeout;
+	// Cache acts as a safety-net evictor; the per-session idle watcher does the
+	// authoritative cleanup (with proper `dissociate` to the relay). The cache TTI
+	// is sized larger than the watcher's interval so the watcher wins under normal
+	// conditions and the cache only fires if the watcher is stuck or missing.
+	let socks5_cache_tti = socks5_idle.saturating_mul(2).max(Duration::from_secs(60));
+	let fwd_cache_tti = cfg
+		.local
+		.udp_forward
+		.iter()
+		.map(|f| f.timeout)
+		.max()
+		.unwrap_or(Duration::from_secs(60))
+		.saturating_mul(2);
+
 	let ctx = Arc::new(AppContext {
 		conn_mgr,
 		socks5,
-		socks5_udp_sessions: Cache::new(1024),
-		fwd_udp_sessions: Cache::new(1024),
+		socks5_udp_sessions: Cache::builder().max_capacity(1024).time_to_idle(socks5_cache_tti).build(),
+		fwd_udp_sessions: Cache::builder().max_capacity(1024).time_to_idle(fwd_cache_tti).build(),
 		next_fwd_assoc_id: AtomicU16::new(0),
 		startup_mode,
 		first_connected: AtomicBool::new(false),
 		first_connect_lock: AsyncMutex::new(()),
+		socks5_udp_idle_timeout: socks5_idle,
 	});
 
 	// Eager mode keeps the original behavior: connect at startup and exit on
