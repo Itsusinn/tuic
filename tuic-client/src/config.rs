@@ -248,6 +248,10 @@ pub struct Local {
 	#[educe(Default = 1500)]
 	pub max_packet_size: usize,
 
+	#[educe(Default(expression = Duration::from_secs(300)))]
+	#[serde(with = "humantime_serde")]
+	pub socks5_udp_idle_timeout: Duration,
+
 	#[educe(Default(expression = Vec::new()))]
 	pub tcp_forward: Vec<TcpForward>,
 
