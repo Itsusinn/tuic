@@ -44,12 +44,12 @@ pub struct ServerGuard {
 /// a cancellation token for graceful shutdown.
 pub async fn run(cfg: Config) -> eyre::Result<ServerGuard> {
 	let mut online_counter = HashMap::new();
-	for (user, _) in cfg.users.iter() {
+	for user in cfg.users.keys() {
 		online_counter.insert(user.to_owned(), AtomicUsize::new(0));
 	}
 
 	let mut traffic_stats = HashMap::new();
-	for (user, _) in cfg.users.iter() {
+	for user in cfg.users.keys() {
 		traffic_stats.insert(user.to_owned(), (AtomicUsize::new(0), AtomicUsize::new(0)));
 	}
 

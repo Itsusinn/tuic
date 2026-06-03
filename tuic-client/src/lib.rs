@@ -28,7 +28,7 @@ pub use config::Config;
 pub struct AppContext {
 	pub conn_mgr: Arc<connection::ConnectionManager>,
 	/// SOCKS5 proxy server
-	pub socks5: Arc<socks5::Server>,
+	pub socks5: Option<Arc<socks5::Server>>,
 	/// UDP session registry for SOCKS5 UDP associate
 	pub socks5_udp_sessions: Cache<u16, socks5::UdpSession>,
 	/// UDP session registry for TCP/UDP port forwarding
@@ -101,13 +101,20 @@ impl AppContext {
 pub async fn run(cfg: Config) -> eyre::Result<()> {
 	let startup_mode = cfg.relay.startup_mode;
 	let conn_mgr = Arc::new(connection::ConnectionManager::build(cfg.relay).await?);
-	let socks5 = Arc::new(socks5::Server::new(
-		cfg.local.server,
-		cfg.local.dual_stack,
-		cfg.local.max_packet_size,
-		cfg.local.username,
-		cfg.local.password,
-	)?);
+	let socks5 = cfg
+		.local
+		.server
+		.map(|addr| {
+			socks5::Server::new(
+				addr,
+				cfg.local.dual_stack,
+				cfg.local.max_packet_size,
+				cfg.local.username,
+				cfg.local.password,
+			)
+			.map(Arc::new)
+		})
+		.transpose()?;
 
 	let socks5_idle = cfg.local.socks5_udp_idle_timeout;
 	// Cache acts as a safety-net evictor; the per-session idle watcher does the
@@ -142,7 +149,69 @@ pub async fn run(cfg: Config) -> eyre::Result<()> {
 		ctx.get_conn().await?;
 	}
 
+	let has_forwarding = !cfg.local.tcp_forward.is_empty() || !cfg.local.udp_forward.is_empty();
 	forward::start(ctx.clone(), cfg.local.tcp_forward, cfg.local.udp_forward).await;
-	socks5::Server::start(ctx.clone()).await;
+	if ctx.socks5.is_some() {
+		socks5::Server::start(ctx.clone()).await;
+	} else if has_forwarding {
+		// If SOCKS5 is disabled but forwarding is active, block forever to keep
+		// the background tasks alive.
+		std::future::pending::<()>().await;
+	}
 	Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+	use tokio::time::{Duration, timeout};
+	use uuid::Uuid;
+
+	use super::*;
+	use crate::config::TcpForward;
+
+	fn install_crypto() {
+		#[cfg(feature = "aws-lc-rs")]
+		let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
+
+		#[cfg(feature = "ring")]
+		let _ = rustls::crypto::ring::default_provider().install_default();
+	}
+
+	#[tokio::test]
+	async fn test_run_stays_alive_with_only_forwarding() {
+		install_crypto();
+		let mut cfg = Config::default();
+		cfg.relay.server = ("127.0.0.1".to_string(), 443);
+		cfg.relay.uuid = Uuid::new_v4();
+
+		cfg.local.server = None;
+		cfg.local.tcp_forward = vec![TcpForward {
+			listen: "127.0.0.1:0".parse().unwrap(),
+			remote: ("127.0.0.1".to_string(), 80),
+		}];
+
+		// run should block because has_forwarding is true and socks5 is None.
+		// We use timeout to verify it doesn't return immediately.
+		let result = timeout(Duration::from_millis(100), run(cfg)).await;
+
+		assert!(result.is_err(), "run() should have blocked and timed out");
+	}
+
+	#[tokio::test]
+	async fn test_run_exits_immediately_with_nothing() {
+		install_crypto();
+		let mut cfg = Config::default();
+		cfg.relay.server = ("127.0.0.1".to_string(), 443);
+		cfg.relay.uuid = Uuid::new_v4();
+
+		cfg.local.server = None;
+		cfg.local.tcp_forward = vec![];
+		cfg.local.udp_forward = vec![];
+
+		// run should return Ok(()) immediately.
+		let result = timeout(Duration::from_millis(100), run(cfg)).await;
+
+		assert!(result.is_ok(), "run() should have returned immediately");
+		assert!(result.unwrap().is_ok());
+	}
 }

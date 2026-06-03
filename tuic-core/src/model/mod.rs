@@ -267,7 +267,7 @@ where
 	}
 
 	fn collect_garbage(&mut self, timeout: Duration) {
-		for (_, session) in self.sessions.iter_mut() {
+		for session in self.sessions.values_mut() {
 			session.collect_garbage(timeout);
 		}
 		// Remove sessions that are empty and have been idle past the timeout.

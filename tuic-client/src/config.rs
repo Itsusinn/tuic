@@ -231,8 +231,8 @@ pub struct ProxyConfig {
 #[educe(Default)]
 #[serde(deny_unknown_fields, default)]
 pub struct Local {
-	#[educe(Default(expression = "127.0.0.1:1080".parse().unwrap()))]
-	pub server: SocketAddr,
+	#[educe(Default = None)]
+	pub server: Option<SocketAddr>,
 
 	#[educe(Default = None)]
 	#[serde(deserialize_with = "deserialize_optional_bytes")]
@@ -288,7 +288,7 @@ impl Config {
 
 		// Check if config file exists
 		if !path.exists() {
-			return Err(ConfigError::ConfigNotFound(path))?;
+			Err(ConfigError::ConfigNotFound(path.clone()))?;
 		}
 
 		let figmet = Figment::from(Serialized::defaults(Config::default()));
@@ -631,6 +631,7 @@ mod tests {
 		assert_eq!(config.relay.gc_lifetime, Duration::from_secs(15));
 		assert!(!config.relay.skip_cert_verify);
 		assert_eq!(config.local.max_packet_size, 1500);
+		assert_eq!(config.local.server, Some("127.0.0.1:1080".parse().unwrap()));
 	}
 
 	#[test]
@@ -804,8 +805,8 @@ server = "127.0.0.1:1081"
 		let json5_config = include_str!("../tests/config/ipv6_server_address.json5");
 
 		let config = test_parse_config(json5_config, ".json5").unwrap();
-		assert!(config.local.server.is_ipv6());
-		assert_eq!(config.local.server.to_string(), "[::1]:1080");
+		assert!(config.local.server.as_ref().unwrap().is_ipv6());
+		assert_eq!(config.local.server.unwrap().to_string(), "[::1]:1080");
 	}
 
 	#[test]
@@ -828,7 +829,7 @@ server = "127.0.0.1:1081"
 		assert_eq!(config.log_level, "info");
 		assert_eq!(config.relay.server.0, "example.com");
 		assert_eq!(config.relay.server.1, 443);
-		assert_eq!(config.local.server.to_string(), "127.0.0.1:1080");
+		assert_eq!(config.local.server, Some("127.0.0.1:1080".parse().unwrap()));
 	}
 
 	#[test]
@@ -878,7 +879,7 @@ server = "127.0.0.1:1081"
 		assert!(!config.relay.pmtu);
 		assert_eq!(config.relay.gc_interval, Duration::from_secs(5));
 		assert_eq!(config.relay.gc_lifetime, Duration::from_secs(20));
-		assert_eq!(config.local.server.to_string(), "[::1]:1080");
+		assert_eq!(config.local.server, Some("[::1]:1080".parse().unwrap()));
 		assert_eq!(config.local.dual_stack, Some(false));
 		assert_eq!(config.local.max_packet_size, 2000);
 	}
@@ -1057,11 +1058,40 @@ server = "127.0.0.1:1081"
 		assert_eq!(config.relay.gc_lifetime, Duration::from_secs(60));
 		assert!(config.relay.skip_cert_verify);
 
-		assert_eq!(config.local.server.to_string(), "[::1]:9999");
+		assert_eq!(config.local.server.unwrap().to_string(), "[::1]:9999");
 		assert_eq!(config.local.username, Some(b"user123".to_vec()));
 		assert_eq!(config.local.password, Some(b"pass456".to_vec()));
 		assert_eq!(config.local.dual_stack, Some(true));
 		assert_eq!(config.local.max_packet_size, 2000);
+	}
+
+	#[test]
+	fn test_no_local_server() {
+		let toml_config = r#"
+		[relay]
+		server = "example.com:443"
+		uuid = "00000000-0000-0000-0000-000000000000"
+		password = "test"
+
+		[local]
+		tcp_forward = []
+		"#;
+
+		let config = test_parse_config(toml_config, ".toml").unwrap();
+		assert_eq!(config.local.server, None);
+	}
+
+	#[test]
+	fn test_no_local_section() {
+		let toml_config = r#"
+		[relay]
+		server = "example.com:443"
+		uuid = "00000000-0000-0000-0000-000000000000"
+		password = "test"
+		"#;
+
+		let config = test_parse_config(toml_config, ".toml").unwrap();
+		assert_eq!(config.local.server, None);
 	}
 
 	#[test]
