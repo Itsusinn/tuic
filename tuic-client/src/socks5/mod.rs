@@ -90,7 +90,10 @@ impl Server {
 	}
 
 	pub async fn start(ctx: Arc<crate::AppContext>) {
-		let server = ctx.socks5.clone();
+		let server = match ctx.socks5.as_ref() {
+			Some(s) => s.clone(),
+			None => return,
+		};
 
 		warn!("[socks5] server started, listening on {}", server.inner.local_addr().unwrap());
 
