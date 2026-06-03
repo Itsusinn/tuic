@@ -288,7 +288,7 @@ impl Config {
 
 		// Check if config file exists
 		if !path.exists() {
-			return Err(ConfigError::ConfigNotFound(path))?;
+			Err(ConfigError::ConfigNotFound(path.clone()))?;
 		}
 
 		let figmet = Figment::from(Serialized::defaults(Config::default()));
