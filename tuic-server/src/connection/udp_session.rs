@@ -11,7 +11,7 @@ use tokio::{
 	net::UdpSocket,
 	sync::{RwLock as AsyncRwLock, oneshot},
 };
-use tracing::{Instrument, Span, warn};
+use tracing::{Instrument, Span, debug, warn};
 use tuic_core::Address;
 
 use super::Connection;
@@ -94,39 +94,72 @@ impl UdpSession {
 			let mut rx = rx;
 			let mut timeout = tokio::time::interval(ctx_listening.cfg.stream_timeout);
 			timeout.reset();
+			let mut health_check = tokio::time::interval(ctx_listening.cfg.gc_interval);
+			health_check.reset();
+
+			enum Event {
+				Packet(Result<(Bytes, SocketAddr), IoError>),
+				Timeout,
+				CloseSignal,
+				HealthCheck,
+			}
 
 			loop {
-				let next;
-				tokio::select! {
-					recv = session_listening.recv() => next = recv,
-					// Avoid client didn't send `UDP-DROP` properly
-					_ = timeout.tick() => {
-						session_listening.close().await;
-						warn!("[packet] [{assoc_id:#06x}] UDP session timeout", assoc_id = session_listening.assoc_id);
-						continue;
-					},
-					// `UDP-DROP`
-					_ = &mut rx => break
-				}
-				timeout.reset();
-				let (pkt, addr) = match next {
-					Ok(v) => v,
-					Err(err) => {
-						warn!(
-							"[packet] [{assoc_id:#06x}] outbound listening error: {err}",
-							assoc_id = session_listening.assoc_id
-						);
-						continue;
-					}
+				let event = tokio::select! {
+					res = session_listening.recv()  => Event::Packet(res),
+					_  = timeout.tick()              => Event::Timeout,
+					_  = &mut rx                     => Event::CloseSignal,
+					_  = health_check.tick()          => Event::HealthCheck,
 				};
 
-				tokio::spawn(
-					conn_listening
-						.clone()
-						.relay_packet(pkt, Address::SocketAddress(addr), session_listening.assoc_id)
-						.log_err()
-						.instrument(span.clone()),
-				);
+				match event {
+					Event::Packet(res) => {
+						timeout.reset();
+
+						let (pkt, addr) = match res {
+							Ok(v) => v,
+							Err(err) => {
+								warn!(
+									"[packet] [{assoc_id:#06x}] outbound listening error: {err}",
+									assoc_id = session_listening.assoc_id
+								);
+								continue;
+							}
+						};
+
+						tokio::spawn(
+							conn_listening
+								.clone()
+								.relay_packet(pkt, Address::SocketAddress(addr), session_listening.assoc_id)
+								.log_err()
+								.instrument(span.clone()),
+						);
+					}
+					Event::Timeout => {
+						if conn_listening.is_closed() {
+							debug!(
+								"[packet] [{assoc_id:#06x}] parent connection closed, cleaning up",
+								assoc_id = session_listening.assoc_id
+							);
+							break;
+						}
+						session_listening.close().await;
+						warn!(
+							"[packet] [{assoc_id:#06x}] UDP session timeout",
+							assoc_id = session_listening.assoc_id
+						);
+					}
+					Event::CloseSignal => break,
+					Event::HealthCheck => {
+						if conn_listening.is_closed() {
+							debug!(
+								"[packet] [{assoc_id:#06x}] parent connection closed, cleaning up",
+								assoc_id = session_listening.assoc_id
+							);
+							break;
+						}
+					}
+				}
 			}
 			session_listening.udp_sessions.invalidate(&assoc_id).await;
 		};
