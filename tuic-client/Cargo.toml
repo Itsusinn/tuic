@@ -18,7 +18,6 @@ aws-lc-rs = ["tuic-core/aws-lc-rs", "dep:aws-lc-rs", "rustls/aws-lc-rs"]
 jemallocator = ["tikv-jemallocator"]
 
 [dependencies]
-moka = { version = "0.12", features = ["future"] }
 num_cpus = "1"
 bytes = { version = "1", default-features = false, features = ["std"] }
 

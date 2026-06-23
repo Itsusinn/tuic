@@ -1,19 +1,16 @@
-use std::{io::ErrorKind, sync::Arc, time::Duration};
+use std::sync::Arc;
 
 use socks5_proto::{Address, Reply};
 use socks5_server::{
 	Associate, Bind, Connect,
 	connection::{associate, bind, connect},
 };
-use tokio::{
-	io::{self, AsyncWriteExt},
-	time,
-};
-use tracing::{debug, error, info, warn};
+use tokio::io::{self, AsyncWriteExt};
+use tracing::{debug, info, warn};
 use tuic_core::Address as TuicAddress;
 
 use super::{Server, udp_session::UdpSession};
-use crate::{connection::ERROR_CODE, error::Error};
+use crate::connection::ERROR_CODE;
 
 impl Server {
 	pub async fn handle_associate(
@@ -32,6 +29,16 @@ impl Server {
 			dual_stack
 		);
 
+		// Check for existing session with same ID
+		{
+			let sessions = ctx.socks5_udp_sessions.read().await;
+			if sessions.contains_key(&assoc_id) {
+				warn!(
+					"[socks5] [{peer_addr}] [associate] [{assoc_id:#06x}] session ID already exists! This may cause conflicts"
+				);
+			}
+		}
+
 		match UdpSession::new(assoc_id, peer_addr, local_ip, dual_stack, max_pkt_size) {
 			Ok(session) => {
 				let local_addr = session.local_addr().unwrap();
@@ -45,31 +52,20 @@ impl Server {
 					}
 				};
 
-				ctx.socks5_udp_sessions.insert(assoc_id, session.clone()).await;
+				{
+					ctx.socks5_udp_sessions.write().await.insert(assoc_id, session.clone());
+				}
 
-				let idle_timeout = ctx.socks5_udp_idle_timeout;
 				let ctx_loop = ctx.clone();
-				let session_for_recv = session.clone();
 				let handle_local_incoming_pkt = async move {
 					loop {
-						let (pkt, target_addr) = match session_for_recv.recv().await {
+						let (pkt, target_addr) = match session.recv().await {
 							Ok(res) => res,
-							Err(Error::Io(err)) if err.kind() == ErrorKind::Other => {
-								// Protocol-level rejects (wrong source addr, fragmented packet, etc.)
-								// — drop this packet and keep serving the session.
+							Err(err) => {
 								warn!(
-									"[socks5] [{peer_addr}] [associate] [{assoc_id:#06x}] dropping malformed UDP packet: {err}"
+									"[socks5] [{peer_addr}] [associate] [{assoc_id:#06x}] failed to receive UDP packet: {err}"
 								);
 								continue;
-							}
-							Err(err) => {
-								// Underlying socket failure — the session is no longer functional,
-								// stop the recv loop so the cleanup path runs.
-								error!(
-									"[socks5] [{peer_addr}] [associate] [{assoc_id:#06x}] unrecoverable UDP recv error, \
-									 ending session: {err}"
-								);
-								break;
 							}
 						};
 
@@ -100,50 +96,20 @@ impl Server {
 					}
 				};
 
-				// Defensive idle watcher: walks up against the session's `last_activity`
-				// (touched on every send/recv) and tears the session down when no traffic
-				// has flowed for the configured timeout. Protects the relay from sessions
-				// stranded by clients that hold the control TCP open without ever sending
-				// UDP, and reclaims the cache slot for new associations.
-				let session_for_idle = session.clone();
-				let idle_watcher = async move {
-					if idle_timeout.is_zero() {
-						std::future::pending::<()>().await;
-						return;
+				match tokio::select! {
+					res = assoc.wait_until_closed() => res,
+					_ = handle_local_incoming_pkt => unreachable!(),
+				} {
+					Ok(()) => {}
+					Err(err) => {
+						warn!("[socks5] [{peer_addr}] [associate] [{assoc_id:#06x}] associate connection error: {err}")
 					}
-					loop {
-						let idle = session_for_idle.idle_for();
-						if idle >= idle_timeout {
-							warn!(
-								"[socks5] [{peer_addr}] [associate] [{assoc_id:#06x}] idle for {idle:?} (>= \
-								 {idle_timeout:?}); closing session"
-							);
-							return;
-						}
-						let remaining = idle_timeout - idle;
-						time::sleep(remaining.max(Duration::from_millis(100))).await;
-					}
-				};
-
-				tokio::select! {
-					res = assoc.wait_until_closed() => {
-						if let Err(err) = res {
-							warn!("[socks5] [{peer_addr}] [associate] [{assoc_id:#06x}] associate connection error: {err}");
-						}
-					}
-					_ = handle_local_incoming_pkt => {}
-					_ = idle_watcher => {}
 				}
 
 				debug!("[socks5] [{peer_addr}] [associate] [{assoc_id:#06x}] stopped associating");
 
-				// Remove may legitimately return None: the cache TTI or a parallel cleanup
-				// path may have evicted the entry first. Either way the session is dead;
-				// just continue to the dissociate handshake with the relay.
-				if ctx.socks5_udp_sessions.remove(&assoc_id).await.is_none() {
-					debug!(
-						"[socks5] [{peer_addr}] [associate] [{assoc_id:#06x}] session already absent from registry on cleanup"
-					);
+				{
+					ctx.socks5_udp_sessions.write().await.remove(&assoc_id).unwrap();
 				}
 
 				if let Ok(conn) = ctx.get_conn().await

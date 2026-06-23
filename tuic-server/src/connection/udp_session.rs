@@ -1,17 +1,16 @@
 use std::{
 	io::Error as IoError,
 	net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, UdpSocket as StdUdpSocket},
-	sync::Arc,
+	sync::{Arc, Weak},
 };
 
 use bytes::Bytes;
-use moka::future::Cache;
 use socket2::{Domain, Protocol, SockAddr, Socket, Type};
 use tokio::{
 	net::UdpSocket,
 	sync::{RwLock as AsyncRwLock, oneshot},
 };
-use tracing::{Instrument, Span, debug, warn};
+use tracing::{Instrument, Span, warn};
 use tuic_core::Address;
 
 use super::Connection;
@@ -20,24 +19,15 @@ use crate::{AppContext, error::Error, utils::FutResultExt};
 pub struct UdpSession {
 	ctx: Arc<AppContext>,
 	assoc_id: u16,
-	udp_sessions: Cache<u16, Arc<UdpSession>>,
+	conn: Connection,
 	socket_v4: UdpSocket,
 	socket_v6: Option<UdpSocket>,
 	close: AsyncRwLock<Option<oneshot::Sender<()>>>,
 }
 
 impl UdpSession {
-	/// Spawn a listen task for the UDP session and return an `Arc<Self>`.
-	///
-	/// The listen task is the session's real owner; when it ends the session
-	/// is dropped. `conn` is consumed and moved into the listen task for
-	/// outgoing packet relay (`relay_packet`).
-	pub fn new(
-		ctx: Arc<AppContext>,
-		conn: Connection,
-		assoc_id: u16,
-		udp_sessions: Cache<u16, Arc<UdpSession>>,
-	) -> Result<Arc<Self>, Error> {
+	// spawn a task which actually owns itself, then return its wake reference.
+	pub fn new(ctx: Arc<AppContext>, conn: Connection, assoc_id: u16) -> Result<Weak<Self>, Error> {
 		let socket_v4 = {
 			let socket = Socket::new(Domain::IPV4, Type::DGRAM, Some(Protocol::UDP))
 				.map_err(|err| Error::Socket("failed to create UDP associate IPv4 socket", err))?;
@@ -76,96 +66,63 @@ impl UdpSession {
 
 		let (tx, rx) = oneshot::channel();
 
-		let ctx_listening = ctx.clone();
 		let session = Arc::new(Self {
-			ctx,
+			ctx: ctx.clone(),
+			conn,
 			assoc_id,
-			udp_sessions,
 			socket_v4,
 			socket_v6,
 			close: AsyncRwLock::new(Some(tx)),
 		});
 
 		let session_listening = session.clone();
-		let conn_listening = conn; // moved here, used by listen task for relay
+		// UdpSession's real owner.
 		let listen_span = Span::current();
 		let listen = async move {
 			let span = Span::current();
 			let mut rx = rx;
-			let mut timeout = tokio::time::interval(ctx_listening.cfg.stream_timeout);
+			let mut timeout = tokio::time::interval(ctx.cfg.stream_timeout);
 			timeout.reset();
-			let mut health_check = tokio::time::interval(ctx_listening.cfg.gc_interval);
-			health_check.reset();
-
-			enum Event {
-				Packet(Result<(Bytes, SocketAddr), IoError>),
-				Timeout,
-				CloseSignal,
-				HealthCheck,
-			}
 
 			loop {
-				let event = tokio::select! {
-					res = session_listening.recv()  => Event::Packet(res),
-					_  = timeout.tick()              => Event::Timeout,
-					_  = &mut rx                     => Event::CloseSignal,
-					_  = health_check.tick()          => Event::HealthCheck,
-				};
-
-				match event {
-					Event::Packet(res) => {
-						timeout.reset();
-
-						let (pkt, addr) = match res {
-							Ok(v) => v,
-							Err(err) => {
-								warn!(
-									"[packet] [{assoc_id:#06x}] outbound listening error: {err}",
-									assoc_id = session_listening.assoc_id
-								);
-								continue;
-							}
-						};
-
-						tokio::spawn(
-							conn_listening
-								.clone()
-								.relay_packet(pkt, Address::SocketAddress(addr), session_listening.assoc_id)
-								.log_err()
-								.instrument(span.clone()),
-						);
-					}
-					Event::Timeout => {
-						if conn_listening.is_closed() {
-							debug!(
-								"[packet] [{assoc_id:#06x}] parent connection closed, cleaning up",
-								assoc_id = session_listening.assoc_id
-							);
-							break;
-						}
+				let next;
+				tokio::select! {
+					recv = session_listening.recv() => next = recv,
+					// Avoid client didn't send `UDP-DROP` properly
+					_ = timeout.tick() => {
 						session_listening.close().await;
+						warn!("[packet] [{assoc_id:#06x}] UDP session timeout", assoc_id = session_listening.assoc_id);
+						continue;
+					},
+					// `UDP-DROP`
+					_ = &mut rx => break
+				}
+				timeout.reset();
+				let (pkt, addr) = match next {
+					Ok(v) => v,
+					Err(err) => {
 						warn!(
-							"[packet] [{assoc_id:#06x}] UDP session timeout",
+							"[packet] [{assoc_id:#06x}] outbound listening error: {err}",
 							assoc_id = session_listening.assoc_id
 						);
+						continue;
 					}
-					Event::CloseSignal => break,
-					Event::HealthCheck => {
-						if conn_listening.is_closed() {
-							debug!(
-								"[packet] [{assoc_id:#06x}] parent connection closed, cleaning up",
-								assoc_id = session_listening.assoc_id
-							);
-							break;
-						}
-					}
-				}
+				};
+
+				tokio::spawn(
+					session_listening
+						.conn
+						.clone()
+						.relay_packet(pkt, Address::SocketAddress(addr), session_listening.assoc_id)
+						.log_err()
+						.instrument(span.clone()),
+				);
 			}
-			session_listening.udp_sessions.invalidate(&assoc_id).await;
+			session_listening.conn.udp_sessions.write().await.remove(&assoc_id);
 		};
 
 		tokio::spawn(listen.instrument(listen_span));
-		Ok(session)
+		Ok(Arc::downgrade(&session))
 	}
 
 	pub async fn send(&self, pkt: Bytes, mut addr: SocketAddr) -> Result<(), Error> {

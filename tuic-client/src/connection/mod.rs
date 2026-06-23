@@ -1,4 +1,5 @@
 use std::{
+	collections::HashMap,
 	net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, UdpSocket},
 	sync::{Arc, Mutex},
 	time::Duration,
@@ -6,7 +7,6 @@ use std::{
 
 use anyhow::Context;
 use crossbeam_utils::atomic::AtomicCell;
-use moka::future::Cache;
 use rustls::{
 	ClientConfig as RustlsClientConfig,
 	pki_types::{CertificateDer, ServerName, UnixTime},
@@ -36,8 +36,8 @@ mod socks5;
 use self::socks5::Socks5UdpSocket;
 
 /// Convenience type aliases for the two UDP session maps
-type Socks5Sessions = Cache<u16, crate::socks5::UdpSession>;
-type FwdSessions = Cache<u16, crate::forward::ForwardUdpSession>;
+type Socks5Sessions = Arc<AsyncRwLock<HashMap<u16, crate::socks5::UdpSession>>>;
+type FwdSessions = Arc<AsyncRwLock<HashMap<u16, crate::forward::ForwardUdpSession>>>;
 
 /// Default error code for QUIC connection
 pub const ERROR_CODE: VarInt = VarInt::from_u32(0);
