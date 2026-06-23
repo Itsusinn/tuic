@@ -1,8 +1,7 @@
 use std::{
 	io::Error as IoError,
 	net::{IpAddr, SocketAddr, UdpSocket as StdUdpSocket},
-	sync::{Arc, Mutex},
-	time::Instant,
+	sync::Arc,
 };
 
 use bytes::Bytes;
@@ -19,7 +18,6 @@ pub struct UdpSession {
 	socket: Arc<AssociatedUdpSocket>,
 	assoc_id: u16,
 	ctrl_addr: SocketAddr,
-	last_activity: Arc<Mutex<Instant>>,
 }
 
 impl UdpSession {
@@ -92,18 +90,7 @@ impl UdpSession {
 			socket: Arc::new(AssociatedUdpSocket::from((socket, max_pkt_size))),
 			assoc_id,
 			ctrl_addr,
-			last_activity: Arc::new(Mutex::new(Instant::now())),
 		})
-	}
-
-	pub fn touch(&self) {
-		if let Ok(mut last) = self.last_activity.lock() {
-			*last = Instant::now();
-		}
-	}
-
-	pub fn idle_for(&self) -> std::time::Duration {
-		self.last_activity.lock().ok().map(|last| last.elapsed()).unwrap_or_default()
 	}
 
 	pub async fn send(&self, pkt: Bytes, mut src_addr: Address) -> Result<(), Error> {
@@ -134,7 +121,6 @@ impl UdpSession {
 			return Err(Error::Io(err));
 		}
 
-		self.touch();
 		Ok(())
 	}
 
@@ -185,71 +171,10 @@ impl UdpSession {
 			assoc_id = self.assoc_id
 		);
 
-		self.touch();
 		Ok((pkt, dst_addr))
 	}
 
 	pub fn local_addr(&self) -> Result<SocketAddr, IoError> {
 		self.socket.local_addr()
-	}
-}
-
-#[cfg(test)]
-mod tests {
-	use std::time::Duration;
-
-	use super::*;
-
-	fn make_session() -> UdpSession {
-		UdpSession::new(
-			0x1234,
-			"127.0.0.1:9999".parse().unwrap(),
-			"127.0.0.1".parse().unwrap(),
-			None,
-			1500,
-		)
-		.expect("binding 127.0.0.1:0 must succeed in tests")
-	}
-
-	#[tokio::test]
-	async fn idle_grows_over_time() {
-		let session = make_session();
-		// A fresh session should be roughly zero-idle.
-		assert!(session.idle_for() < Duration::from_millis(50));
-
-		tokio::time::sleep(Duration::from_millis(80)).await;
-		let idle = session.idle_for();
-		assert!(idle >= Duration::from_millis(60), "idle should grow to ~80ms, got {idle:?}");
-	}
-
-	#[tokio::test]
-	async fn touch_resets_idle() {
-		let session = make_session();
-		tokio::time::sleep(Duration::from_millis(80)).await;
-		assert!(session.idle_for() >= Duration::from_millis(60));
-
-		session.touch();
-		let after_touch = session.idle_for();
-		assert!(
-			after_touch < Duration::from_millis(30),
-			"touch should reset idle to near-zero, got {after_touch:?}"
-		);
-	}
-
-	#[tokio::test]
-	async fn touch_is_shared_across_clones() {
-		// Sessions are cloned into recv loop, idle watcher, and the inbound packet
-		// handler — touches from one clone must be visible to all readers.
-		let a = make_session();
-		let b = a.clone();
-
-		tokio::time::sleep(Duration::from_millis(80)).await;
-		assert!(b.idle_for() >= Duration::from_millis(60));
-
-		a.touch();
-		assert!(
-			b.idle_for() < Duration::from_millis(30),
-			"touch on one clone must propagate to the other"
-		);
 	}
 }

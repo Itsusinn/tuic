@@ -1,4 +1,5 @@
 use std::{
+	collections::hash_map::Entry,
 	io::{Error as IoError, ErrorKind},
 	net::{IpAddr, SocketAddr},
 };
@@ -328,13 +329,19 @@ impl Connection {
 				src_addr = addr
 			);
 
-			let session = match self.udp_sessions.get(&assoc_id).await {
-				Some(s) => s,
-				None => {
-					let session = UdpSession::new(self.ctx.clone(), self.clone(), assoc_id, self.udp_sessions.clone())?;
-					self.udp_sessions.insert(assoc_id, session.clone()).await;
-					session
-				}
+			let guard = self.udp_sessions.read().await;
+			let session = guard.get(&assoc_id).map(|v| v.to_owned());
+			drop(guard);
+			let session = match session {
+				Some(v) => v,
+				None => match self.udp_sessions.write().await.entry(assoc_id) {
+					Entry::Occupied(entry) => entry.get().clone(),
+					Entry::Vacant(entry) => {
+						let session = UdpSession::new(self.ctx.clone(), self.clone(), assoc_id)?;
+						entry.insert(session.clone());
+						session
+					}
+				},
 			};
 
 			// Resolve using default outbound and apply ACL
@@ -392,7 +399,11 @@ impl Connection {
 
 			let uuid = self.auth.get().ok_or_eyre("Unexpected authorization state")?;
 			restful::traffic_tx(&self.ctx, &uuid, pkt.len());
-			session.send(pkt, socket_addr).await
+			if let Some(session) = session.upgrade() {
+				session.send(pkt, socket_addr).await
+			} else {
+				Err(eyre!("UdpSession dropped already").into())
+			}
 		};
 
 		if let Err(err) = process.await {
@@ -406,7 +417,9 @@ impl Connection {
 	pub async fn handle_dissociate(&self, assoc_id: u16) {
 		info!("[UDP-DROP] [{assoc_id:#06x}]");
 
-		if let Some(session) = self.udp_sessions.remove(&assoc_id).await {
+		if let Some(session) = self.udp_sessions.write().await.remove(&assoc_id)
+			&& let Some(session) = session.upgrade()
+		{
 			session.close().await;
 		}
 	}
