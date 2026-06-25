@@ -1,18 +1,31 @@
 use std::process;
 
 use clap::Parser;
-#[cfg(feature = "jemallocator")]
+#[cfg(all(feature = "jemallocator", not(feature = "dhat-heap")))]
 use tikv_jemallocator::Jemalloc;
 use tuic_server::{
 	config::{Cli, Control, EnvState, ResolvedRuntime, parse_config},
 	log,
 };
 
-#[cfg(feature = "jemallocator")]
+// dhat takes over the global allocator to trace every heap allocation, so it
+// must be the sole `#[global_allocator]`; jemalloc is disabled whenever
+// `dhat-heap` is enabled.
+#[cfg(all(feature = "jemallocator", not(feature = "dhat-heap")))]
 #[global_allocator]
 static GLOBAL: Jemalloc = Jemalloc;
 
+#[cfg(feature = "dhat-heap")]
+#[global_allocator]
+static ALLOC: dhat::Alloc = dhat::Alloc;
+
 fn main() -> eyre::Result<()> {
+	// Profile the whole process. Dropping the guard on graceful shutdown writes
+	// `dhat-heap.json`; its at-exit ("t-end") stats show allocations still live
+	// at exit, i.e. leaked resources.
+	#[cfg(feature = "dhat-heap")]
+	let _dhat = dhat::Profiler::new_heap();
+
 	#[cfg(feature = "aws-lc-rs")]
 	{
 		_ = rustls::crypto::aws_lc_rs::default_provider().install_default();

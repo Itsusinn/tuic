@@ -16,6 +16,11 @@ default = ["aws-lc-rs"]
 ring = ["tuic-core/ring", "rustls/ring"]
 aws-lc-rs = ["tuic-core/aws-lc-rs", "dep:aws-lc-rs", "rustls/aws-lc-rs"]
 jemallocator = ["tikv-jemallocator"]
+# Heap profiling / resource-leak detection via dhat. Replaces the global
+# allocator (mutually exclusive with `jemallocator`, dhat wins) and pulls in
+# tokio's signal support so Ctrl-C can shut the client down cleanly, letting the
+# profiler flush its report on exit.
+dhat-heap = ["dep:dhat", "tokio/signal"]
 
 [dependencies]
 num_cpus = "1"
@@ -65,6 +70,7 @@ chrono = "0.4"
 tracing = "0.1"
 
 tikv-jemallocator = { version = "0.7", optional = true }
+dhat = { version = "0.3", optional = true }
 
 [dev-dependencies]
 tempfile = "3"

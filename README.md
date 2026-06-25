@@ -78,6 +78,19 @@ There are 4 crates provided in this repository:
 
 Contributors should fork from the `main` branch and submit pull requests to the `main` branch. Please note that the `dev` branch may be force-pushed from time to time, so avoid basing your work on it.
 
+### Heap profiling / leak detection
+
+Both `tuic-server` and `tuic-client` ship an optional [dhat](https://crates.io/crates/dhat) heap profiler behind the `dhat-heap` feature, useful for chasing resource/memory leaks (e.g. UDP sessions that are never cleaned up).
+
+```bash
+# Build & run the server with profiling enabled
+cargo run -p tuic-server --features dhat-heap -- -c config.toml
+```
+
+Exercise the binary, then stop it with **Ctrl-C** (a graceful shutdown is required — a hard kill skips the profiler). On exit a `dhat-heap.json` file is written to the working directory; open it in the [DHAT viewer](https://nnethercote.github.io/dh_view/dh_view.html) and inspect the **"At t-end"** (at-exit) numbers — blocks still alive when the process shut down are your leaks, and each is annotated with the allocation backtrace.
+
+Note: `dhat-heap` installs its own global allocator, so it is mutually exclusive with `jemallocator` (dhat takes precedence if both are enabled). Leave it off for release/production builds — it adds per-allocation overhead.
+
 ## Contributors
 
 Thanks to all the contributors who have helped improve TUIC!

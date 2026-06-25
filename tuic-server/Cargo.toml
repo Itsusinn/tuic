@@ -16,6 +16,9 @@ default = ["aws-lc-rs"]
 ring = ["tuic-core/ring", "rustls/ring", "rcgen/ring", "rustls-acme/ring"]
 aws-lc-rs = ["tuic-core/aws-lc-rs", "dep:aws-lc-rs", "rustls/aws-lc-rs", "rcgen/aws_lc_rs", "rustls-acme/aws-lc-rs"]
 jemallocator = ["tikv-jemallocator"]
+# Heap profiling / resource-leak detection via dhat. Replaces the global
+# allocator, so it is mutually exclusive with `jemallocator` (dhat wins).
+dhat-heap = ["dep:dhat"]
 
 [dependencies]
 h3 = "0.0.8"
@@ -83,6 +86,7 @@ peekable = { version = "0.6.1", default-features = false, features = ["tokio"] }
 smallvec = { version = "1", default-features = false }
 
 tikv-jemallocator = { version = "0.7", optional = true }
+dhat = { version = "0.3", optional = true }
 rand = "0.10"
 
 [dev-dependencies]
