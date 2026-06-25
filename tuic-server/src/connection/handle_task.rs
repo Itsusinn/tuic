@@ -384,8 +384,9 @@ impl Connection {
 				initial_addrs[0]
 			};
 
-			// Get-or-create the UDP session (binding its outbound sockets) only now that the
-			// packet has passed ACL/outbound policy — never for dropped/blocked packets.
+			// Get-or-create the UDP session (binding its outbound sockets) only now that
+			// the packet has passed ACL/outbound policy — never for dropped/blocked
+			// packets.
 			let guard = self.udp_sessions.read().await;
 			let session = guard.get(&assoc_id).map(|v| v.to_owned());
 			drop(guard);
