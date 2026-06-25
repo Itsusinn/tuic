@@ -5,9 +5,9 @@ use socks5_server::{
 	Associate, Bind, Connect,
 	connection::{associate, bind, connect},
 };
-use tokio::io::{self, AsyncWriteExt};
+use tokio::io::AsyncWriteExt;
 use tracing::{debug, info, warn};
-use tuic_core::Address as TuicAddress;
+use tuic_core::{Address as TuicAddress, io::copy_bidirectional};
 
 use super::{Server, udp_session::UdpSession};
 use crate::connection::ERROR_CODE;
@@ -159,14 +159,15 @@ impl Server {
 
 		match relay {
 			Ok(mut relay) => match conn.reply(Reply::Succeeded, Address::unspecified()).await {
-				Ok(mut conn) => match io::copy_bidirectional(&mut conn, &mut relay).await {
-					Ok(_) => {}
-					Err(err) => {
+				Ok(mut conn) => {
+					let (_up, _down, err) =
+						copy_bidirectional(&mut conn, &mut relay, tuic_core::io::RELAY_HALF_CLOSE_TIMEOUT).await;
+					if let Some(err) = err {
 						let _ = conn.shutdown().await;
 						let _ = relay.reset(ERROR_CODE);
 						warn!("[socks5] [{peer_addr}] [connect] [{target_addr}] TCP stream relaying error: {err}");
 					}
-				},
+				}
 				Err(err) => {
 					let _ = relay.shutdown().await;
 					warn!("[socks5] [{peer_addr}] [connect] [{target_addr}] command reply error: {err}");

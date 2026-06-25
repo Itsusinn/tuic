@@ -13,7 +13,9 @@ use tokio::{
 };
 use tracing::{info, warn};
 use tuic_core::{
-	Address, is_private_ip,
+	Address,
+	io::copy_bidirectional,
+	is_private_ip,
 	quinn::{Authenticate, Connect, Packet, StreamRx, StreamTx},
 };
 
@@ -21,7 +23,6 @@ use super::{Connection, ERROR_CODE, UdpSession};
 use crate::{
 	config::OutboundRule,
 	error::Error,
-	io::copy_io,
 	restful,
 	utils::{StackPrefer, UdpRelayMode},
 };
@@ -220,7 +221,12 @@ impl Connection {
 
 			// a -> b tx
 			// a <- b rx
-			let (tx, rx, err) = copy_io(&mut conn, &mut stream).await;
+			//
+			// `stream_timeout` doubles as the half-close idle window: once one side
+			// sends FIN, the relay is reaped after this much inactivity so the still-open
+			// outbound socket doesn't linger in CLOSE_WAIT for the life of the QUIC
+			// connection.
+			let (tx, rx, err) = copy_bidirectional(&mut conn, &mut stream, self.ctx.cfg.stream_timeout).await;
 			if err.is_some() {
 				_ = conn.reset(ERROR_CODE);
 			} else {

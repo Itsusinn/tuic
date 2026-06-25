@@ -25,6 +25,9 @@ pub mod quinn {
 	pub use super::quinn_impl::*;
 }
 
+// Bidirectional relay copy with a half-close idle reaper
+pub mod io;
+
 // Utility types
 mod utils;
 pub use self::utils::{CongestionControl, StackPrefer, UdpRelayMode, is_private_ip, sniff_from_stream};
