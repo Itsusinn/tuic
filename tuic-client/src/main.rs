@@ -2,16 +2,29 @@ use std::{process, str::FromStr};
 
 use chrono::{Offset, TimeZone};
 use clap::Parser;
-#[cfg(feature = "jemallocator")]
+#[cfg(all(feature = "jemallocator", not(feature = "dhat-heap")))]
 use tikv_jemallocator::Jemalloc;
 use tracing::level_filters::LevelFilter;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 use tuic_client::config::{Cli, Config, EnvState, ResolvedRuntime};
-#[cfg(feature = "jemallocator")]
+// dhat takes over the global allocator to trace every heap allocation, so it
+// must be the sole `#[global_allocator]`; jemalloc is disabled whenever
+// `dhat-heap` is enabled.
+#[cfg(all(feature = "jemallocator", not(feature = "dhat-heap")))]
 #[global_allocator]
 static GLOBAL: Jemalloc = Jemalloc;
 
+#[cfg(feature = "dhat-heap")]
+#[global_allocator]
+static ALLOC: dhat::Alloc = dhat::Alloc;
+
 fn main() -> eyre::Result<()> {
+	// Profile the whole process. Dropping the guard on graceful shutdown writes
+	// `dhat-heap.json`; its at-exit ("t-end") stats show allocations still live
+	// at exit, i.e. leaked resources.
+	#[cfg(feature = "dhat-heap")]
+	let _dhat = dhat::Profiler::new_heap();
+
 	#[cfg(feature = "aws-lc-rs")]
 	{
 		_ = rustls::crypto::aws_lc_rs::default_provider().install_default();
@@ -58,5 +71,27 @@ fn main() -> eyre::Result<()> {
 
 	let rt = builder.enable_all().build()?;
 
-	rt.block_on(async move { tuic_client::run(cfg).await })
+	// `run` never returns on its own (the SOCKS5 accept loop runs forever), so a
+	// plain Ctrl-C would hard-kill the process and skip the profiler's `Drop`.
+	// Under `dhat-heap`, race it against Ctrl-C so shutdown is graceful and
+	// `dhat-heap.json` gets written.
+	#[cfg(feature = "dhat-heap")]
+	let result = rt.block_on(async move {
+		tokio::select! {
+			res = tuic_client::run(cfg) => res,
+			_ = tokio::signal::ctrl_c() => {
+				tracing::info!("Received Ctrl-C, shutting down.");
+				Ok(())
+			}
+		}
+	});
+
+	#[cfg(not(feature = "dhat-heap"))]
+	let result = rt.block_on(async move { tuic_client::run(cfg).await });
+
+	// Drop the runtime (aborting spawned tasks and freeing their resources)
+	// before `_dhat` falls out of scope, so the leak report reflects a clean
+	// shutdown rather than in-flight work.
+	drop(rt);
+	result
 }
