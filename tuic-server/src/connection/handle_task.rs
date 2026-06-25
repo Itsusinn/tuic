@@ -329,22 +329,9 @@ impl Connection {
 				src_addr = addr
 			);
 
-			let guard = self.udp_sessions.read().await;
-			let session = guard.get(&assoc_id).map(|v| v.to_owned());
-			drop(guard);
-			let session = match session {
-				Some(v) => v,
-				None => match self.udp_sessions.write().await.entry(assoc_id) {
-					Entry::Occupied(entry) => entry.get().clone(),
-					Entry::Vacant(entry) => {
-						let session = UdpSession::new(self.ctx.clone(), self.clone(), assoc_id)?;
-						entry.insert(session.clone());
-						session
-					}
-				},
-			};
-
-			// Resolve using default outbound and apply ACL
+			// Resolve the target and run ACL/outbound policy BEFORE creating a session, so
+			// packets that are dropped, blocked, or fail to resolve don't leak an outbound
+			// socket pair (+ listen task) for the whole `stream_timeout` window.
 			let initial_addrs: Vec<SocketAddr> = resolve_dns(&addr).await?.collect();
 			if initial_addrs.is_empty() {
 				return Err(Error::from(IoError::new(ErrorKind::NotFound, "no address resolved")));
@@ -395,6 +382,24 @@ impl Connection {
 			} else {
 				// Use the first address resolved
 				initial_addrs[0]
+			};
+
+			// Get-or-create the UDP session (binding its outbound sockets) only now that
+			// the packet has passed ACL/outbound policy — never for dropped/blocked
+			// packets.
+			let guard = self.udp_sessions.read().await;
+			let session = guard.get(&assoc_id).map(|v| v.to_owned());
+			drop(guard);
+			let session = match session {
+				Some(v) => v,
+				None => match self.udp_sessions.write().await.entry(assoc_id) {
+					Entry::Occupied(entry) => entry.get().clone(),
+					Entry::Vacant(entry) => {
+						let session = UdpSession::new(self.ctx.clone(), self.clone(), assoc_id)?;
+						entry.insert(session.clone());
+						session
+					}
+				},
 			};
 
 			let uuid = self.auth.get().ok_or_eyre("Unexpected authorization state")?;
