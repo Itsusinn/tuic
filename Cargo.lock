@@ -3492,7 +3492,7 @@ checksum = "e421abadd41a4225275504ea4d6566923418b7f05506fbc9c0fe86ba7396114b"
 
 [[package]]
 name = "tuic-client"
-version = "1.8.9"
+version = "1.8.10"
 dependencies = [
  "anyhow",
  "aws-lc-rs",
@@ -3533,7 +3533,7 @@ dependencies = [
 
 [[package]]
 name = "tuic-core"
-version = "1.8.9"
+version = "1.8.10"
 dependencies = [
  "bytes",
  "eyre",
@@ -3557,7 +3557,7 @@ dependencies = [
 
 [[package]]
 name = "tuic-server"
-version = "1.8.9"
+version = "1.8.10"
 dependencies = [
  "arc-swap",
  "aws-lc-rs",
@@ -3618,7 +3618,7 @@ dependencies = [
 
 [[package]]
 name = "tuic-tests"
-version = "1.8.9"
+version = "1.8.10"
 dependencies = [
  "aws-lc-rs",
  "eyre",
