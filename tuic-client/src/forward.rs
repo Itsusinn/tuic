@@ -8,12 +8,11 @@ use std::{
 use bytes::Bytes;
 use socket2::{Domain, Protocol, SockAddr, Socket, Type};
 use tokio::{
-	io,
 	io::AsyncWriteExt,
 	net::{TcpListener, UdpSocket},
 };
 use tracing::{debug, info, warn};
-use tuic_core::Address as TuicAddress;
+use tuic_core::{Address as TuicAddress, io::copy_bidirectional};
 
 use crate::{
 	config::{TcpForward, UdpForward},
@@ -78,11 +77,13 @@ async fn run_tcp_forwarder(entry: TcpForward, ctx: Arc<crate::AppContext>) {
 								let conn = ctx.get_conn().await?;
 								let remote_addr = TuicAddress::DomainAddress(remote.0, remote.1);
 								let mut relay = conn.connect(remote_addr).await?;
-								match io::copy_bidirectional(&mut inbound, &mut relay).await {
-									Ok((_lr, _rl)) => {
+								let (_up, _down, err) =
+									copy_bidirectional(&mut inbound, &mut relay, tuic_core::io::RELAY_HALF_CLOSE_TIMEOUT).await;
+								match err {
+									None => {
 										let _ = relay.shutdown().await;
 									}
-									Err(err) => {
+									Some(err) => {
 										warn!("[forward-tcp] [{peer}] relay error: {err}");
 									}
 								}

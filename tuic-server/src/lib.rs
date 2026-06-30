@@ -17,7 +17,6 @@ pub mod compat;
 pub mod config;
 pub mod connection;
 pub mod error;
-pub mod io;
 pub mod log;
 pub mod restful;
 pub mod server;
