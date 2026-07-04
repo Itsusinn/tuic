@@ -1180,3 +1180,239 @@ async fn test_server_port_zero() -> eyre::Result<()> {
 	guard.cancel.cancel();
 	Ok(())
 }
+
+#[tokio::test(flavor = "current_thread")]
+#[serial]
+#[tracing_test::traced_test]
+#[cfg_attr(not(any(target_arch = "x86", target_arch = "x86_64")), ignore)]
+async fn test_restful_api_integration() -> eyre::Result<()> {
+	use std::{collections::HashMap, net::SocketAddr, path::PathBuf};
+
+	use reqwest::{Client, StatusCode};
+	use serde_json::Value;
+
+	#[cfg(feature = "aws-lc-rs")]
+	let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
+	#[cfg(feature = "ring")]
+	let _ = rustls::crypto::ring::default_provider().install_default();
+
+	fn free_tcp_addr() -> eyre::Result<SocketAddr> {
+		let listener = std::net::TcpListener::bind("127.0.0.1:0")?;
+		Ok(listener.local_addr()?)
+	}
+
+	async fn get_json(client: &Client, base_url: &str, path: &str, token: &str) -> eyre::Result<(StatusCode, Value)> {
+		let response = client.get(format!("{base_url}/{path}")).bearer_auth(token).send().await?;
+		let status = response.status();
+		let body = response.json::<Value>().await?;
+		Ok((status, body))
+	}
+
+	async fn wait_for_restful(client: &Client, base_url: &str, token: &str) -> eyre::Result<()> {
+		for _ in 0..50 {
+			match get_json(client, base_url, "online", token).await {
+				Ok((StatusCode::OK, _)) => return Ok(()),
+				_ => tokio::time::sleep(Duration::from_millis(100)).await,
+			}
+		}
+		eyre::bail!("RESTful API did not become ready")
+	}
+
+	async fn wait_for_online(client: &Client, base_url: &str, token: &str, uuid: Uuid) -> eyre::Result<(Value, Value)> {
+		let uuid = uuid.to_string();
+		for _ in 0..80 {
+			let (online_status, online) = get_json(client, base_url, "online", token).await?;
+			let (detailed_status, detailed) = get_json(client, base_url, "detailed_online", token).await?;
+			if online_status == StatusCode::OK
+				&& detailed_status == StatusCode::OK
+				&& online.get(&uuid).and_then(Value::as_u64) == Some(1)
+				&& detailed
+					.get(&uuid)
+					.and_then(Value::as_array)
+					.is_some_and(|addrs| !addrs.is_empty())
+			{
+				return Ok((online, detailed));
+			}
+			tokio::time::sleep(Duration::from_millis(100)).await;
+		}
+		eyre::bail!("RESTful API did not report the authenticated client online")
+	}
+
+	async fn wait_for_traffic(client: &Client, base_url: &str, token: &str, uuid: Uuid) -> eyre::Result<Value> {
+		let uuid = uuid.to_string();
+		for _ in 0..80 {
+			let (status, traffic) = get_json(client, base_url, "traffic", token).await?;
+			let stats = traffic.get(&uuid);
+			let tx = stats.and_then(|stats| stats.get("tx")).and_then(Value::as_u64).unwrap_or(0);
+			let rx = stats.and_then(|stats| stats.get("rx")).and_then(Value::as_u64).unwrap_or(0);
+			if status == StatusCode::OK && tx > 0 && rx > 0 {
+				return Ok(traffic);
+			}
+			tokio::time::sleep(Duration::from_millis(100)).await;
+		}
+		eyre::bail!("RESTful API did not report traffic for the authenticated client")
+	}
+
+	async fn wait_for_offline(client: &Client, base_url: &str, token: &str, uuid: Uuid) -> eyre::Result<()> {
+		let uuid = uuid.to_string();
+		for _ in 0..80 {
+			let (online_status, online) = get_json(client, base_url, "online", token).await?;
+			let (detailed_status, detailed) = get_json(client, base_url, "detailed_online", token).await?;
+			if online_status == StatusCode::OK
+				&& detailed_status == StatusCode::OK
+				&& online.get(&uuid).is_none()
+				&& detailed.get(&uuid).is_none()
+			{
+				return Ok(());
+			}
+			tokio::time::sleep(Duration::from_millis(100)).await;
+		}
+		eyre::bail!("RESTful API still reports kicked client online")
+	}
+
+	let uuid = Uuid::parse_str("00000000-0000-0000-0000-000000000123")?;
+	let password = "test_password";
+	let secret = "restful_secret";
+	let restful_addr = free_tcp_addr()?;
+
+	let server_config = tuic_server::Config {
+		log_level: tuic_server::config::LogLevel::Debug,
+		server: "127.0.0.1:0".parse::<SocketAddr>()?,
+		users: {
+			let mut users = HashMap::new();
+			users.insert(uuid, password.to_string());
+			users
+		},
+		tls: tuic_server::config::TlsConfig {
+			self_sign: true,
+			certificate: PathBuf::from("./test_restful_cert.pem"),
+			private_key: PathBuf::from("./test_restful_key.pem"),
+			alpn: vec!["h3".to_string()],
+			hostname: "localhost".to_string(),
+			auto_ssl: false,
+			acme_email: "admin@example.com".to_string(),
+		},
+		data_dir: std::env::temp_dir(),
+		restful: Some(tuic_server::config::RestfulConfig {
+			addr: restful_addr,
+			secret: secret.to_string(),
+			maximum_clients_per_user: 1,
+		}),
+		udp_relay_ipv6: true,
+		zero_rtt_handshake: false,
+		dual_stack: false,
+		gc_interval: Duration::from_millis(100),
+		gc_lifetime: Duration::from_secs(1),
+		experimental: ExperimentalConfig {
+			drop_loopback: false,
+			..Default::default()
+		},
+		acl: vec![tuic_server::acl::AclRule {
+			outbound: "allow".to_string(),
+			addr: tuic_server::acl::AclAddress::Localhost,
+			ports: None,
+			hijack: None,
+		}],
+		..Default::default()
+	};
+
+	let guard = tuic_server::run(server_config).await?;
+	let client = Client::new();
+	let base_url = format!("http://{restful_addr}");
+	wait_for_restful(&client, &base_url, secret).await?;
+
+	let (unauthorized_status, unauthorized_body) = get_json(&client, &base_url, "online", "wrong_secret").await?;
+	assert_eq!(unauthorized_status, StatusCode::UNAUTHORIZED);
+	assert_eq!(unauthorized_body, Value::Object(Default::default()));
+
+	let socks_addr = free_tcp_addr()?;
+	let client_config = tuic_client::Config {
+		tokio_runtime: Default::default(),
+		relay: tuic_client::config::Relay {
+			server: (guard.local_addr.ip().to_string(), guard.local_addr.port()),
+			uuid,
+			password: std::sync::Arc::from(password.as_bytes()),
+			ip: None,
+			ipstack_prefer: StackPrefer::V4first,
+			certificates: Vec::new(),
+			udp_relay_mode: tuic_client::utils::UdpRelayMode::Native,
+			congestion_control: tuic_client::utils::CongestionControl::Cubic,
+			alpn: vec![b"h3".to_vec()],
+			zero_rtt_handshake: false,
+			disable_sni: true,
+			disable_native_certs: true,
+			gso: false,
+			pmtu: false,
+			skip_cert_verify: true,
+			startup_mode: tuic_client::config::StartupMode::Eager,
+			heartbeat: Duration::from_millis(500),
+			gc_interval: Duration::from_millis(100),
+			gc_lifetime: Duration::from_secs(1),
+			..Default::default()
+		},
+		local: tuic_client::config::Local {
+			server: Some(socks_addr),
+			username: None,
+			password: None,
+			dual_stack: Some(false),
+			max_packet_size: 1500,
+			socks5_udp_idle_timeout: Duration::from_secs(300),
+			tcp_forward: Vec::new(),
+			udp_forward: Vec::new(),
+		},
+		log_level: "debug".to_string(),
+	};
+
+	let client_handle = tokio::spawn(async move {
+		if let Err(err) = tuic_client::run(client_config).await {
+			error!("[RESTful Test] Client error: {err}");
+		}
+	});
+
+	let (_online, detailed) = wait_for_online(&client, &base_url, secret, uuid).await?;
+	assert!(
+		detailed
+			.get(uuid.to_string())
+			.and_then(Value::as_array)
+			.is_some_and(|addrs| addrs.iter().all(Value::is_string)),
+		"detailed_online must return socket address strings"
+	);
+
+	let (echo_task, echo_addr) = run_tcp_echo_server("127.0.0.1:0", "RESTful Test").await;
+	tokio::time::sleep(Duration::from_millis(100)).await;
+	let test_data = b"restful traffic";
+	let tcp_result = test_tcp_through_socks5(&socks_addr.to_string(), echo_addr, test_data, "RESTful Test").await;
+	assert!(tcp_result.is_ok(), "TCP relay through SOCKS5 failed: {:?}", tcp_result.err());
+	echo_task.abort();
+
+	let traffic = wait_for_traffic(&client, &base_url, secret, uuid).await?;
+	let stats = traffic.get(uuid.to_string()).expect("traffic entry for test user");
+	assert!(stats.get("tx").and_then(Value::as_u64).unwrap_or_default() >= test_data.len() as u64);
+	assert!(stats.get("rx").and_then(Value::as_u64).unwrap_or_default() >= test_data.len() as u64);
+
+	let (reset_status, reset_body) = get_json(&client, &base_url, "reset_traffic", secret).await?;
+	assert_eq!(reset_status, StatusCode::OK);
+	assert!(reset_body.get(uuid.to_string()).is_some());
+
+	let (traffic_status, traffic_after_reset) = get_json(&client, &base_url, "traffic", secret).await?;
+	assert_eq!(traffic_status, StatusCode::OK);
+	assert!(
+		traffic_after_reset.get(uuid.to_string()).is_none(),
+		"traffic should be empty for the user immediately after reset"
+	);
+
+	let kick_status = client
+		.post(format!("{base_url}/kick"))
+		.bearer_auth(secret)
+		.json(&vec![uuid])
+		.send()
+		.await?
+		.status();
+	assert_eq!(kick_status, StatusCode::OK);
+
+	wait_for_offline(&client, &base_url, secret, uuid).await?;
+
+	client_handle.abort();
+	guard.cancel.cancel();
+	Ok(())
+}
