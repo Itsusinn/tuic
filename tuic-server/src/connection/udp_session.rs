@@ -100,10 +100,10 @@ impl UdpSession {
 					},
 					// Avoid client didn't send `UDP-DROP` properly
 					_ = timeout.tick() => {
-						session_listening.close().await;
 						warn!("[packet] [{assoc_id:#06x}] UDP session timeout", assoc_id = session_listening.assoc_id);
-						continue;
+						break;
 					},
+
 					// `UDP-DROP`
 					_ = &mut rx => break
 				}
@@ -115,7 +115,7 @@ impl UdpSession {
 							"[packet] [{assoc_id:#06x}] outbound listening error: {err}",
 							assoc_id = session_listening.assoc_id
 						);
-						continue;
+						break;
 					}
 				};
 
