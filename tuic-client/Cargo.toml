@@ -35,7 +35,7 @@ toml = "1.1"
 serde_yaml = "0.9"
 figment = { version = "0.10", features = ["toml", "yaml"] }
 figment-json5 = "0.1.1"
-educe = { version = "0.6", default-features = false, features = ["Default"] }
+educe = { version = "0.7", default-features = false, features = ["Default"] }
 humantime-serde = "1"
 socket2 = { version = "0.6", default-features = false }
 socks5-proto = { version = "0.3", default-features = false }
