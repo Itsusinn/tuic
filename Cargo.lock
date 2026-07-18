@@ -5096,9 +5096,12 @@ name = "tuic-server"
 version = "1.8.11"
 dependencies = [
  "arc-swap",
+ "async-trait",
  "aws-lc-rs",
+ "axum",
  "bytes",
  "clap",
+ "dashmap",
  "derive_more",
  "educe",
  "eyre",

@@ -97,6 +97,44 @@ impl GeoDataConfig {
 	}
 }
 
+/// RESTful API configuration for server management endpoints.
+///
+/// When enabled, exposes an HTTP API for querying online users, traffic
+/// statistics, and kicking users. Uses Bearer token authentication when
+/// `secret` is set.
+#[derive(Deserialize, Serialize, Clone)]
+#[serde(default, deny_unknown_fields)]
+pub struct RestfulConfig {
+	/// Whether to start the RESTful API server.
+	pub enabled: bool,
+
+	/// Address to listen on, e.g. `"127.0.0.1:13471"`.
+	#[serde(default = "default_restful_addr")]
+	pub addr: SocketAddr,
+
+	/// Bearer token secret for endpoint authentication. Empty string means no
+	/// auth required (not recommended if the API is exposed publicly).
+	pub secret: String,
+
+	/// Maximum concurrent connections per user (0 = unlimited).
+	pub maximum_clients_per_user: usize,
+}
+
+impl Default for RestfulConfig {
+	fn default() -> Self {
+		Self {
+			enabled: false,
+			addr: default_restful_addr(),
+			secret: String::new(),
+			maximum_clients_per_user: 0,
+		}
+	}
+}
+
+fn default_restful_addr() -> SocketAddr {
+	"127.0.0.1:13471".parse().unwrap()
+}
+
 #[derive(Deserialize, Serialize, Educe)]
 #[educe(Default)]
 #[serde(default, deny_unknown_fields)]
@@ -183,6 +221,10 @@ pub struct Config {
 	/// it, those rules never match (and a warning is logged at startup).
 	#[serde(default)]
 	pub geodata: GeoDataConfig,
+
+	/// RESTful API configuration for server management.
+	#[serde(default)]
+	pub restful: RestfulConfig,
 
 	/// Old configuration fields
 	#[serde(default, rename = "self_sign")]

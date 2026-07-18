@@ -80,6 +80,11 @@ tracing-subscriber = { version = "0.3", default-features = false, features = ["t
 tracing-appender = "0.2"
 tracing = "0.1"
 
+# RESTful API
+axum = { version = "0.8", default-features = false, features = ["json"] }
+dashmap = "6"
+async-trait = "0.1"
+
 # Error handling
 thiserror = { version = "2", default-features = false }
 eyre = { version = "0.6" }

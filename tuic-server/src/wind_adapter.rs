@@ -35,7 +35,7 @@ use wind_base::{
 	resolve::resolve_target,
 };
 use wind_core::{
-	AppContext, Dispatcher, OutboundAction, RouteAction, Router, SystemResolver,
+	ActiveConnections, AppContext, Dispatcher, InboundHooks, OutboundAction, RouteAction, Router, SystemResolver,
 	resolve::Resolver,
 	rule::Rule,
 	types::TargetAddr,
@@ -281,13 +281,17 @@ fn build_dispatcher(
 	Ok(dispatcher)
 }
 
-pub async fn create_inbound(ctx: Arc<TuicAppContext>) -> eyre::Result<(ServerInbound, Dispatcher<TuicRouter>)> {
+pub async fn create_inbound(
+	ctx: Arc<TuicAppContext>,
+	hooks: InboundHooks,
+	active: Option<ActiveConnections>,
+) -> eyre::Result<(ServerInbound, Dispatcher<TuicRouter>)> {
 	let resolver = build_resolver(&ctx.cfg)?;
 	let geodata = load_geodata(&ctx.cfg).await?;
 	let dispatcher = build_dispatcher(ctx.clone(), resolver, geodata)?;
 
 	let inbound = match ctx.cfg.backend.mode {
-		BackendMode::Quinn => ServerInbound::Tuic(create_quinn_inbound(&ctx).await?),
+		BackendMode::Quinn => ServerInbound::Tuic(create_quinn_inbound(&ctx, hooks, active).await?),
 		#[cfg(feature = "quiche")]
 		BackendMode::Quiche => ServerInbound::Tuiche(create_quiche_inbound(&ctx).await?),
 		#[cfg(not(feature = "quiche"))]
@@ -304,7 +308,11 @@ pub async fn create_inbound(ctx: Arc<TuicAppContext>) -> eyre::Result<(ServerInb
 
 /// Build the quinn (`wind-tuic`) inbound, including ACME / self-signed / file
 /// certificate resolution.
-async fn create_quinn_inbound(ctx: &Arc<TuicAppContext>) -> eyre::Result<TuicInbound> {
+async fn create_quinn_inbound(
+	ctx: &Arc<TuicAppContext>,
+	hooks: InboundHooks,
+	active: Option<ActiveConnections>,
+) -> eyre::Result<TuicInbound> {
 	let cfg = &ctx.cfg;
 	let quinn = &cfg.backend.quinn;
 
@@ -345,6 +353,8 @@ async fn create_quinn_inbound(ctx: &Arc<TuicAppContext>) -> eyre::Result<TuicInb
 	});
 
 	let opts = TuicInboundOpts {
+		hooks,
+		active,
 		listen_addr: cfg.server,
 		certificate: certs,
 		private_key: key,
