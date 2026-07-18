@@ -3,7 +3,7 @@ name: CI
 on:
   push:
     tags: ["v*"]
-    branches: ["main"]
+    branches: ["main", "next"]
   pull_request:
     branches: ["main"]
   workflow_dispatch:
