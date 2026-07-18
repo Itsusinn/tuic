@@ -1,7 +1,7 @@
 //! Wind framework [`Plugin`] for the TUIC client.
 //!
 //! Creates a TUIC outbound connection, SOCKS5 inbound (via wind-socks),
-//! and wires them together through App/Plugin builder.
+//! tunnel inbounds, and wires them together through App/Plugin builder.
 
 use std::sync::Arc;
 
@@ -13,8 +13,8 @@ use wind_core::{
 use wind_socks::inbound::{AuthMode, SocksInbound, SocksInboundOpt};
 
 use crate::{
-	forward,
 	shared::SharedOutbound,
+	tunnel::{TunnelTcpInbound, TunnelUdpInbound},
 	wind_adapter::TuicOutboundAdapter,
 };
 
@@ -109,14 +109,26 @@ impl Plugin for TuicClientPlugin {
 			SocksInbound::new(opts, ctx.token.clone())
 		});
 
-		// ── TCP/UDP forwarders ────────────────────────────────────────────
-		let tcp_fwd = self.cfg.local.tcp_forward.clone();
-		let udp_fwd = self.cfg.local.udp_forward.clone();
-		let fwd_token = app.context().token.child_token();
-		let fwd_shared = shared.clone();
-		ctx.tasks.spawn(async move {
-			forward::start_shared(tcp_fwd, udp_fwd, fwd_shared, fwd_token).await;
-		});
+		// ── TCP tunnel inbounds ───────────────────────────────────────────
+		let mut app = app;
+		for entry in local.tcp_forward {
+			let listen = entry.listen;
+			let remote = entry.remote;
+			app = app.add_inbound_with(move |_: InboundHooks, ctx: Arc<AppContext>| {
+				TunnelTcpInbound::new(listen, remote, ctx.token.clone())
+			});
+		}
+
+		// ── UDP tunnel inbounds ───────────────────────────────────────────
+		for entry in local.udp_forward {
+			let listen = entry.listen;
+			let remote = entry.remote;
+			let timeout = entry.timeout;
+			app = app.add_inbound_with(move |_: InboundHooks, ctx: Arc<AppContext>| {
+				TunnelUdpInbound::new(listen, remote, timeout, ctx.token.clone())
+					.expect("bind tunnel UDP socket")
+			});
+		}
 
 		app
 	}

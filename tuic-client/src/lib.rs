@@ -7,7 +7,7 @@ use wind_core::App;
 
 pub mod config;
 pub mod error;
-pub mod forward;
+pub mod tunnel;
 pub mod plugin;
 pub mod shared;
 pub mod utils;
