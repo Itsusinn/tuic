@@ -1,5 +1,0 @@
-[users]
-"not-a-valid-uuid" = "password"
-
-[tls]
-self_sign = true
