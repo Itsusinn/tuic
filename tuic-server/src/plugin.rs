@@ -132,7 +132,7 @@ impl Plugin for TuicServerPlugin {
 						gso: quinn.gso,
 						congestion_control: quinn.congestion_control.controller,
 						initial_window: quinn.congestion_control.initial_window,
-						masquerade: masquerade_enabled.then(|| wind_tuic::server::MasqueradeConfig {
+						masquerade: masquerade_enabled.then_some(wind_tuic::server::MasqueradeConfig {
 							upstream: masquerade_upstream,
 						}),
 						..Default::default()

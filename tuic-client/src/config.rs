@@ -10,6 +10,7 @@ use std::{
 
 use clap::Parser;
 use educe::Educe;
+use eyre::bail;
 use figment::{
 	Figment,
 	providers::{Format, Serialized, Toml, Yaml},
@@ -249,7 +250,7 @@ impl Config {
 		let path = cli.config.ok_or(ConfigError::NoConfig)?;
 
 		if !path.exists() {
-			return Err(ConfigError::ConfigNotFound(path))?;
+			bail!(ConfigError::ConfigNotFound(path));
 		}
 
 		let figmet = Figment::from(Serialized::defaults(Config::default()));
@@ -294,9 +295,7 @@ impl Config {
 					ConfigFormat::Json => figmet.merge(Json5::string(&content)),
 					ConfigFormat::Toml => figmet.merge(Toml::string(&content)),
 					ConfigFormat::Yaml => figmet.merge(Yaml::string(&content)),
-					ConfigFormat::Unknown => {
-						return Err(ConfigError::UnknownFormat)?;
-					}
+					ConfigFormat::Unknown => Err(ConfigError::UnknownFormat)?,
 				}
 			}
 		};
