@@ -287,7 +287,7 @@ pub struct Config {
 }
 
 /// QUIC backend selection plus per-backend transport tuning.
-#[derive(Deserialize, Serialize, Educe)]
+#[derive(Deserialize, Serialize, Educe, Clone)]
 #[educe(Default)]
 #[serde(default, deny_unknown_fields)]
 pub struct BackendConfig {
@@ -350,7 +350,7 @@ pub struct MasqueradeConfig {
 }
 
 /// Transport tuning for the quinn backend (`wind-tuic`).
-#[derive(Deserialize, Serialize, Educe)]
+#[derive(Deserialize, Serialize, Educe, Clone)]
 #[educe(Default)]
 #[serde(default, deny_unknown_fields)]
 pub struct QuinnConfig {
@@ -380,7 +380,7 @@ pub struct QuinnConfig {
 }
 
 /// Transport tuning for the tokio-quiche backend (`wind-tuiche`).
-#[derive(Deserialize, Serialize, Educe)]
+#[derive(Deserialize, Serialize, Educe, Clone)]
 #[educe(Default)]
 #[serde(default, deny_unknown_fields)]
 pub struct QuicheConfig {
@@ -473,6 +473,7 @@ pub struct OutboundRule {
 }
 
 #[derive(Deserialize, Serialize, Educe)]
+#[derive(Clone)]
 #[educe(Default)]
 #[serde(default, deny_unknown_fields)]
 pub struct CongestionControlConfig {
