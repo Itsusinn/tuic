@@ -5038,6 +5038,7 @@ name = "tuic-client"
 version = "1.8.11"
 dependencies = [
  "anyhow",
+ "async-trait",
  "aws-lc-rs",
  "bytes",
  "chrono",
@@ -5071,6 +5072,7 @@ dependencies = [
  "tracing-subscriber",
  "uuid",
  "wind-core",
+ "wind-socks",
  "wind-tuic",
 ]
 

@@ -1,19 +1,17 @@
-//! Wind framework adapter for tuic-client
+//! Wind-tuic outbound wrapper for tuic-client.
 //!
-//! This module provides integration between the original tuic-client logic
-//! and the wind-tuic implementation.
+//! [`TuicOutboundAdapter`] wraps a [`TuicOutbound`] and implements
+//! [`wind_core::AbstractOutbound`] so it can be used as a dispatcher handler
+//! (via [`OutboundAsAction`]) or directly by forwarders.
 
 use std::{net::SocketAddr, sync::Arc};
 
-use once_cell::sync::OnceCell;
 use wind_core::{AbstractOutbound, AppContext, tcp::AbstractTcpStream, types::TargetAddr, udp::UdpStream};
 use wind_tuic::quinn::outbound::{ReconnectConfig, TuicOutbound, TuicOutboundOpts};
 
 use crate::config::Relay;
 
-static WIND_CONNECTION: OnceCell<TuicOutboundAdapter> = OnceCell::new();
-
-/// Wind-tuic outbound wrapper for tuic-client
+/// Wind-tuic outbound wrapper.
 pub struct TuicOutboundAdapter {
 	pub outbound: TuicOutbound,
 }
@@ -32,25 +30,9 @@ impl TuicOutboundAdapter {
 
 		let password: Arc<[u8]> = relay.password.clone();
 
-		// Pick the SNI to send during TLS handshake.
-		//
-		// Defaulting to `relay.server.0` is sensible when the server field is
-		// a hostname, but if it's an IP literal we end up announcing the IP
-		// in the SNI extension — most rustls/webpki verifiers reject that as
-		// a non-hostname SNI, and even when they don't, the SNI value carries
-		// no integrity benefit. Warn loudly so operators notice the
-		// wrong configuration; require an explicit `sni` for IP-literal
-		// servers and use a placeholder otherwise so the connection still
-		// attempts to handshake (and rustls will surface the bad-SNI error
-		// in its own message).
 		let sni = match relay.sni.clone() {
 			Some(s) => s,
 			None => {
-				// Strip any surrounding brackets so a bracketed IPv6 literal
-				// (`[::1]`) is recognized as an IP literal too -- otherwise the
-				// bracketed form fails `IpAddr::parse` and gets announced
-				// verbatim as the SNI, which rustls rejects ("invalid server
-				// name").
 				let host = relay.server.0.trim_start_matches('[').trim_end_matches(']');
 				if host.parse::<std::net::IpAddr>().is_ok() {
 					tracing::warn!(
@@ -58,9 +40,6 @@ impl TuicOutboundAdapter {
 						 Set `sni = \"<hostname>\"` in the relay config to fix.",
 						relay.server.0,
 					);
-					// rustls accepts "invalid" only if the verifier accepts it
-					// — for the skip-verify path this is harmless; for the
-					// real path the connection will fail with a clear error.
 					"invalid.sni.placeholder".to_string()
 				} else {
 					relay.server.0.clone()
@@ -104,38 +83,18 @@ impl AbstractOutbound for TuicOutboundAdapter {
 		&self,
 		target_addr: TargetAddr,
 		stream: impl AbstractTcpStream,
-		_dialer: Option<impl AbstractOutbound>,
+		_via: Option<impl AbstractOutbound + Sized + Send>,
 	) -> eyre::Result<()> {
 		self.outbound
-			.handle_tcp(target_addr, stream, None::<TuicOutboundAdapter>)
+			.handle_tcp(target_addr, stream, Option::<Self>::None)
 			.await
 	}
 
-	async fn handle_udp(&self, udp_stream: UdpStream, _dialer: Option<impl AbstractOutbound>) -> eyre::Result<()> {
-		self.outbound.handle_udp(udp_stream, None::<TuicOutboundAdapter>).await
+	async fn handle_udp(
+		&self,
+		udp_stream: UdpStream,
+		_via: Option<impl AbstractOutbound + Sized + Send>,
+	) -> eyre::Result<()> {
+		self.outbound.handle_udp(udp_stream, Option::<Self>::None).await
 	}
-}
-
-impl TuicOutboundAdapter {
-	/// Get the global wind-tuic connection
-	pub fn get() -> Option<&'static Self> {
-		WIND_CONNECTION.get()
-	}
-
-	/// Initialize the global wind-tuic connection
-	pub fn set_global(adapter: Self) -> Result<(), Box<Self>> {
-		WIND_CONNECTION.set(adapter).map_err(Box::new)
-	}
-}
-
-/// Create a new TUIC connection using wind-tuic and set it as global
-pub async fn create_connection(ctx: Arc<AppContext>, relay: Relay) -> eyre::Result<()> {
-	let adapter = TuicOutboundAdapter::new(ctx, relay).await?;
-	TuicOutboundAdapter::set_global(adapter).map_err(|_| eyre::eyre!("Failed to set global wind-tuic connection"))?;
-	Ok(())
-}
-
-/// Get the global wind-tuic connection
-pub fn get_connection() -> Option<&'static TuicOutboundAdapter> {
-	TuicOutboundAdapter::get()
 }

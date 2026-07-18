@@ -1,20 +1,12 @@
 //! Graceful-shutdown test for the tuic-client TCP/UDP forwarders.
 //!
-//! `forward::start` spawns each forwarder into `ctx.tasks`, driven by a child
-//! of `ctx.token`. Cancelling the token must break every accept/recv loop so
-//! the tracker drains — this is the forwarder half of the client's
-//! `run_with_cancel` shutdown path.
+//! Each forwarder runs until its `cancel` token fires, then the accept/recv
+//! loop exits and the spawned tasks drain.
 
-use std::{net::SocketAddr, sync::Arc, time::Duration};
+use std::{net::SocketAddr, time::Duration};
 
-use tuic_client::{
-	config::{TcpForward, UdpForward},
-	forward,
-};
-use wind_core::AppContext;
+use tuic_client::{config::{TcpForward, UdpForward}, forward, shared::SharedOutbound};
 
-/// Reserve a free loopback TCP port (the listener is dropped immediately so the
-/// forwarder can bind it).
 fn free_tcp_addr() -> SocketAddr {
 	let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
 	let a = l.local_addr().unwrap();
@@ -22,7 +14,6 @@ fn free_tcp_addr() -> SocketAddr {
 	a
 }
 
-/// Reserve a free loopback UDP port.
 fn free_udp_addr() -> SocketAddr {
 	let s = std::net::UdpSocket::bind("127.0.0.1:0").unwrap();
 	let a = s.local_addr().unwrap();
@@ -32,11 +23,11 @@ fn free_udp_addr() -> SocketAddr {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn forwarders_drain_on_cancel() {
-	let ctx = Arc::new(AppContext::default());
+	let cancel = tokio_util::sync::CancellationToken::new();
+	let outbound = SharedOutbound::new();
 
 	let tcp = vec![TcpForward {
 		listen: free_tcp_addr(),
-		// Discard port (9) — never actually dialed; the loops are idle.
 		remote: ("127.0.0.1".to_string(), 9),
 	}];
 	let udp = vec![UdpForward {
@@ -45,15 +36,14 @@ async fn forwarders_drain_on_cancel() {
 		timeout: Duration::from_secs(60),
 	}];
 
-	forward::start(tcp, udp, &ctx).await;
+	let join = tokio::spawn(forward::start_shared(tcp, udp, outbound, cancel.clone()));
 
-	// Let both forwarder loops bind and reach their `select!`.
 	tokio::time::sleep(Duration::from_millis(200)).await;
 
-	// Graceful shutdown: cancel the context token, then drain the tracker.
-	ctx.token.cancel();
-	ctx.tasks.close();
-	tokio::time::timeout(Duration::from_secs(5), ctx.tasks.wait())
+	cancel.cancel();
+
+	tokio::time::timeout(Duration::from_secs(5), join)
 		.await
-		.expect("forwarder tasks did not drain within 5s of cancellation");
+		.expect("forwarder tasks did not drain within 5s of cancellation")
+		.expect("join error");
 }

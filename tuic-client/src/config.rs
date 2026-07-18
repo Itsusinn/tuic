@@ -77,6 +77,7 @@ pub struct Config {
 #[derive(Debug, Deserialize, serde::Serialize, Educe)]
 #[educe(Default)]
 #[serde(deny_unknown_fields, default)]
+#[derive(Clone)]
 pub struct Relay {
 	#[serde(deserialize_with = "deserialize_server")]
 	pub server: (String, u16),
@@ -195,6 +196,7 @@ pub struct ProxyConfig {
 #[derive(Debug, Deserialize, serde::Serialize, Educe)]
 #[educe(Default)]
 #[serde(deny_unknown_fields, default)]
+#[derive(Clone)]
 pub struct Local {
 	#[educe(Default(expression = "127.0.0.1:1080".parse().unwrap()))]
 	pub server: SocketAddr,

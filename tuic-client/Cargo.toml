@@ -21,7 +21,10 @@ jemallocator = ["tikv-jemallocator"]
 
 # Wind framework
 wind-core = { path = "../forks/wind/crates/wind-core" }
+wind-socks = { path = "../forks/wind/crates/wind-socks" }
 wind-tuic = { path = "../forks/wind/crates/wind-tuic", features = ["client", "quinn"] }
+
+async-trait = "0.1"
 
 bytes = { version = "1", default-features = false, features = ["std"] }
 

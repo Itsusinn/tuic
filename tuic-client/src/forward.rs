@@ -13,7 +13,7 @@ use tokio::net::{TcpListener, UdpSocket};
 use tokio_util::sync::CancellationToken;
 use tracing::{Instrument, debug, info, warn};
 use wind_core::{
-	AbstractOutbound, AppContext,
+	AbstractOutbound,
 	types::TargetAddr,
 	udp::{UdpPacket, UdpStream},
 };
@@ -21,35 +21,34 @@ use wind_core::{
 use crate::{
 	config::{TcpForward, UdpForward},
 	error::Error,
-	wind_adapter,
+	shared::SharedOutbound,
 };
 
 static NEXT_ASSOC_ID: AtomicU16 = AtomicU16::new(0);
 
 fn next_assoc_id() -> u16 {
-	// Use high bit set to avoid collision with SOCKS5-generated assoc IDs
 	0x8000 | (NEXT_ASSOC_ID.fetch_add(1, Ordering::Relaxed) & 0x7fff)
 }
 
-// NOTE: a global `UDP_SESSIONS: HashMap<assoc_id, ForwardUdpSession>` once
-// existed here; it was being written (insert / remove) by this file but
-// never read by anyone — pure dead code that just took locks on the UDP
-// hot path. The local `sessions: HashMap<SocketAddr, UdpForwardSession>`
-// in `run_udp_forwarder` is the only routing table in use.
-
-/// Spawn the configured TCP/UDP forwarders into `ctx.tasks`, each driven by a
-/// child of `ctx.token` so shutdown stops the accept/recv loops and aborts
-/// in-flight per-connection tasks.
-pub async fn start(tcp: Vec<TcpForward>, udp: Vec<UdpForward>, ctx: &Arc<AppContext>) {
+/// Spawn the configured TCP/UDP forwarders with a shared outbound handle.
+///
+/// Each forwarder listens until `cancel` is fired; the shared outbound is
+/// used for relaying traffic through the TUIC tunnel.
+pub async fn start_shared(
+	tcp: Vec<TcpForward>,
+	udp: Vec<UdpForward>,
+	outbound: Arc<SharedOutbound>,
+	cancel: CancellationToken,
+) {
 	for entry in tcp {
-		ctx.tasks.spawn(run_tcp_forwarder(entry, ctx.token.child_token()));
+		tokio::spawn(run_tcp_forwarder(entry, cancel.child_token(), outbound.clone()));
 	}
 	for entry in udp {
-		ctx.tasks.spawn(run_udp_forwarder(entry, ctx.token.child_token()));
+		tokio::spawn(run_udp_forwarder(entry, cancel.child_token(), outbound.clone()));
 	}
 }
 
-async fn run_tcp_forwarder(entry: TcpForward, cancel: CancellationToken) {
+async fn run_tcp_forwarder(entry: TcpForward, cancel: CancellationToken, outbound: Arc<SharedOutbound>) {
 	let listener = match create_tcp_listener(entry.listen) {
 		Ok(l) => l,
 		Err(err) => {
@@ -57,7 +56,6 @@ async fn run_tcp_forwarder(entry: TcpForward, cancel: CancellationToken) {
 			return;
 		}
 	};
-	// Normal startup info — `warn!` here was startling on every launch.
 	info!(
 		"[forward-tcp] listening on {listen} -> {remote:?}",
 		listen = listener.local_addr().unwrap(),
@@ -74,11 +72,12 @@ async fn run_tcp_forwarder(entry: TcpForward, cancel: CancellationToken) {
 					let remote = entry.remote.clone();
 					let span = tracing::info_span!("forward_tcp", peer = %peer);
 					let conn_cancel = cancel.child_token();
+					let ob = outbound.clone();
 					tokio::spawn(
 						async move {
 							tokio::select! {
 								_ = conn_cancel.cancelled() => {}
-								_ = handle_tcp_conn(inbound, remote) => {}
+								_ = handle_tcp_conn(inbound, remote, ob) => {}
 							}
 						}
 						.instrument(span),
@@ -90,14 +89,13 @@ async fn run_tcp_forwarder(entry: TcpForward, cancel: CancellationToken) {
 	}
 }
 
-async fn handle_tcp_conn(inbound: tokio::net::TcpStream, remote: (String, u16)) {
+async fn handle_tcp_conn(inbound: tokio::net::TcpStream, remote: (String, u16), outbound: Arc<SharedOutbound>) {
 	info!("connected");
 	let result: Result<(), Error> = async {
-		let adapter =
-			wind_adapter::get_connection().ok_or_else(|| Error::Other(anyhow::anyhow!("wind adapter not initialized")))?;
+		let adapter = outbound.get().await.map_err(|e| Error::Other(anyhow::anyhow!("{e}")))?;
 		let target = TargetAddr::Domain(remote.0, remote.1);
 		adapter
-			.handle_tcp(target, inbound, None::<wind_adapter::TuicOutboundAdapter>)
+			.handle_tcp(target, inbound, Option::<crate::wind_adapter::TuicOutboundAdapter>::None)
 			.await
 			.map_err(|e| Error::Other(anyhow::anyhow!("{e}")))?;
 		Ok(())
@@ -131,16 +129,14 @@ fn create_tcp_listener(addr: SocketAddr) -> Result<TcpListener, Error> {
 	TcpListener::from_std(StdTcpListener::from(socket)).map_err(|err| Error::Socket("failed to create tcp forward socket", err))
 }
 
-/// Per-`src_addr` UDP forwarder session. Holds a sender into a single,
-/// persistent `UdpStream` that's bridged through `wind_adapter::handle_udp`,
-/// plus an `Instant` of last activity used for idle expiry.
+/// Per-`src_addr` UDP forwarder session.
 struct UdpForwardSession {
 	assoc_id: u16,
 	tx_to_out: tokio::sync::mpsc::Sender<UdpPacket>,
 	last_seen: std::time::Instant,
 }
 
-async fn run_udp_forwarder(entry: UdpForward, cancel: CancellationToken) {
+async fn run_udp_forwarder(entry: UdpForward, cancel: CancellationToken, outbound: Arc<SharedOutbound>) {
 	let socket = match UdpSocket::bind(entry.listen).await {
 		Ok(s) => s,
 		Err(err) => {
@@ -149,7 +145,6 @@ async fn run_udp_forwarder(entry: UdpForward, cancel: CancellationToken) {
 		}
 	};
 	let socket = Arc::new(socket);
-	// Normal startup info — `warn!` here was startling on every launch.
 	info!(
 		"[forward-udp] listening on {listen} -> {remote:?} timeout={timeout:?}",
 		listen = entry.listen,
@@ -158,14 +153,6 @@ async fn run_udp_forwarder(entry: UdpForward, cancel: CancellationToken) {
 	);
 
 	let mut buf = vec![0u8; 65535];
-
-	// Per-`src_addr` sessions. Previously every incoming UDP packet spawned a
-	// fresh task that opened a one-shot TUIC `UdpStream`, sent the single
-	// payload and closed — paying the entire stream-setup cost per datagram
-	// and forfeiting NAT 5-tuple state on the remote. Now we keep one
-	// `UdpForwardSession` per source address with a long-lived `UdpStream`
-	// bridge and feed every subsequent packet from that source through the
-	// same channel. Idle sessions are reaped on a coarse-grained interval.
 	let mut sessions: HashMap<SocketAddr, UdpForwardSession> = HashMap::new();
 	let mut gc_interval = tokio::time::interval(entry.timeout / 4);
 	gc_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
@@ -174,8 +161,6 @@ async fn run_udp_forwarder(entry: UdpForward, cancel: CancellationToken) {
 		tokio::select! {
 			_ = cancel.cancelled() => {
 				info!("[forward-udp] cancellation received, shutting down");
-				// Dropping `sessions` drops every `tx_to_out`, which closes the
-				// per-session relay tasks' inbound channels so they exit cleanly.
 				break;
 			}
 			recv = socket.recv_from(&mut buf) => match recv {
@@ -190,8 +175,7 @@ async fn run_udp_forwarder(entry: UdpForward, cancel: CancellationToken) {
 						let (tx_to_local, mut rx_from_out) = tokio::sync::mpsc::channel::<UdpPacket>(64);
 						let udp_stream = UdpStream { tx: tx_to_local, rx: rx_from_local };
 
-						// Reply bridge: take packets coming back from the outbound
-						// and write them to the original src_addr.
+						// Reply bridge
 						tokio::spawn(async move {
 							while let Some(reply_pkt) = rx_from_out.recv().await {
 								if let Err(err) = socket_for_reply.send_to(&reply_pkt.payload, src_addr).await {
@@ -200,14 +184,17 @@ async fn run_udp_forwarder(entry: UdpForward, cancel: CancellationToken) {
 							}
 						}.instrument(tracing::info_span!("forward_udp_reply", peer = %src_addr, assoc_id)));
 
-						// One persistent `handle_udp` per session.
+						let ob = outbound.clone();
 						tokio::spawn(async move {
-							let Some(adapter) = wind_adapter::get_connection() else {
-								warn!("[forward-udp] wind adapter not initialized");
-								return;
+							let adapter = match ob.get().await {
+								Ok(a) => a,
+								Err(e) => {
+									warn!("[forward-udp] [{assoc_id:#06x}] outbound error: {e}");
+									return;
+								}
 							};
 							if let Err(err) = adapter
-								.handle_udp(udp_stream, None::<wind_adapter::TuicOutboundAdapter>)
+								.handle_udp(udp_stream, Option::<crate::wind_adapter::TuicOutboundAdapter>::None)
 								.await
 							{
 								warn!("[forward-udp] [{assoc_id:#06x}] relay error: {err}");
@@ -224,9 +211,6 @@ async fn run_udp_forwarder(entry: UdpForward, cancel: CancellationToken) {
 					session.last_seen = std::time::Instant::now();
 					let assoc_id = session.assoc_id;
 
-					// Forward the packet through the existing session. A
-					// `try_send` failure means the outbound side is saturated;
-					// drop with a debug log rather than blocking the recv loop.
 					match session.tx_to_out.try_send(UdpPacket {
 						source: None,
 						target,
@@ -245,9 +229,6 @@ async fn run_udp_forwarder(entry: UdpForward, cancel: CancellationToken) {
 				Err(err) => warn!("[forward-udp] recv_from error: {err}"),
 			},
 			_ = gc_interval.tick() => {
-				// Reap idle sessions. Dropping the entry drops `tx_to_out`,
-				// which closes `rx_from_local` and lets the spawned relay
-				// task exit cleanly.
 				let now = std::time::Instant::now();
 				sessions.retain(|src_addr, s| {
 					if now.duration_since(s.last_seen) >= entry.timeout {
