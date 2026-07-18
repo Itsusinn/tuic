@@ -5071,6 +5071,7 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "uuid",
+ "wind-base",
  "wind-core",
  "wind-socks",
  "wind-tuic",
@@ -5567,6 +5568,7 @@ dependencies = [
  "eyre",
  "socket2 0.6.4",
  "tokio",
+ "tokio-util",
  "tracing",
  "wind-core",
 ]
