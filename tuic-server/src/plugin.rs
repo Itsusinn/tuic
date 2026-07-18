@@ -6,12 +6,8 @@
 
 use std::sync::Arc;
 
-use wind_core::{
-	ActiveConnections, App, AppContext, InboundHooks, Plugin, StaticTuicAuth, StatsCollector,
-	utils::StackPrefer,
-};
+use wind_core::{ActiveConnections, App, AppContext, InboundHooks, Plugin, StaticTuicAuth, StatsCollector, utils::StackPrefer};
 use wind_tuic::quinn::inbound::{TuicInbound, TuicInboundOpts};
-
 
 use crate::{
 	Config,
@@ -56,7 +52,10 @@ impl Plugin for TuicServerPlugin {
 
 		// ── Outbound handlers ────────────────────────────────────────────────
 		let stream_timeout = cfg.stream_timeout;
-		let app = app.add_outbound("default", wind_adapter::make_outbound_action(&cfg.outbound.default, resolver.clone(), stream_timeout));
+		let app = app.add_outbound(
+			"default",
+			wind_adapter::make_outbound_action(&cfg.outbound.default, resolver.clone(), stream_timeout),
+		);
 		let mut app = app;
 		for (name, rule) in std::mem::take(&mut cfg.outbound.named) {
 			let handler = wind_adapter::make_outbound_action(&rule, resolver.clone(), stream_timeout);
@@ -110,8 +109,7 @@ impl Plugin for TuicServerPlugin {
 					let (certs, key) = if tls_self_sign {
 						generate_self_signed(&hostname).expect("self-signed cert generation")
 					} else {
-						load_cert_from_files(&cert_path, &key_path)
-							.expect("loading TLS cert/key from files")
+						load_cert_from_files(&cert_path, &key_path).expect("loading TLS cert/key from files")
 					};
 					let opts = TuicInboundOpts {
 						hooks,

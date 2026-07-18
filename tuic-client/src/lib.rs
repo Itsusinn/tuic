@@ -7,9 +7,9 @@ use wind_core::App;
 
 pub mod config;
 pub mod error;
-pub mod tunnel;
 pub mod plugin;
 pub mod shared;
+pub mod tunnel;
 pub mod utils;
 pub mod wind_adapter;
 
@@ -21,10 +21,7 @@ pub use plugin::TuicClientPlugin;
 /// Constructs a wind [`App`], registers the [`TuicClientPlugin`], and drives
 /// it until Ctrl-C / SIGTERM.
 pub async fn run(cfg: Config) -> eyre::Result<()> {
-	App::new()
-		.add_plugin(TuicClientPlugin::new(cfg))
-		.run()
-		.await
+	App::new().add_plugin(TuicClientPlugin::new(cfg)).run().await
 }
 
 /// Run the TUIC client with a caller-owned cancel token (for tests).

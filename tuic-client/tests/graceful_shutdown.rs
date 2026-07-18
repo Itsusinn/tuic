@@ -44,11 +44,7 @@ impl InboundCallback for NoopCallback {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn tcp_tunnel_drains_on_cancel() {
 	let cancel = CancellationToken::new();
-	let inbound = TunnelTcpInbound::new(
-		free_tcp_addr(),
-		("127.0.0.1".to_string(), 9),
-		cancel.clone(),
-	);
+	let inbound = TunnelTcpInbound::new(free_tcp_addr(), ("127.0.0.1".to_string(), 9), cancel.clone());
 
 	let join = tokio::spawn(async move { inbound.listen(&NoopCallback).await });
 

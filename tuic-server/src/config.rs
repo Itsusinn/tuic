@@ -472,8 +472,7 @@ pub struct OutboundRule {
 	pub allow_udp: Option<bool>,
 }
 
-#[derive(Deserialize, Serialize, Educe)]
-#[derive(Clone)]
+#[derive(Deserialize, Serialize, Educe, Clone)]
 #[educe(Default)]
 #[serde(default, deny_unknown_fields)]
 pub struct CongestionControlConfig {

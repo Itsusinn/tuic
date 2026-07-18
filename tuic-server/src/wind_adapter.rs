@@ -15,12 +15,7 @@ use wind_base::{
 	direct::{DirectOutbound, DirectOutboundOpts},
 	resolve::resolve_target,
 };
-use wind_core::{
-	OutboundAction, RouteAction, Router,
-	rule::Rule,
-	types::TargetAddr,
-	utils::is_private_ip,
-};
+use wind_core::{OutboundAction, RouteAction, Router, rule::Rule, types::TargetAddr, utils::is_private_ip};
 use wind_geodata::GeoData;
 use wind_socks::action::{Socks5Action, Socks5ActionOpts};
 
@@ -114,10 +109,7 @@ impl TuicRouter {
 			None
 		} else {
 			if !cfg.acl.is_empty() {
-				tracing::info!(
-					"[router] converted {} legacy ACL rule(s) to Metacubex format",
-					cfg.acl.len()
-				);
+				tracing::info!("[router] converted {} legacy ACL rule(s) to Metacubex format", cfg.acl.len());
 			}
 			let mut builder = AclEngine::builder("default").rules(all_rules);
 			if let Some(gd) = geodata {
@@ -176,7 +168,6 @@ pub fn load_cert_from_files(
 	let cert_data = std::fs::read(cert_path)?;
 	let key_data = std::fs::read(key_path)?;
 	let certs = rustls_pemfile::certs(&mut cert_data.as_slice()).collect::<Result<Vec<_>, _>>()?;
-	let key = rustls_pemfile::private_key(&mut key_data.as_slice())?
-		.ok_or_else(|| eyre::eyre!("No private key found"))?;
+	let key = rustls_pemfile::private_key(&mut key_data.as_slice())?.ok_or_else(|| eyre::eyre!("No private key found"))?;
 	Ok((certs, key))
 }

@@ -85,16 +85,10 @@ impl AbstractOutbound for TuicOutboundAdapter {
 		stream: impl AbstractTcpStream,
 		_via: Option<impl AbstractOutbound + Sized + Send>,
 	) -> eyre::Result<()> {
-		self.outbound
-			.handle_tcp(target_addr, stream, Option::<Self>::None)
-			.await
+		self.outbound.handle_tcp(target_addr, stream, Option::<Self>::None).await
 	}
 
-	async fn handle_udp(
-		&self,
-		udp_stream: UdpStream,
-		_via: Option<impl AbstractOutbound + Sized + Send>,
-	) -> eyre::Result<()> {
+	async fn handle_udp(&self, udp_stream: UdpStream, _via: Option<impl AbstractOutbound + Sized + Send>) -> eyre::Result<()> {
 		self.outbound.handle_udp(udp_stream, Option::<Self>::None).await
 	}
 }

@@ -14,11 +14,7 @@
 //! | GET | `/traffic` | Per-user cumulative traffic (upload/download) |
 //! | GET | `/reset_traffic` | Reset & return per-user traffic deltas |
 
-use std::{
-	collections::HashMap,
-	net::SocketAddr,
-	sync::Arc,
-};
+use std::{collections::HashMap, net::SocketAddr, sync::Arc};
 
 use async_trait::async_trait;
 use axum::{
@@ -34,9 +30,8 @@ use tracing::warn;
 use uuid::Uuid;
 use wind_core::{
 	ActiveConnections, StatsCollector, UserId,
-	hooks::{ConnectDecision, ConnInfo, ConnectionHooks},
+	hooks::{ConnInfo, ConnectDecision, ConnectionHooks},
 };
-
 
 
 /// Per-connection metadata stored by [`ConnectionTracker`].
@@ -59,9 +54,7 @@ pub struct ConnectionTracker {
 
 impl ConnectionTracker {
 	pub fn new() -> Self {
-		Self {
-			inner: DashMap::new(),
-		}
+		Self { inner: DashMap::new() }
 	}
 
 	/// Number of live connections for a given user.
@@ -84,10 +77,7 @@ impl ConnectionTracker {
 	/// Build a map of UUID → Vec<SocketAddr> of live connections.
 	pub fn detailed_online(&self, uuid_lookup: &HashMap<Uuid, String>) -> HashMap<Uuid, Vec<SocketAddr>> {
 		let mut result: HashMap<Uuid, Vec<SocketAddr>> = HashMap::new();
-		let uuid_set: HashMap<&[u8], Uuid> = uuid_lookup
-			.keys()
-			.map(|u| (u.as_bytes().as_slice(), *u))
-			.collect();
+		let uuid_set: HashMap<&[u8], Uuid> = uuid_lookup.keys().map(|u| (u.as_bytes().as_slice(), *u)).collect();
 
 		for entry in self.inner.iter() {
 			if let Some(uuid) = uuid_set.get(entry.value().user.as_bytes()) {
@@ -155,9 +145,11 @@ impl KickConnections for ActiveConnections {
 	fn kick_user(&self, user: &UserId) -> usize {
 		self.kick_user(user)
 	}
+
 	fn count_for(&self, user: &UserId) -> usize {
 		self.count_for(user)
 	}
+
 	fn len(&self) -> usize {
 		self.len()
 	}
@@ -168,9 +160,17 @@ impl KickConnections for ActiveConnections {
 pub struct NoopConnections;
 #[async_trait]
 impl KickConnections for NoopConnections {
-	fn kick_user(&self, _user: &UserId) -> usize { 0 }
-	fn count_for(&self, _user: &UserId) -> usize { 0 }
-	fn len(&self) -> usize { 0 }
+	fn kick_user(&self, _user: &UserId) -> usize {
+		0
+	}
+
+	fn count_for(&self, _user: &UserId) -> usize {
+		0
+	}
+
+	fn len(&self) -> usize {
+		0
+	}
 }
 
 #[async_trait]
@@ -178,9 +178,11 @@ impl KickConnections for ConnectionTracker {
 	fn kick_user(&self, user: &UserId) -> usize {
 		self.kick_user(user)
 	}
+
 	fn count_for(&self, user: &UserId) -> usize {
 		self.count_for(user)
 	}
+
 	fn len(&self) -> usize {
 		self.len()
 	}
@@ -226,10 +228,7 @@ async fn kick_handler(
 }
 
 /// GET /online — per-user online connection count.
-async fn online_handler(
-	State(state): State<Arc<RestfulState>>,
-	headers: HeaderMap,
-) -> (StatusCode, Json<Value>) {
+async fn online_handler(State(state): State<Arc<RestfulState>>, headers: HeaderMap) -> (StatusCode, Json<Value>) {
 	if !is_authorized(&headers, &state.secret) {
 		return unauthorized();
 	}
@@ -244,10 +243,7 @@ async fn online_handler(
 }
 
 /// GET /detailed_online — per-user online connections with remote addresses.
-async fn detailed_online_handler(
-	State(state): State<Arc<RestfulState>>,
-	headers: HeaderMap,
-) -> (StatusCode, Json<Value>) {
+async fn detailed_online_handler(State(state): State<Arc<RestfulState>>, headers: HeaderMap) -> (StatusCode, Json<Value>) {
 	if !is_authorized(&headers, &state.secret) {
 		return unauthorized();
 	}
@@ -271,10 +267,7 @@ async fn detailed_online_handler(
 }
 
 /// GET /traffic — per-user cumulative traffic (upload/download bytes).
-async fn traffic_handler(
-	State(state): State<Arc<RestfulState>>,
-	headers: HeaderMap,
-) -> (StatusCode, Json<Value>) {
+async fn traffic_handler(State(state): State<Arc<RestfulState>>, headers: HeaderMap) -> (StatusCode, Json<Value>) {
 	if !is_authorized(&headers, &state.secret) {
 		return unauthorized();
 	}
@@ -311,10 +304,7 @@ async fn traffic_handler(
 }
 
 /// GET /reset_traffic — reset & return per-user traffic deltas.
-async fn reset_traffic_handler(
-	State(state): State<Arc<RestfulState>>,
-	headers: HeaderMap,
-) -> (StatusCode, Json<Value>) {
+async fn reset_traffic_handler(State(state): State<Arc<RestfulState>>, headers: HeaderMap) -> (StatusCode, Json<Value>) {
 	if !is_authorized(&headers, &state.secret) {
 		return unauthorized();
 	}

@@ -5,11 +5,7 @@
 
 use std::sync::Arc;
 
-use wind_core::{
-	AbstractOutbound, App, AppContext, InboundHooks, OutboundAction, Plugin,
-	types::TargetAddr,
-	udp::UdpStream,
-};
+use wind_core::{AbstractOutbound, App, AppContext, InboundHooks, OutboundAction, Plugin, types::TargetAddr, udp::UdpStream};
 use wind_socks::inbound::{AuthMode, SocksInbound, SocksInboundOpt};
 
 use crate::{
@@ -34,18 +30,16 @@ struct LazyHandler {
 
 #[async_trait::async_trait]
 impl OutboundAction for LazyHandler {
-	async fn handle_tcp(
-		&self,
-		target: TargetAddr,
-		stream: Box<dyn wind_core::tcp::AbstractTcpStream>,
-	) -> eyre::Result<()> {
+	async fn handle_tcp(&self, target: TargetAddr, stream: Box<dyn wind_core::tcp::AbstractTcpStream>) -> eyre::Result<()> {
 		let out = self.shared.get().await?;
-		out.handle_tcp(target, stream, Option::<crate::wind_adapter::TuicOutboundAdapter>::None).await
+		out.handle_tcp(target, stream, Option::<crate::wind_adapter::TuicOutboundAdapter>::None)
+			.await
 	}
 
 	async fn handle_udp(&self, stream: UdpStream) -> eyre::Result<()> {
 		let out = self.shared.get().await?;
-		out.handle_udp(stream, Option::<crate::wind_adapter::TuicOutboundAdapter>::None).await
+		out.handle_udp(stream, Option::<crate::wind_adapter::TuicOutboundAdapter>::None)
+			.await
 	}
 }
 
@@ -125,8 +119,7 @@ impl Plugin for TuicClientPlugin {
 			let remote = entry.remote;
 			let timeout = entry.timeout;
 			app = app.add_inbound_with(move |_: InboundHooks, ctx: Arc<AppContext>| {
-				TunnelUdpInbound::new(listen, remote, timeout, ctx.token.clone())
-					.expect("bind tunnel UDP socket")
+				TunnelUdpInbound::new(listen, remote, timeout, ctx.token.clone()).expect("bind tunnel UDP socket")
 			});
 		}
 
