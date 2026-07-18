@@ -10,19 +10,24 @@ publish = false
 
 [features]
 default = ["aws-lc-rs"]
-ring = ["tuic-core/ring", "rustls/ring", "tuic-client/ring", "tuic-server/ring"]
-aws-lc-rs = ["tuic-core/aws-lc-rs", "dep:aws-lc-rs", "rustls/aws-lc-rs", "tuic-client/aws-lc-rs", "tuic-server/aws-lc-rs"]
-deplog = ["tracing-test/no-env-filter"]
+ring = ["wind-tuic/ring", "rustls/ring", "tuic-client/ring", "tuic-server/ring"]
+aws-lc-rs = ["wind-tuic/aws-lc-rs", "dep:aws-lc-rs", "rustls/aws-lc-rs", "tuic-client/aws-lc-rs", "tuic-server/aws-lc-rs"]
+
+# End-to-end HTTP/3 masquerade test (tests/masquerade.rs). Opt-in because it
+# pulls reqwest's experimental HTTP/3 client (a second quinn/h3 stack). The
+# `--cfg reqwest_unstable` flag it needs is set by the workspace `.cargo/config.toml`,
+# so just run:
+#   cargo test -p tuic-tests --features h3-masquerade-test
+h3-masquerade-test = ["wind-tuic/masquerade", "dep:reqwest", "dep:http"]
 
 [dependencies]
-# Core dependencies for integration tests
-tuic-core = { path = "../tuic-core", default-features = false, features = ["async_marshal", "marshal", "model"] }
+wind-core = { version = "0.1.1", path = "../forks/wind/crates/wind-core" }
+tuic-core = { path = "../forks/wind/crates/tuic-core" }
 tuic-client = { path = "../tuic-client", default-features = false }
 tuic-server = { path = "../tuic-server", default-features = false }
+wind-tuic = { path = "../forks/wind/crates/wind-tuic", default-features = false, features = ["server", "client", "quinn"] }
 
-# Required dependencies
-uuid = { version = "1", features = ["v4", "serde", "std"] }
-tokio = { version = "1", features = ["full"] }
+bytes = "1"
 json5 = { version = "1.3" }
 lexopt = { version = "0.3" }
 eyre = { version = "0.6" }
@@ -30,6 +35,30 @@ fast-socks5 = { version = "1" }
 rustls = { version = "0.23", default-features = false }
 tracing-test = { version = "0.2" }
 tracing = "0.1"
-tracing-subscriber = "0.3"
 serial_test = "3"
+tokio = { version = "1", features = ["full"] }
 aws-lc-rs = { version = "1", default-features = false, optional = true, features = ["prebuilt-nasm"] }
+uuid = "1"
+tokio-util = { version = "0.7", features = ["codec"] }
+
+# HTTP/3 client for the masquerade e2e test (gated behind `h3-masquerade-test`).
+reqwest = { version = "0.12", default-features = false, features = ["http3", "rustls-tls"], optional = true }
+http = { version = "1", optional = true }
+
+# `reqwest_unstable` is a rustc cfg (set in the workspace `.cargo/config.toml`)
+# that gates reqwest's HTTP/3 client and the masquerade test; declare it so it
+# isn't flagged as an unknown cfg.
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(reqwest_unstable)'] }
+
+# The quiche e2e tests only *run* on 64-bit (cross-emulated 32-bit test execution
+# is unreliable for real sockets). On 64-bit we enable tuic-server's `quiche`
+# feature (so the tests exercise it), add wind-tuic's `quiche` feature (for the
+# cert-reload test's direct `wind_tuic::quiche::TuicheInboundBuilder` use), and
+# pull a raw quinn client + rcgen. On 32-bit none of this is built and the quiche
+# test files compile to nothing. (The quiche backend itself builds on 32-bit too.)
+[target.'cfg(target_pointer_width = "64")'.dependencies]
+tuic-server = { path = "../tuic-server", default-features = false, features = ["quiche"] }
+wind-tuic = { path = "../forks/wind/crates/wind-tuic", default-features = false, features = ["quiche"] }
+quinn = { workspace = true, default-features = false, features = ["runtime-tokio", "rustls-aws-lc-rs"] }
+rcgen = { version = "0.14", default-features = false, features = ["crypto", "pem", "aws_lc_rs"] }

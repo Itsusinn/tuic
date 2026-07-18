@@ -1,5 +1,6 @@
 [workspace]
-members = ["tuic-core", "tuic-server", "tuic-client", "tuic-tests"]
+members = ["tuic-server", "tuic-client", "tuic-tests"]
+exclude = ["forks", "tuic-core.old", "tuic-server.old", "tuic-client.old", "tuic-tests.old"]
 resolver = "2"
 
 [workspace.package]
@@ -8,6 +9,7 @@ version = "1.8.11"
 rust-version = "1.85.0"
 edition = "2024"
 readme = "README.md"
+description = "TUIC proxy protocol implementation"
 license = "GPL-3.0-or-later"
 repository = "https://github.com/Itsusinn/tuic"
 
@@ -15,6 +17,19 @@ repository = "https://github.com/Itsusinn/tuic"
 quinn = { branch = "bbrv3", git = "https://github.com/Tipuch/quinn.git", default-features = false }
 quinn-proto = { branch = "bbrv3", git = "https://github.com/Tipuch/quinn.git", default-features = false }
 quinn-congestions = { git = "https://github.com/proxy-rs/quinn-congestions.git", default-features = false}
+
+# Patch datagram-socket to fix build failure on musl targets with libc >= 0.2.169.
+# libc::msghdr gained private padding fields (__pad1, __pad2) that prevent
+# struct literal construction. Fix from: https://github.com/cloudflare/quiche/pull/2224
+[patch.crates-io]
+datagram-socket = { path = "forks/wind/patches/datagram-socket" }
+
+# Patch tokio-quiche so the QUIC backend builds on 32-bit targets. Upstream's
+# GSO path (src/quic/io/gso.rs) transmutes `u128` -> `std::time::Instant` to get
+# the monotonic-clock epoch for SO_TXTIME, which only compiles where `Instant`
+# is 16 bytes (64-bit). The patch replaces it with a portable
+# `clock_gettime(CLOCK_MONOTONIC)`-correlated conversion.
+tokio-quiche = { path = "forks/wind/patches/tokio-quiche" }
 
 [workspace.lints.clippy]
 unwrap_used = "deny"

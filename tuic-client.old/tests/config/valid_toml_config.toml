@@ -1,0 +1,57 @@
+# TUIC Client Configuration - TOML format
+# This is a test configuration file
+
+log_level = "debug"
+
+[relay]
+server = "test.example.com:9443"
+uuid = "12345678-1234-5678-1234-567812345678"
+password = "secure_password"
+
+# IP and stack preferences
+ipstack_prefer = "v4"
+
+# QUIC and UDP settings
+udp_relay_mode = "quic"
+congestion_control = "cubic"
+zero_rtt_handshake = true
+disable_sni = false
+
+# ALPN protocols
+alpn = ["h3", "h2"]
+
+# Timeouts
+timeout = "10s"
+heartbeat = "5s"
+gc_interval = "5s"
+gc_lifetime = "20s"
+
+# MTU settings
+initial_mtu = 1400
+min_mtu = 1300
+gso = false
+pmtu = true
+
+# Window sizes
+send_window = 20000000
+receive_window = 10000000
+
+[local]
+server = "0.0.0.0:1080"
+max_packet_size = 1400
+dual_stack = true
+
+# TCP forwarding rules
+[[local.tcp_forward]]
+listen = "127.0.0.1:8080"
+remote = "httpbin.org:80"
+
+[[local.tcp_forward]]
+listen = "127.0.0.1:8443"
+remote = "httpbin.org:443"
+
+# UDP forwarding rules
+[[local.udp_forward]]
+listen = "127.0.0.1:5353"
+remote = "1.1.1.1:53"
+timeout = "60s"

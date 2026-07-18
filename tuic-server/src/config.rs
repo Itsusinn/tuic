@@ -13,15 +13,15 @@ use figment::{
 };
 use figment_json5::Json5;
 use rand::{RngExt, distr::Alphanumeric, rng};
-use reqwest::Url;
-use serde::{Deserialize, Deserializer, Serialize};
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use tracing::{level_filters::LevelFilter, warn};
 use uuid::Uuid;
+use wind_core::rule::Rule;
 
 #[cfg(test)]
-use crate::acl::{AclAddress, AclPorts};
+use crate::legacy::{AclAddress, AclPorts};
 use crate::{
-	acl::AclRule,
+	legacy::AclRule,
 	utils::{CongestionController, StackPrefer},
 };
 
@@ -75,38 +75,62 @@ pub struct Cli {
 	pub init: bool,
 }
 
+/// GeoIP / GeoSite database configuration.
+///
+/// Point `geosite` and `geoip` at v2ray-format `.dat` files; on startup they
+/// are compiled into a cache under `data_dir` and used to evaluate `GEOSITE` /
+/// `GEOIP` routing rules. When unset, geo rules never match.
+#[derive(Deserialize, Serialize, Educe, Clone, Debug)]
+#[educe(Default)]
+#[serde(default, deny_unknown_fields)]
+pub struct GeoDataConfig {
+	/// Path to a v2ray `geosite.dat` file (domain category database).
+	pub geosite: Option<PathBuf>,
+	/// Path to a v2ray `geoip.dat` file (IP country database).
+	pub geoip: Option<PathBuf>,
+}
+
+impl GeoDataConfig {
+	/// Whether both database files are configured (both are required to build).
+	pub fn is_enabled(&self) -> bool {
+		self.geosite.is_some() && self.geoip.is_some()
+	}
+}
+
 #[derive(Deserialize, Serialize, Educe)]
 #[educe(Default)]
 #[serde(default, deny_unknown_fields)]
 pub struct Config {
 	pub log_level: LogLevel,
+	#[serde(default)]
+	pub log: LogConfig,
 	#[educe(Default(expression = "[::]:8443".parse().unwrap()))]
 	pub server: SocketAddr,
 	pub users: HashMap<Uuid, String>,
 	pub tls: TlsConfig,
-	#[educe(Default = None)]
-	pub camouflage: Option<CamouflageConfig>,
+
+	/// HTTP/3 masquerade: reverse-proxy non-TUIC (HTTP/3 probe) connections to
+	/// a real upstream site so the server is indistinguishable from a web
+	/// server.
+	#[serde(default)]
+	pub masquerade: MasqueradeConfig,
 
 	#[educe(Default = "")]
 	pub data_dir: PathBuf,
 
-	/// Logging configuration.
+	/// QUIC backend selection plus per-backend tuning.
+	///
+	/// `backend.mode` chooses between the quinn-based (`wind-tuic`) and the
+	/// tokio-quiche-based (`wind-tuiche`) implementations; `backend.quinn` and
+	/// `backend.quiche` hold the transport tuning for each.
 	#[serde(default)]
-	pub log: LogConfig,
-
-	#[educe(Default = None)]
-	pub restful: Option<RestfulConfig>,
-
-	pub quic: QuicConfig,
+	pub backend: BackendConfig,
 
 	#[educe(Default = true)]
 	pub udp_relay_ipv6: bool,
 
 	#[educe(Default = false)]
 	pub zero_rtt_handshake: bool,
-
-	#[educe(Default(expression = TokioRuntime::Auto))]
-	pub tokio_runtime: TokioRuntime,
 
 	#[educe(Default = true)]
 	pub dual_stack: bool,
@@ -137,12 +161,28 @@ pub struct Config {
 	#[serde(default)]
 	pub outbound: OutboundConfig,
 
-	/// Access Control List rules
-	#[serde(default, deserialize_with = "crate::acl::deserialize_acl")]
+	/// Access Control List rules (legacy format)
+	#[serde(default, deserialize_with = "crate::legacy::deserialize_acl")]
 	#[educe(Default(expression = Vec::new()))]
 	pub acl: Vec<AclRule>,
 
+	/// Metacubex-style routing rules (evaluated after ACL rules).
+	///
+	/// Each entry is a string such as `"DOMAIN-SUFFIX,google.com,proxy"`.
+	/// See [`wind_core::rule::Rule`] for the full list of supported types.
+	#[serde(default, deserialize_with = "deserialize_rules", serialize_with = "serialize_rules")]
+	#[educe(Default(expression = Vec::new()))]
+	pub rules: Vec<wind_core::rule::Rule>,
+
 	pub experimental: ExperimentalConfig,
+
+	#[serde(default)]
+	pub dns: wind_dns::DnsConfig,
+
+	/// GeoIP / GeoSite database for `GEOIP` / `GEOSITE` routing rules. Without
+	/// it, those rules never match (and a warning is logged at startup).
+	#[serde(default)]
+	pub geodata: GeoDataConfig,
 
 	/// Old configuration fields
 	#[serde(default, rename = "self_sign")]
@@ -175,10 +215,15 @@ pub struct Config {
 	#[serde(default, rename = "initial_window")]
 	#[deprecated]
 	pub __initial_window: Option<u64>,
-	#[serde(default, rename = "receive_window")]
+	// NOTE: these renames previously had `send_window`/`receive_window` swapped
+	// (each field renamed to the OTHER name's wire form), so a legacy top-level
+	// `send_window` key deserialised into `__receive_window` and was migrated
+	// into `quic.receive_window`. QUIC flow-control parameters were silently
+	// transposed on every load of a deprecated config layout.
+	#[serde(default, rename = "send_window")]
 	#[deprecated]
 	pub __send_window: Option<u64>,
-	#[serde(default, rename = "send_window")]
+	#[serde(default, rename = "receive_window")]
 	#[deprecated]
 	pub __receive_window: Option<u32>,
 	#[serde(default, rename = "initial_mtu")]
@@ -193,9 +238,35 @@ pub struct Config {
 	#[serde(default, rename = "pmtu")]
 	#[deprecated]
 	pub __pmtu: Option<bool>,
-	#[serde(rename = "restful_server")]
+	/// Deprecated top-level `[quic]` section — migrated into `backend.quinn`.
+	#[serde(default, rename = "quic")]
 	#[deprecated]
-	pub __restful_server: Option<SocketAddr>,
+	pub __quic: Option<QuinnConfig>,
+}
+
+/// QUIC backend selection plus per-backend transport tuning.
+#[derive(Deserialize, Serialize, Educe)]
+#[educe(Default)]
+#[serde(default, deny_unknown_fields)]
+pub struct BackendConfig {
+	/// Which QUIC implementation to run.
+	pub mode: BackendMode,
+	/// Tuning for the quinn backend (`wind-tuic`).
+	pub quinn: QuinnConfig,
+	/// Tuning for the tokio-quiche backend (`wind-tuiche`).
+	pub quiche: QuicheConfig,
+}
+
+/// Selects the inbound QUIC implementation.
+#[derive(Deserialize, Serialize, Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum BackendMode {
+	/// quinn-based backend (`wind-tuic`). The default, fully-featured backend.
+	#[default]
+	Quinn,
+	/// tokio-quiche-based backend (`wind-tuiche`). Experimental, and only
+	/// available when tuic-server is built with the `quiche` cargo feature.
+	Quiche,
 }
 
 #[derive(Deserialize, Serialize, Educe)]
@@ -215,12 +286,32 @@ pub struct TlsConfig {
 	pub auto_ssl: bool,
 	#[educe(Default(expression = ""))]
 	pub acme_email: String,
+	#[educe(Default(expression = false))]
+	pub acme_staging: bool,
 }
 
+/// HTTP/3 masquerade configuration.
+///
+/// When `enabled`, a connection that isn't TUIC (its first stream byte isn't
+/// the TUIC version `0x05` — i.e. an active prober speaking real HTTP/3) is
+/// served as a reverse proxy to `upstream`, so the server is indistinguishable
+/// from a normal HTTP/3 website instead of resetting the connection.
 #[derive(Deserialize, Serialize, Educe)]
 #[educe(Default)]
 #[serde(default, deny_unknown_fields)]
-pub struct QuicConfig {
+pub struct MasqueradeConfig {
+	#[educe(Default(expression = false))]
+	pub enabled: bool,
+	/// Upstream site to reverse-proxy to, e.g. `https://example.com`.
+	#[educe(Default(expression = "https://example.com"))]
+	pub upstream: String,
+}
+
+/// Transport tuning for the quinn backend (`wind-tuic`).
+#[derive(Deserialize, Serialize, Educe)]
+#[educe(Default)]
+#[serde(default, deny_unknown_fields)]
+pub struct QuinnConfig {
 	pub congestion_control: CongestionControlConfig,
 
 	#[educe(Default = 1200)]
@@ -244,26 +335,34 @@ pub struct QuicConfig {
 	#[serde(with = "humantime_serde")]
 	#[educe(Default(expression = Duration::from_secs(30)))]
 	pub max_idle_time: Duration,
-
-	#[educe(Default(expression = 1280u32))]
-	pub max_concurrent_streams: u32,
 }
 
-#[derive(Deserialize, Serialize, Educe, Clone, Debug)]
+/// Transport tuning for the tokio-quiche backend (`wind-tuiche`).
+#[derive(Deserialize, Serialize, Educe)]
 #[educe(Default)]
 #[serde(default, deny_unknown_fields)]
-pub struct CamouflageConfig {
-	#[educe(Default = false)]
-	pub enabled: bool,
-	#[educe(Default(expression = "".to_string()))]
-	pub reverse_proxy_url: String,
-	#[educe(Default = None)]
-	pub reverse_proxy_hostname: Option<String>,
+pub struct QuicheConfig {
+	pub congestion_control: CongestionControlConfig,
+
 	#[serde(with = "humantime_serde")]
-	#[educe(Default(expression = Duration::from_secs(10)))]
-	pub request_timeout: Duration,
+	#[educe(Default(expression = Duration::from_secs(30)))]
+	pub max_idle_time: Duration,
+
+	#[educe(Default = 100)]
+	pub max_concurrent_bi_streams: u64,
+
+	#[educe(Default = 100)]
+	pub max_concurrent_uni_streams: u64,
+
+	#[educe(Default = 16777216)]
+	pub send_window: u64,
+
+	#[educe(Default = 8388608)]
+	pub receive_window: u64,
+
+	/// Enable 0-RTT early data (replayable; see the quinn backend's warning).
 	#[educe(Default = false)]
-	pub skip_backend_tls_verify: bool,
+	pub zero_rtt: bool,
 }
 
 /// The `default` rule is mandatory when named rules are present; other named
@@ -297,13 +396,13 @@ pub struct OutboundRule {
 
 	/// Optional IPv4 address to bind to for direct connections (only used when
 	/// kind == "direct").
-	#[serde(default, deserialize_with = "deserialize_single_or_vec")]
-	pub bind_ipv4: Vec<Ipv4Addr>,
+	#[serde(default)]
+	pub bind_ipv4: Option<Ipv4Addr>,
 
 	/// Optional IPv6 address to bind to for direct connections (only used when
 	/// kind == "direct").
-	#[serde(default, deserialize_with = "deserialize_single_or_vec")]
-	pub bind_ipv6: Vec<Ipv6Addr>,
+	#[serde(default)]
+	pub bind_ipv6: Option<Ipv6Addr>,
 
 	/// Optional device/interface name to bind to (only used when kind ==
 	/// "direct").
@@ -342,18 +441,6 @@ pub struct CongestionControlConfig {
 
 #[derive(Deserialize, Serialize, Educe, Clone)]
 #[educe(Default)]
-#[serde(default, deny_unknown_fields)]
-pub struct RestfulConfig {
-	#[educe(Default(expression = "127.0.0.1:8443".parse().unwrap()))]
-	pub addr: SocketAddr,
-	#[educe(Default = "YOUR_SECRET_HERE")]
-	pub secret: String,
-	#[educe(Default = 0)]
-	pub maximum_clients_per_user: usize,
-}
-
-#[derive(Deserialize, Serialize, Educe, Clone)]
-#[educe(Default)]
 #[serde(default)]
 pub struct ExperimentalConfig {
 	#[educe(Default = true)]
@@ -362,22 +449,79 @@ pub struct ExperimentalConfig {
 	pub drop_private: bool,
 }
 
-fn deserialize_single_or_vec<'de, D, T>(deserializer: D) -> Result<Vec<T>, D::Error>
+/// Serialize `Vec<Rule>` as an array of strings.
+fn serialize_rules<S>(rules: &[Rule], serializer: S) -> Result<S::Ok, S::Error>
+where
+	S: Serializer,
+{
+	use serde::ser::SerializeSeq;
+	let mut seq = serializer.serialize_seq(Some(rules.len()))?;
+	for rule in rules {
+		seq.serialize_element(&rule.to_string())?;
+	}
+	seq.end()
+}
+
+/// Deserialize the `rules` field which may be either:
+///   * an array of strings (each a Metacubex-style rule line)
+///   * a single multiline string with one rule per line
+fn deserialize_rules<'de, D>(deserializer: D) -> Result<Vec<Rule>, D::Error>
 where
 	D: Deserializer<'de>,
-	T: Deserialize<'de>,
 {
-	#[derive(Deserialize)]
-	#[serde(untagged)]
-	enum SingleOrVec<T> {
-		Single(T),
-		Vec(Vec<T>),
+	use serde::de::{self, Visitor};
+
+	struct RulesVisitor;
+
+	impl<'de> Visitor<'de> for RulesVisitor {
+		type Value = Vec<Rule>;
+
+		fn expecting(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+			f.write_str("an array of rule strings or a multiline string")
+		}
+
+		fn visit_seq<A>(self, mut seq: A) -> Result<Self::Value, A::Error>
+		where
+			A: de::SeqAccess<'de>,
+		{
+			let mut rules = Vec::new();
+			while let Some(line) = seq.next_element::<String>()? {
+				match Rule::parse(&line) {
+					Ok(rule) => rules.push(rule),
+					Err(wind_core::rule::RuleParseError::EmptyOrComment) => {}
+					Err(e) => return Err(de::Error::custom(format!("invalid rule '{}': {}", line, e))),
+				}
+			}
+			Ok(rules)
+		}
+
+		fn visit_str<E>(self, v: &str) -> Result<Self::Value, E>
+		where
+			E: de::Error,
+		{
+			let mut rules = Vec::new();
+			for line in v.lines() {
+				let line = line.trim();
+				if line.is_empty() || line.starts_with('#') {
+					continue;
+				}
+				match Rule::parse(line) {
+					Ok(rule) => rules.push(rule),
+					Err(e) => return Err(de::Error::custom(format!("invalid rule '{}': {}", line, e))),
+				}
+			}
+			Ok(rules)
+		}
+
+		fn visit_string<E>(self, v: String) -> Result<Self::Value, E>
+		where
+			E: de::Error,
+		{
+			self.visit_str(&v)
+		}
 	}
 
-	match SingleOrVec::deserialize(deserializer)? {
-		SingleOrVec::Single(value) => Ok(vec![value]),
-		SingleOrVec::Vec(values) => Ok(values),
-	}
+	deserializer.deserialize_any(RulesVisitor)
 }
 
 fn generate_random_alphanumeric_string(min: usize, max: usize) -> String {
@@ -389,7 +533,6 @@ fn generate_random_alphanumeric_string(min: usize, max: usize) -> String {
 
 impl Config {
 	pub fn migrate(&mut self) {
-		// Migrate TLS-related fields
 		#[allow(deprecated)]
 		{
 			if let Some(self_sign) = self.__self_sign {
@@ -415,48 +558,42 @@ impl Config {
 			}
 		}
 
-		// Migrate QUIC-related fields
+		// Migrate QUIC-related fields into the quinn backend tuning.
+		//
+		// A deprecated top-level `[quic]` section is applied first (as a whole),
+		// then the even-older flat scalar keys override individual fields, so the
+		// historical precedence (flat keys win) is preserved.
 		#[allow(deprecated)]
 		{
+			if let Some(quic) = self.__quic.take() {
+				self.backend.quinn = quic;
+			}
 			if let Some(congestion_control) = self.__congestion_control {
-				self.quic.congestion_control.controller = congestion_control;
+				self.backend.quinn.congestion_control.controller = congestion_control;
 			}
 			if let Some(max_idle_time) = self.__max_idle_time {
-				self.quic.max_idle_time = max_idle_time;
+				self.backend.quinn.max_idle_time = max_idle_time;
 			}
 			if let Some(initial_window) = self.__initial_window {
-				self.quic.congestion_control.initial_window = initial_window;
+				self.backend.quinn.congestion_control.initial_window = initial_window;
 			}
 			if let Some(send_window) = self.__send_window {
-				self.quic.send_window = send_window;
+				self.backend.quinn.send_window = send_window;
 			}
 			if let Some(receive_window) = self.__receive_window {
-				self.quic.receive_window = receive_window;
+				self.backend.quinn.receive_window = receive_window;
 			}
 			if let Some(initial_mtu) = self.__initial_mtu {
-				self.quic.initial_mtu = initial_mtu;
+				self.backend.quinn.initial_mtu = initial_mtu;
 			}
 			if let Some(min_mtu) = self.__min_mtu {
-				self.quic.min_mtu = min_mtu;
+				self.backend.quinn.min_mtu = min_mtu;
 			}
 			if let Some(gso) = self.__gso {
-				self.quic.gso = gso;
+				self.backend.quinn.gso = gso;
 			}
 			if let Some(pmtu) = self.__pmtu {
-				self.quic.pmtu = pmtu;
-			}
-		}
-
-		// Migrate Restful-related fields
-		#[allow(deprecated)]
-		{
-			if let Some(restful_server) = self.__restful_server {
-				if self.restful.is_none() {
-					self.restful = Some(RestfulConfig::default());
-				}
-				if let Some(ref mut restful) = self.restful {
-					restful.addr = restful_server;
-				}
+				self.backend.quinn.pmtu = pmtu;
 			}
 		}
 	}
@@ -470,11 +607,6 @@ impl Config {
 				}
 				users
 			},
-			restful: Some(RestfulConfig {
-				secret: generate_random_alphanumeric_string(30, 50),
-				..Default::default()
-			}),
-			// Provide a minimal outbound example
 			outbound: OutboundConfig {
 				default: OutboundRule {
 					kind: "direct".into(),
@@ -483,25 +615,24 @@ impl Config {
 				},
 				..Default::default()
 			},
-			// Example ACL list (empty by default)
 			acl: Vec::new(),
 			..Default::default()
 		}
 	}
 }
 
-#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq)]
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 #[serde(rename_all = "lowercase")]
 #[derive(Educe)]
 #[educe(Default)]
 pub enum LogLevel {
-	Trace,
-	Debug,
+	Trace = 0,
+	Debug = 1,
 	#[educe(Default)]
-	Info,
-	Warn,
-	Error,
-	Off,
+	Info = 2,
+	Warn = 3,
+	Error = 4,
+	Off = 5,
 }
 
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -541,38 +672,6 @@ pub struct LogConfig {
 	/// Rotation policy for `log_file`.
 	pub log_rotation: LogRotation,
 }
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize, serde::Serialize)]
-#[serde(rename_all = "snake_case")]
-pub enum TokioRuntime {
-	#[default]
-	Auto,
-	MultiThread,
-	CurrentThread,
-}
-
-impl TokioRuntime {
-	pub fn resolve(self) -> ResolvedRuntime {
-		match self {
-			TokioRuntime::MultiThread => ResolvedRuntime::MultiThread,
-			TokioRuntime::CurrentThread => ResolvedRuntime::CurrentThread,
-			TokioRuntime::Auto => {
-				if num_cpus::get() <= 2 {
-					ResolvedRuntime::CurrentThread
-				} else {
-					ResolvedRuntime::MultiThread
-				}
-			}
-		}
-	}
-}
-
-#[derive(Debug, Clone, Copy)]
-pub enum ResolvedRuntime {
-	MultiThread,
-	CurrentThread,
-}
-
 impl From<LogLevel> for LevelFilter {
 	fn from(value: LogLevel) -> Self {
 		match value {
@@ -590,7 +689,6 @@ impl From<LogLevel> for LevelFilter {
 fn infer_config_format(content: &str) -> ConfigFormat {
 	let trimmed = content.trim_start();
 
-	// Check for JSON/JSON5 format
 	if trimmed.starts_with('{') || trimmed.starts_with('[') {
 		return ConfigFormat::Json;
 	}
@@ -601,7 +699,6 @@ fn infer_config_format(content: &str) -> ConfigFormat {
 		return ConfigFormat::Yaml;
 	}
 
-	// Try to detect YAML-style indentation patterns
 	let lines: Vec<&str> = content
 		.lines()
 		.filter(|l| !l.trim().is_empty() && !l.trim_start().starts_with('#'))
@@ -622,14 +719,36 @@ fn infer_config_format(content: &str) -> ConfigFormat {
 		false
 	});
 
-	// Check for TOML format (common indicators)
-	// TOML uses = for assignment and [section] for tables
+	// Check for TOML format (common indicators).
+	//
+	// 1. TOML uses `[section]` tables — match a bracketed prefix that has no inner
+	//    colon (`:` would suggest a YAML mapping with a list-marker key).
+	// 2. TOML uses `=` for assignments — but ONLY of the form `<identifier> = ...`.
+	//    The previous heuristic was `... || trimmed_line.contains('=')` (with
+	//    bare-OR precedence over `&&`!), so any YAML line containing an `=` in a
+	//    VALUE — for example `secret: aGVsbG8=` — was flagged as TOML. The combined
+	//    check then wrongly classified those YAML files as TOML and parsing failed.
+	//    The check below uses a strict identifier prefix and is properly
+	//    parenthesised.
+	let is_toml_assignment = |s: &str| -> bool {
+		let bytes = s.as_bytes();
+		if bytes.is_empty() || !(bytes[0].is_ascii_alphabetic() || bytes[0] == b'_') {
+			return false;
+		}
+		let mut i = 1;
+		while i < bytes.len() && (bytes[i].is_ascii_alphanumeric() || bytes[i] == b'_' || bytes[i] == b'-') {
+			i += 1;
+		}
+		while i < bytes.len() && (bytes[i] == b' ' || bytes[i] == b'\t') {
+			i += 1;
+		}
+		matches!(bytes.get(i), Some(b'='))
+	};
 	let has_toml_patterns = lines.iter().any(|line| {
-		let trimmed_line = line.trim();
-		trimmed_line.starts_with('[') && trimmed_line.contains(']') && !trimmed_line.contains(':') || trimmed_line.contains('=')
+		let trimmed = line.trim();
+		(trimmed.starts_with('[') && trimmed.contains(']') && !trimmed.contains(':')) || is_toml_assignment(trimmed)
 	});
 
-	// Decide based on patterns found
 	if has_toml_patterns && !has_yaml_patterns {
 		ConfigFormat::Toml
 	} else if has_yaml_patterns && !has_toml_patterns {
@@ -639,11 +758,11 @@ fn infer_config_format(content: &str) -> ConfigFormat {
 		// (YAML could have = in values, but TOML [sections] are more specific)
 		ConfigFormat::Toml
 	} else {
-		// Default to Unknown if we can't determine
 		ConfigFormat::Unknown
 	}
 }
 
+#[derive(Debug, PartialEq, Eq)]
 enum ConfigFormat {
 	Json,
 	Toml,
@@ -664,7 +783,6 @@ async fn find_config_in_dir(dir: &PathBuf) -> eyre::Result<PathBuf> {
 	let mut entries = tokio::fs::read_dir(dir).await?;
 	let mut config_files = Vec::new();
 
-	// Collect all files with recognizable config extensions
 	while let Some(entry) = entries.next_entry().await? {
 		let path = entry.path();
 		if path.is_file() {
@@ -693,7 +811,6 @@ async fn find_config_in_dir(dir: &PathBuf) -> eyre::Result<PathBuf> {
 }
 
 pub async fn parse_config(cli: Cli, env_state: EnvState) -> eyre::Result<Config> {
-	// Handle --init flag
 	if cli.init {
 		warn!("Generating an example configuration to config.toml......");
 
@@ -722,7 +839,6 @@ pub async fn parse_config(cli: Cli, env_state: EnvState) -> eyre::Result<Config>
 		));
 	};
 
-	// Check if config file exists
 	if !cfg_path.exists() {
 		return Err(eyre::eyre!("Config file not found: {}", cfg_path.display()));
 	}
@@ -778,7 +894,6 @@ pub async fn parse_config(cli: Cli, env_state: EnvState) -> eyre::Result<Config>
 		ConfigFormat::Toml => figmet.merge(Toml::file(&cfg_path)),
 		ConfigFormat::Yaml => figmet.merge(Yaml::file(&cfg_path)),
 		ConfigFormat::Unknown => {
-			// Try to infer format from file content
 			let content = tokio::fs::read_to_string(&cfg_path).await?;
 			let inferred_format = infer_config_format(&content);
 
@@ -798,7 +913,6 @@ pub async fn parse_config(cli: Cli, env_state: EnvState) -> eyre::Result<Config>
 
 	let mut config: Config = figmet.extract()?;
 
-	// Migrate legacy fields to new nested structure
 	config.migrate();
 
 	if config.data_dir.to_str() == Some("") {
@@ -810,7 +924,6 @@ pub async fn parse_config(cli: Cli, env_state: EnvState) -> eyre::Result<Config>
 		tokio::fs::create_dir_all(&config.data_dir).await?;
 	};
 
-	// Determine certificate and key paths
 	let base_dir = config.data_dir.clone();
 	config.tls.certificate = if config.tls.auto_ssl && config.tls.certificate.to_str() == Some("") {
 		config.data_dir.join(format!("{}.cer.pem", config.tls.hostname))
@@ -828,40 +941,6 @@ pub async fn parse_config(cli: Cli, env_state: EnvState) -> eyre::Result<Config>
 		config.tls.private_key.clone()
 	};
 
-	if let Some(camouflage) = &config.camouflage
-		&& camouflage.enabled
-	{
-		if camouflage.reverse_proxy_url.trim().is_empty() {
-			return Err(eyre::eyre!(
-				"`camouflage.reverse_proxy_url` is required when camouflage is enabled"
-			));
-		}
-		if !camouflage.reverse_proxy_url.starts_with("http://") && !camouflage.reverse_proxy_url.starts_with("https://") {
-			return Err(eyre::eyre!(
-				"`camouflage.reverse_proxy_url` must be an absolute URL and start with http:// or https://"
-			));
-		}
-		if camouflage
-			.reverse_proxy_hostname
-			.as_deref()
-			.is_some_and(|s| s.trim().is_empty())
-		{
-			return Err(eyre::eyre!("`camouflage.reverse_proxy_hostname` cannot be empty"));
-		}
-		let backend = Url::parse(camouflage.reverse_proxy_url.as_str())
-			.map_err(|err| eyre::eyre!("`camouflage.reverse_proxy_url` is invalid: {err}"))?;
-		if backend
-			.host_str()
-			.and_then(|host| host.parse::<std::net::IpAddr>().ok())
-			.is_some()
-			&& camouflage.reverse_proxy_hostname.is_none()
-		{
-			return Err(eyre::eyre!(
-				"`camouflage.reverse_proxy_hostname` is required when `camouflage.reverse_proxy_url` uses an IP address"
-			));
-		}
-	}
-
 	Ok(config)
 }
 
@@ -875,7 +954,7 @@ mod tests {
 	use tempfile::tempdir;
 
 	use super::*;
-	use crate::acl::{AclPortSpec, AclProtocol};
+	use crate::legacy::{AclPortSpec, AclProtocol};
 
 	async fn test_parse_config(config_content: &str, extension: &str) -> eyre::Result<Config> {
 		test_parse_config_with_env(config_content, extension, EnvState::default()).await
@@ -907,7 +986,7 @@ mod tests {
 		let result = test_parse_config(config, ".toml").await.unwrap();
 
 		assert_eq!(result.log_level, LogLevel::Warn);
-		assert_eq!(result.server, "127.0.0.1:8080".parse().unwrap());
+		assert_eq!(result.server, "127.0.0.1:8080".parse::<SocketAddr>().unwrap());
 		assert!(!result.udp_relay_ipv6);
 		assert!(result.zero_rtt_handshake);
 
@@ -915,30 +994,17 @@ mod tests {
 		assert!(result.tls.auto_ssl);
 		assert_eq!(result.tls.hostname, "testhost");
 		assert_eq!(result.tls.acme_email, "admin@example.com");
-		assert!(result.camouflage.is_some());
-		let camouflage = result.camouflage.as_ref().unwrap();
-		assert!(camouflage.enabled);
-		assert_eq!(camouflage.reverse_proxy_url, "https://127.0.0.1:443");
-		assert_eq!(camouflage.reverse_proxy_hostname.as_deref(), Some("example.com"));
-		assert_eq!(camouflage.request_timeout, Duration::from_secs(15));
-		assert!(camouflage.skip_backend_tls_verify);
-		assert_eq!(result.quic.initial_mtu, 1400);
-		assert_eq!(result.quic.min_mtu, 1300);
-		assert_eq!(result.quic.send_window, 10000000);
-		assert_eq!(result.quic.congestion_control.controller, CongestionController::Bbr);
-		assert_eq!(result.quic.congestion_control.initial_window, 2000000);
-
-		let restful = result.restful.unwrap();
-		assert_eq!(restful.addr, "192.168.1.100:8081".parse().unwrap());
-		assert_eq!(restful.secret, "test_secret");
-		assert_eq!(restful.maximum_clients_per_user, 5);
+		assert_eq!(result.backend.quinn.initial_mtu, 1400);
+		assert_eq!(result.backend.quinn.min_mtu, 1300);
+		assert_eq!(result.backend.quinn.send_window, 10000000);
+		assert_eq!(result.backend.quinn.congestion_control.controller, CongestionController::Bbr);
+		assert_eq!(result.backend.quinn.congestion_control.initial_window, 2000000);
 
 		let uuid1 = Uuid::parse_str("123e4567-e89b-12d3-a456-426614174000").unwrap();
 		let uuid2 = Uuid::parse_str("123e4567-e89b-12d3-a456-426614174001").unwrap();
 		assert_eq!(result.users.get(&uuid1), Some(&"password1".to_string()));
 		assert_eq!(result.users.get(&uuid2), Some(&"password2".to_string()));
 
-		// Cleanup test directories
 		let _ = tokio::fs::remove_dir_all("__test__custom_data").await;
 		Ok(())
 	}
@@ -959,7 +1025,7 @@ mod tests {
 		assert_eq!(result.users.get(&uuid), Some(&"old_password".to_string()));
 
 		assert!(!result.tls.self_sign);
-		assert!(result.data_dir.ends_with("__test__legacy_data")); // Cleanup test directories
+		assert!(result.data_dir.ends_with("__test__legacy_data"));
 		let _ = tokio::fs::remove_dir_all("__test__legacy_data").await;
 	}
 
@@ -982,7 +1048,6 @@ mod tests {
 			current_dir.join("__test__relative_path").join("certs/server.key")
 		);
 
-		// Cleanup test directories
 		let _ = tokio::fs::remove_dir_all("__test__relative_path").await;
 	}
 
@@ -1005,18 +1070,15 @@ mod tests {
 		assert_eq!(result.tls.certificate, expected_cert);
 		assert_eq!(result.tls.private_key, expected_key);
 
-		// Cleanup test directories
 		let _ = tokio::fs::remove_dir_all("__test__ssl_data").await;
 	}
 
 	#[tokio::test]
 	async fn test_error_handling() {
-		// Test Invalid TOML
 		let config = "invalid toml content";
 		let result = test_parse_config(config, ".toml").await;
 		assert!(result.is_err());
 
-		// Test Invalid JSON
 		let config = "{ invalid json }";
 		let result = test_parse_config(config, ".json").await;
 		assert!(result.is_err());
@@ -1036,44 +1098,6 @@ mod tests {
 		assert!(result.is_ok());
 		let cli = result.unwrap();
 		assert!(cli.config.is_none());
-	}
-
-	#[tokio::test]
-	async fn test_camouflage_invalid_reverse_proxy_url() {
-		let config = r#"
-server = "127.0.0.1:8080"
-
-[tls]
-self_sign = true
-
-[users]
-"123e4567-e89b-12d3-a456-426614174000" = "password1"
-
-[camouflage]
-enabled = true
-reverse_proxy_url = "127.0.0.1:443"
-"#;
-		let result = test_parse_config(config, ".toml").await;
-		assert!(result.is_err());
-	}
-
-	#[tokio::test]
-	async fn test_camouflage_ip_reverse_proxy_url_requires_reverse_proxy_hostname() {
-		let config = r#"
-server = "127.0.0.1:8080"
-
-[tls]
-self_sign = true
-
-[users]
-"123e4567-e89b-12d3-a456-426614174000" = "password1"
-
-[camouflage]
-enabled = true
-reverse_proxy_url = "https://127.0.0.1:443"
-"#;
-		let result = test_parse_config(config, ".toml").await;
-		assert!(result.is_err());
 	}
 
 	#[tokio::test]
@@ -1103,7 +1127,7 @@ reverse_proxy_url = "https://127.0.0.1:443"
 		let prefer_v4 = result.outbound.named.get("prefer_v4").unwrap();
 		assert_eq!(prefer_v4.kind, "direct");
 		assert_eq!(prefer_v4.ip_mode, Some(StackPrefer::V4first));
-		assert_eq!(prefer_v4.bind_ipv4, vec!["2.4.6.8".parse::<Ipv4Addr>().unwrap()]);
+		assert_eq!(prefer_v4.bind_ipv4, Some("2.4.6.8".parse().unwrap()));
 		assert_eq!(prefer_v4.bind_device, Some("eth233".to_string()));
 
 		let socks5 = result.outbound.named.get("through_socks5").unwrap();
@@ -1111,26 +1135,6 @@ reverse_proxy_url = "https://127.0.0.1:443"
 		assert_eq!(socks5.addr, Some("127.0.0.1:1080".to_string()));
 		assert_eq!(socks5.username, Some("optional".to_string()));
 		assert_eq!(socks5.password, Some("optional".to_string()));
-	}
-
-	#[tokio::test]
-	async fn test_outbound_valid_with_multiple_bind_ips() {
-		let config = include_str!("../tests/config/outbound_valid_with_multiple_bind_ips.toml");
-
-		let result = test_parse_config(config, ".toml").await.unwrap();
-
-		let prefer_v4 = result.outbound.named.get("prefer_v4").unwrap();
-		assert_eq!(
-			prefer_v4.bind_ipv4,
-			vec!["2.4.6.8".parse::<Ipv4Addr>().unwrap(), "2.4.6.9".parse::<Ipv4Addr>().unwrap()]
-		);
-		assert_eq!(
-			prefer_v4.bind_ipv6,
-			vec![
-				"0:0:0:0:0:ffff:0204:0608".parse::<Ipv6Addr>().unwrap(),
-				"0:0:0:0:0:ffff:0204:0609".parse::<Ipv6Addr>().unwrap()
-			]
-		);
 	}
 
 	#[tokio::test]
@@ -1234,7 +1238,7 @@ reverse_proxy_url = "https://127.0.0.1:443"
 		assert_eq!(ports.entries[3].protocol, Some(AclProtocol::Udp));
 
 		// Test rule parsing
-		let rule = crate::acl::parse_acl_rule("allow google.com 80,443").unwrap();
+		let rule = crate::legacy::parse_acl_rule("allow google.com 80,443").unwrap();
 		assert_eq!(rule.outbound, "allow");
 		assert_eq!(rule.addr, AclAddress::Domain("google.com".to_string()));
 		assert!(rule.ports.is_some());
@@ -1250,7 +1254,7 @@ reverse_proxy_url = "https://127.0.0.1:443"
 
 		// Check default values
 		assert_eq!(result.log_level, LogLevel::Info);
-		assert_eq!(result.server, "[::]:8443".parse().unwrap());
+		assert_eq!(result.server, "[::]:8443".parse::<SocketAddr>().unwrap());
 		assert!(result.udp_relay_ipv6);
 		assert!(!result.zero_rtt_handshake);
 		assert!(result.dual_stack);
@@ -1309,17 +1313,68 @@ reverse_proxy_url = "https://127.0.0.1:443"
 
 	#[tokio::test]
 	async fn test_congestion_control_variants() {
-		// Test BBR
 		let config_bbr = include_str!("../tests/config/congestion_control_bbr.toml");
 
 		let result = test_parse_config(config_bbr, ".toml").await.unwrap();
-		assert_eq!(result.quic.congestion_control.controller, CongestionController::Bbr);
+		assert_eq!(result.backend.quinn.congestion_control.controller, CongestionController::Bbr);
 
-		// Test NewReno (note: lowercase 'newreno' is the valid variant)
+		// note: lowercase 'newreno' is the valid variant
 		let config_new_reno = include_str!("../tests/config/congestion_control_newreno.toml");
 
 		let result = test_parse_config(config_new_reno, ".toml").await.unwrap();
-		assert_eq!(result.quic.congestion_control.controller, CongestionController::NewReno);
+		assert_eq!(
+			result.backend.quinn.congestion_control.controller,
+			CongestionController::NewReno
+		);
+	}
+
+	#[tokio::test]
+	async fn test_backend_mode_quiche_and_subsections() {
+		// New `[backend]` layout: mode selects the implementation, and each
+		// backend has its own tuning subsection.
+		let config = r#"
+server = "127.0.0.1:8080"
+
+[backend]
+mode = "quiche"
+
+[backend.quinn]
+initial_mtu = 1400
+
+[backend.quiche]
+max_concurrent_bi_streams = 50
+zero_rtt = true
+max_idle_time = "45s"
+"#;
+		let result = test_parse_config(config, ".toml").await.unwrap();
+		assert_eq!(result.backend.mode, BackendMode::Quiche);
+		assert_eq!(result.backend.quinn.initial_mtu, 1400);
+		assert_eq!(result.backend.quiche.max_concurrent_bi_streams, 50);
+		assert!(result.backend.quiche.zero_rtt);
+		assert_eq!(result.backend.quiche.max_idle_time, Duration::from_secs(45));
+	}
+
+	#[tokio::test]
+	async fn test_backend_mode_defaults_to_quinn() {
+		let result = test_parse_config("server = \"127.0.0.1:8080\"\n", ".toml").await.unwrap();
+		assert_eq!(result.backend.mode, BackendMode::Quinn);
+	}
+
+	#[tokio::test]
+	async fn test_legacy_quic_section_migrates_to_backend_quinn() {
+		// A deprecated top-level `[quic]` section must still load, migrating into
+		// `backend.quinn`.
+		let config = r#"
+server = "127.0.0.1:8080"
+
+[quic]
+initial_mtu = 1456
+send_window = 12345678
+"#;
+		let result = test_parse_config(config, ".toml").await.unwrap();
+		assert_eq!(result.backend.mode, BackendMode::Quinn);
+		assert_eq!(result.backend.quinn.initial_mtu, 1456);
+		assert_eq!(result.backend.quinn.send_window, 12345678);
 	}
 
 	#[tokio::test]
@@ -1342,11 +1397,9 @@ reverse_proxy_url = "https://127.0.0.1:443"
 		assert!(result.tls.certificate.ends_with("cert.pem"));
 		assert!(result.tls.private_key.ends_with("key.pem"));
 		assert_eq!(result.tls.hostname, "example.com");
-		assert_eq!(result.quic.congestion_control.controller, CongestionController::Bbr);
-		assert_eq!(result.quic.max_idle_time, Duration::from_secs(60));
-		assert_eq!(result.quic.initial_mtu, 1500);
-		assert!(result.restful.is_some());
-		assert_eq!(result.restful.unwrap().addr, "0.0.0.0:8080".parse().unwrap());
+		assert_eq!(result.backend.quinn.congestion_control.controller, CongestionController::Bbr);
+		assert_eq!(result.backend.quinn.max_idle_time, Duration::from_secs(60));
+		assert_eq!(result.backend.quinn.initial_mtu, 1500);
 	}
 
 	#[tokio::test]
@@ -1356,7 +1409,7 @@ reverse_proxy_url = "https://127.0.0.1:443"
 
 		let result = test_parse_config(config, "").await.unwrap();
 		assert_eq!(result.log_level, LogLevel::Info);
-		assert_eq!(result.server, "127.0.0.1:8080".parse().unwrap());
+		assert_eq!(result.server, "127.0.0.1:8080".parse::<SocketAddr>().unwrap());
 	}
 
 	#[tokio::test]
@@ -1366,7 +1419,7 @@ reverse_proxy_url = "https://127.0.0.1:443"
 
 		let result = test_parse_config(config, "").await.unwrap();
 		assert_eq!(result.log_level, LogLevel::Debug);
-		assert_eq!(result.server, "0.0.0.0:8443".parse().unwrap());
+		assert_eq!(result.server, "0.0.0.0:8443".parse::<SocketAddr>().unwrap());
 	}
 
 	#[tokio::test]
@@ -1379,7 +1432,7 @@ reverse_proxy_url = "https://127.0.0.1:443"
 
 		let result = test_parse_config(config, ".yaml").await.unwrap();
 		assert_eq!(result.log_level, LogLevel::Warn);
-		assert_eq!(result.server, "127.0.0.1:9000".parse().unwrap());
+		assert_eq!(result.server, "127.0.0.1:9000".parse::<SocketAddr>().unwrap());
 		assert_eq!(result.tls.hostname, "yaml.test.com");
 	}
 
@@ -1390,7 +1443,7 @@ reverse_proxy_url = "https://127.0.0.1:443"
 
 		let result = test_parse_config(config, ".json5").await.unwrap();
 		assert_eq!(result.log_level, LogLevel::Info);
-		assert_eq!(result.server, "127.0.0.1:8080".parse().unwrap());
+		assert_eq!(result.server, "127.0.0.1:8080".parse::<SocketAddr>().unwrap());
 		assert_eq!(result.tls.hostname, "test.json5.com");
 	}
 
@@ -1415,7 +1468,7 @@ reverse_proxy_url = "https://127.0.0.1:443"
 
 		let result = test_parse_config(config, ".json5").await.unwrap();
 		assert_eq!(result.log_level, LogLevel::Warn);
-		assert_eq!(result.server, "0.0.0.0:8443".parse().unwrap());
+		assert_eq!(result.server, "0.0.0.0:8443".parse::<SocketAddr>().unwrap());
 		assert_eq!(result.tls.hostname, "unquoted.test.com");
 	}
 
@@ -1427,7 +1480,7 @@ reverse_proxy_url = "https://127.0.0.1:443"
 		let result = test_parse_config(config, ".json5").await.unwrap();
 
 		assert_eq!(result.log_level, LogLevel::Info);
-		assert_eq!(result.server, "127.0.0.1:9443".parse().unwrap());
+		assert_eq!(result.server, "127.0.0.1:9443".parse::<SocketAddr>().unwrap());
 		assert!(!result.udp_relay_ipv6);
 		assert!(result.zero_rtt_handshake);
 
@@ -1436,16 +1489,11 @@ reverse_proxy_url = "https://127.0.0.1:443"
 		assert!(result.tls.self_sign);
 		assert!(result.tls.auto_ssl);
 		assert_eq!(result.tls.hostname, "json5.example.com");
-		assert_eq!(result.quic.initial_mtu, 1400);
-		assert_eq!(result.quic.min_mtu, 1300);
-		assert_eq!(result.quic.send_window, 8000000);
-		assert_eq!(result.quic.congestion_control.controller, CongestionController::Bbr);
-		assert_eq!(result.quic.congestion_control.initial_window, 1500000);
-
-		let restful = result.restful.unwrap();
-		assert_eq!(restful.addr, "127.0.0.1:8888".parse().unwrap());
-		assert_eq!(restful.secret, "json5_secret");
-		assert_eq!(restful.maximum_clients_per_user, 10);
+		assert_eq!(result.backend.quinn.initial_mtu, 1400);
+		assert_eq!(result.backend.quinn.min_mtu, 1300);
+		assert_eq!(result.backend.quinn.send_window, 8000000);
+		assert_eq!(result.backend.quinn.congestion_control.controller, CongestionController::Bbr);
+		assert_eq!(result.backend.quinn.congestion_control.initial_window, 1500000);
 	}
 
 	#[tokio::test]
@@ -1477,7 +1525,7 @@ reverse_proxy_url = "https://127.0.0.1:443"
 
 		let result = test_parse_config(config, ".json5").await.unwrap();
 		assert_eq!(result.log_level, LogLevel::Error);
-		assert_eq!(result.server, "192.168.1.1:8443".parse().unwrap());
+		assert_eq!(result.server, "192.168.1.1:8443".parse::<SocketAddr>().unwrap());
 		assert!(!result.tls.self_sign);
 	}
 	#[tokio::test]
@@ -1508,7 +1556,7 @@ reverse_proxy_url = "https://127.0.0.1:443"
 		assert!(result.is_ok());
 		let config = result.unwrap();
 		assert_eq!(config.log_level, LogLevel::Info);
-		assert_eq!(config.server, "127.0.0.1:8080".parse().unwrap());
+		assert_eq!(config.server, "127.0.0.1:8080".parse::<SocketAddr>().unwrap());
 	}
 
 	#[tokio::test]
@@ -1613,7 +1661,6 @@ reverse_proxy_url = "https://127.0.0.1:443"
 		let temp_dir = tempdir().unwrap();
 		let dir_path = temp_dir.path();
 
-		// Test with JSON
 		let json_dir = dir_path.join("json_test");
 		fs::create_dir(&json_dir).unwrap();
 		fs::write(json_dir.join("config.json"), r#"{"log_level": "debug"}"#).unwrap();
@@ -1627,7 +1674,6 @@ reverse_proxy_url = "https://127.0.0.1:443"
 		let result = parse_config(cli, EnvState::default()).await.unwrap();
 		assert_eq!(result.log_level, LogLevel::Debug);
 
-		// Test with YAML
 		let yaml_dir = dir_path.join("yaml_test");
 		fs::create_dir(&yaml_dir).unwrap();
 		fs::write(yaml_dir.join("config.yaml"), "log_level: warn").unwrap();
@@ -1656,7 +1702,7 @@ reverse_proxy_url = "https://127.0.0.1:443"
 		// Use .json extension but content is TOML
 		let result = test_parse_config_with_env(config_content, ".json", env_state).await.unwrap();
 		assert_eq!(result.log_level, LogLevel::Info);
-		assert_eq!(result.server, "127.0.0.1:8443".parse().unwrap());
+		assert_eq!(result.server, "127.0.0.1:8443".parse::<SocketAddr>().unwrap());
 	}
 
 	#[tokio::test]
@@ -1693,7 +1739,7 @@ reverse_proxy_url = "https://127.0.0.1:443"
 		// Use .toml extension but content is JSON
 		let result = test_parse_config_with_env(config_content, ".toml", env_state).await.unwrap();
 		assert_eq!(result.log_level, LogLevel::Warn);
-		assert_eq!(result.server, "127.0.0.1:9999".parse().unwrap());
+		assert_eq!(result.server, "127.0.0.1:9999".parse::<SocketAddr>().unwrap());
 	}
 
 	#[tokio::test]
@@ -1712,7 +1758,7 @@ reverse_proxy_url = "https://127.0.0.1:443"
 			.await
 			.unwrap();
 		assert_eq!(result.log_level, LogLevel::Trace);
-		assert_eq!(result.server, "127.0.0.1:7777".parse().unwrap());
+		assert_eq!(result.server, "127.0.0.1:7777".parse::<SocketAddr>().unwrap());
 	}
 
 	#[tokio::test]
@@ -1769,8 +1815,11 @@ reverse_proxy_url = "https://127.0.0.1:443"
 		// Note: This test doesn't actually set env vars, just tests the structure
 		let env_state = EnvState::from_system();
 
-		// Should not panic and return a valid EnvState
-		assert!(env_state.tuic_config_format.is_none() || env_state.tuic_config_format.is_some());
+		// `from_system` must not panic. There is no value we can usefully
+		// assert about `tuic_config_format` here without setting up env
+		// vars first, so just keep `env_state` alive to confirm it
+		// constructs.
+		let _ = env_state;
 	}
 
 	#[tokio::test]
@@ -1804,5 +1853,156 @@ reverse_proxy_url = "https://127.0.0.1:443"
 
 		// Should succeed because inference will detect TOML
 		assert!(result.is_ok());
+	}
+
+	#[tokio::test]
+	async fn test_rules_parsing() {
+		let config = include_str!("../tests/config/rules_parsing.toml");
+
+		let result = test_parse_config(config, ".toml").await.unwrap();
+
+		assert_eq!(result.rules.len(), 8);
+
+		assert_eq!(result.rules[0].to_string(), "DOMAIN,ad.example.com,REJECT");
+		assert_eq!(result.rules[0].target, "REJECT");
+
+		assert_eq!(result.rules[1].to_string(), "DOMAIN-SUFFIX,google.com,proxy");
+
+		assert_eq!(result.rules[2].target, "reject");
+
+		assert_eq!(result.rules[3].target, "direct");
+		assert!(result.rules[3].no_resolve());
+
+		assert_eq!(result.rules[4].to_string(), "IP-CIDR6,fc00::/7,direct");
+
+		assert_eq!(result.rules[5].to_string(), "DST-PORT,443,proxy");
+
+		assert_eq!(result.rules[6].to_string(), "NETWORK,udp,direct");
+
+		assert_eq!(result.rules[7].to_string(), "MATCH,proxy");
+	}
+
+	#[tokio::test]
+	async fn test_rules_empty() {
+		let config = include_str!("../tests/config/rules_empty.toml");
+
+		let result = test_parse_config(config, ".toml").await.unwrap();
+		assert_eq!(result.rules.len(), 0);
+	}
+
+	#[tokio::test]
+	async fn test_rules_default_when_omitted() {
+		// When rules field is not specified, it should default to empty
+		let config = include_str!("../tests/config/default_values.toml");
+
+		let result = test_parse_config(config, ".toml").await.unwrap();
+		assert_eq!(result.rules.len(), 0);
+	}
+
+	#[tokio::test]
+	async fn test_rules_coexist_with_acl() {
+		let config = include_str!("../tests/config/rules_with_acl.toml");
+
+		let result = test_parse_config(config, ".toml").await.unwrap();
+
+		// Legacy ACL rules
+		assert_eq!(result.acl.len(), 2);
+		assert_eq!(result.acl[0].outbound, "reject");
+		assert_eq!(result.acl[0].addr, AclAddress::Private);
+		assert_eq!(result.acl[1].outbound, "allow");
+		assert_eq!(result.acl[1].addr, AclAddress::Localhost);
+
+		// New Metacubex rules
+		assert_eq!(result.rules.len(), 2);
+		assert_eq!(result.rules[0].to_string(), "DOMAIN-SUFFIX,ads.example.com,reject");
+		assert_eq!(result.rules[1].to_string(), "MATCH,proxy");
+	}
+
+	#[tokio::test]
+	async fn test_rules_serialize_roundtrip() {
+		let config = include_str!("../tests/config/rules_parsing.toml");
+
+		let result = test_parse_config(config, ".toml").await.unwrap();
+
+		// Serialize to TOML string and verify rules appear as strings
+		let serialized = toml::to_string_pretty(&result).unwrap();
+		assert!(
+			serialized.contains("DOMAIN,ad.example.com,REJECT"),
+			"serialized:\n{serialized}"
+		);
+		assert!(serialized.contains("MATCH,proxy"), "serialized:\n{serialized}");
+		assert!(
+			serialized.contains("IP-CIDR,10.0.0.0/8,direct,no-resolve"),
+			"serialized:\n{serialized}"
+		);
+
+		// Verify the serialized form is a string array
+		assert!(
+			serialized.contains(r#""DOMAIN,ad.example.com,REJECT""#),
+			"rules should be serialized as quoted strings"
+		);
+	}
+
+	#[tokio::test]
+	async fn test_rules_invalid_rule_string() {
+		let temp_dir = tempdir().unwrap();
+		let config_path = temp_dir.path().join("config.toml");
+
+		let bad_config = r#"
+[users]
+"123e4567-e89b-12d3-a456-426614174000" = "password"
+
+[tls]
+self_sign = true
+
+rules = ["INVALID_TYPE,value,target"]
+"#;
+
+		fs::write(&config_path, bad_config).unwrap();
+
+		let cli = Cli::try_parse_from(vec!["test_binary", "--config", &config_path.to_string_lossy()]).unwrap();
+
+		let result = parse_config(cli, EnvState::default()).await;
+		assert!(result.is_err());
+	}
+
+	// ------------------------------------------------------------------
+	// PR4-L regression tests for `infer_config_format`
+	// ------------------------------------------------------------------
+
+	/// Previously a YAML value that happened to contain `=` (e.g. a base64
+	/// secret like `aGVsbG8=`) was misclassified as TOML because the heuristic
+	/// reduced to `trimmed.contains('=')` due to `&&`/`||` precedence.
+	#[test]
+	fn yaml_with_equals_in_value_is_yaml() {
+		let yaml = "secret: aGVsbG8=\nfoo: bar\n";
+		assert_eq!(infer_config_format(yaml), ConfigFormat::Yaml);
+	}
+
+	#[test]
+	fn toml_section_still_detected() {
+		// `infer_config_format` short-circuits `starts_with('[')` to JSON, so
+		// any TOML file starting with a `[section]` would be misidentified as
+		// JSON regardless of the PR4-L heuristic fix. That JSON shortcut is a
+		// pre-existing bug orthogonal to this PR; here we just verify a
+		// TOML file whose FIRST non-comment line is a `key = value`
+		// assignment is still detected as TOML — covering the case PR4-L
+		// actually changed.
+		let toml = "# config\nlog_level = \"info\"\n[server]\nport = 9443\n";
+		assert_eq!(infer_config_format(toml), ConfigFormat::Toml);
+	}
+
+	#[test]
+	fn toml_bare_assignment_still_detected() {
+		// `key = "value"` without a section header is still valid TOML.
+		let toml = "log_level = \"info\"\n";
+		assert_eq!(infer_config_format(toml), ConfigFormat::Toml);
+	}
+
+	#[test]
+	fn yaml_with_indented_block_not_misread_as_toml() {
+		// Indented list under a key — pure YAML, no top-level `=`.
+		let yaml = "rules:\n  - foo=bar\n  - baz\n";
+		assert_eq!(infer_config_format(yaml), ConfigFormat::Yaml);
 	}
 }

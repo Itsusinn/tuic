@@ -1,9 +1,218 @@
-use std::time::Duration;
+use std::{collections::HashMap, net::SocketAddr, path::PathBuf, sync::Arc, time::Duration};
 
 use tokio::time::timeout;
 use tracing::{error, info};
+use uuid::Uuid;
 
-// Helper function to create and run a TCP echo server
+/// Install the rustls crypto provider (idempotent; safe to call repeatedly).
+pub fn install_crypto_provider() {
+	#[cfg(feature = "aws-lc-rs")]
+	let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
+	#[cfg(feature = "ring")]
+	let _ = rustls::crypto::ring::default_provider().install_default();
+}
+
+/// Build a `tuic-server` config that uses the tokio-quiche backend with a
+/// self-signed certificate.
+pub fn quiche_server_config(
+	server: SocketAddr,
+	data_dir: PathBuf,
+	uuid: Uuid,
+	password: &str,
+	zero_rtt: bool,
+) -> tuic_server::Config {
+	let mut cfg = tuic_server::Config {
+		log_level: tuic_server::config::LogLevel::Debug,
+		server,
+		users: {
+			let mut users = HashMap::new();
+			users.insert(uuid, password.to_string());
+			users
+		},
+		tls: tuic_server::config::TlsConfig {
+			self_sign: true,
+			hostname: "localhost".to_string(),
+			..Default::default()
+		},
+		data_dir,
+		zero_rtt_handshake: zero_rtt,
+		experimental: tuic_server::config::ExperimentalConfig {
+			// Echo servers run on 127.0.0.1, so loopback must be allowed.
+			drop_loopback: false,
+			drop_private: false,
+		},
+		..Default::default()
+	};
+	cfg.backend.mode = tuic_server::config::BackendMode::Quiche;
+	cfg.backend.quiche.zero_rtt = zero_rtt;
+	cfg
+}
+
+/// Build a `tuic-server` config that uses the default quinn backend
+/// (`wind-tuic`) with a self-signed certificate.
+pub fn quinn_server_config(
+	server: SocketAddr,
+	data_dir: PathBuf,
+	uuid: Uuid,
+	password: &str,
+	zero_rtt: bool,
+) -> tuic_server::Config {
+	// Default `BackendMode` is `Quinn`, so leave `backend.mode` untouched. On the
+	// quinn backend `zero_rtt_handshake` flows into the inbound's
+	// `max_early_data_size`/`into_0rtt()` accept path (see wind-tuic
+	// quinn::inbound).
+	tuic_server::Config {
+		log_level: tuic_server::config::LogLevel::Debug,
+		server,
+		users: {
+			let mut users = HashMap::new();
+			users.insert(uuid, password.to_string());
+			users
+		},
+		tls: tuic_server::config::TlsConfig {
+			self_sign: true,
+			hostname: "localhost".to_string(),
+			// The quinn backend passes `tls.alpn` straight through to the QUIC
+			// server config (unlike the quiche backend, which forces `h3`), so it
+			// must be set explicitly or ALPN negotiation fails against the client's
+			// `h3`.
+			alpn: vec!["h3".to_string()],
+			..Default::default()
+		},
+		data_dir,
+		zero_rtt_handshake: zero_rtt,
+		experimental: tuic_server::config::ExperimentalConfig {
+			// Echo servers run on 127.0.0.1, so loopback must be allowed.
+			drop_loopback: false,
+			drop_private: false,
+		},
+		..Default::default()
+	}
+}
+
+/// Build a `tuic-client` config (quinn) pointing at a local server.
+///
+/// The client is always quinn-based regardless of the *server's* backend, so
+/// this builder is shared by both [`start_quiche_pair`] and
+/// [`start_quinn_pair`].
+pub fn tuic_client_config(
+	server_port: u16,
+	socks_port: u16,
+	uuid: Uuid,
+	password: &str,
+	zero_rtt: bool,
+) -> tuic_client::Config {
+	tuic_client::Config {
+		relay: tuic_client::config::Relay {
+			server: ("127.0.0.1".to_string(), server_port),
+			uuid,
+			password: Arc::from(password.as_bytes().to_vec().into_boxed_slice()),
+			ip: None,
+			ipstack_prefer: tuic_client::utils::StackPrefer::V4first,
+			certificates: Vec::new(),
+			udp_relay_mode: tuic_client::utils::UdpRelayMode::Native,
+			congestion_control: tuic_client::utils::CongestionControl::Cubic,
+			alpn: vec![b"h3".to_vec()],
+			zero_rtt_handshake: zero_rtt,
+			disable_sni: true,
+			disable_native_certs: true,
+			gso: false,
+			pmtu: false,
+			skip_cert_verify: true,
+			..Default::default()
+		},
+		local: tuic_client::config::Local {
+			server: format!("127.0.0.1:{socks_port}").parse().unwrap(),
+			username: None,
+			password: None,
+			// `None` (not `Some(false)`): with `Some(false)` the SOCKS5 UDP-associate
+			// socket calls `set_only_v6(true)`, which fails with ENOPROTOOPT on the
+			// IPv4 associate socket used here (notably on CI runners without IPv6).
+			// `None` skips the dual-stack setsockopt entirely.
+			dual_stack: None,
+			max_packet_size: 1500,
+			tcp_forward: Vec::new(),
+			udp_forward: Vec::new(),
+		},
+		log_level: "debug".to_string(),
+	}
+}
+
+/// Start a quiche-backed `tuic-server` plus a `tuic-client`, waiting for the
+/// client's SOCKS5 proxy to come up. Returns the SOCKS5 address.
+///
+/// NOTE: `tuic_client::run` installs a **process-global** connection
+/// (`OnceCell`), so at most one client may run per test process — keep to one
+/// client-starting test per `tests/*.rs` file.
+pub async fn start_quiche_pair(server_port: u16, socks_port: u16, zero_rtt: bool) -> String {
+	install_crypto_provider();
+
+	let uuid = Uuid::new_v4();
+	let password = "test_password";
+	let server_addr: SocketAddr = format!("127.0.0.1:{server_port}").parse().unwrap();
+	let data_dir = std::env::temp_dir().join(format!("wind-tuiche-test-{server_port}"));
+
+	let scfg = quiche_server_config(server_addr, data_dir, uuid, password, zero_rtt);
+	tokio::spawn(async move {
+		match timeout(Duration::from_secs(20), tuic_server::run(scfg)).await {
+			Ok(Ok(())) => info!("[quiche test] server exited ok"),
+			Ok(Err(e)) => error!("[quiche test] server error: {e}"),
+			Err(_) => info!("[quiche test] server timed out (expected at test end)"),
+		}
+	});
+	tokio::time::sleep(Duration::from_secs(1)).await;
+
+	let ccfg = tuic_client_config(server_port, socks_port, uuid, password, zero_rtt);
+	tokio::spawn(async move {
+		match timeout(Duration::from_secs(20), tuic_client::run(ccfg)).await {
+			Ok(Ok(())) => info!("[quiche test] client exited ok"),
+			Ok(Err(e)) => error!("[quiche test] client error: {e}"),
+			Err(_) => info!("[quiche test] client timed out (expected at test end)"),
+		}
+	});
+	tokio::time::sleep(Duration::from_secs(2)).await;
+
+	format!("127.0.0.1:{socks_port}")
+}
+
+/// Start a quinn-backed `tuic-server` plus a `tuic-client`, waiting for the
+/// client's SOCKS5 proxy to come up. Returns the SOCKS5 address. Mirrors
+/// [`start_quiche_pair`] but exercises the default quinn backend.
+///
+/// NOTE: `tuic_client::run` installs a **process-global** connection
+/// (`OnceCell`), so at most one client may run per test process — keep to one
+/// client-starting test per `tests/*.rs` file.
+pub async fn start_quinn_pair(server_port: u16, socks_port: u16, zero_rtt: bool) -> String {
+	install_crypto_provider();
+
+	let uuid = Uuid::new_v4();
+	let password = "test_password";
+	let server_addr: SocketAddr = format!("127.0.0.1:{server_port}").parse().unwrap();
+	let data_dir = std::env::temp_dir().join(format!("wind-tuic-quinn-test-{server_port}"));
+
+	let scfg = quinn_server_config(server_addr, data_dir, uuid, password, zero_rtt);
+	tokio::spawn(async move {
+		match timeout(Duration::from_secs(20), tuic_server::run(scfg)).await {
+			Ok(Ok(())) => info!("[quinn test] server exited ok"),
+			Ok(Err(e)) => error!("[quinn test] server error: {e}"),
+			Err(_) => info!("[quinn test] server timed out (expected at test end)"),
+		}
+	});
+	tokio::time::sleep(Duration::from_secs(1)).await;
+
+	let ccfg = tuic_client_config(server_port, socks_port, uuid, password, zero_rtt);
+	tokio::spawn(async move {
+		match timeout(Duration::from_secs(20), tuic_client::run(ccfg)).await {
+			Ok(Ok(())) => info!("[quinn test] client exited ok"),
+			Ok(Err(e)) => error!("[quinn test] client error: {e}"),
+			Err(_) => info!("[quinn test] client timed out (expected at test end)"),
+		}
+	});
+	tokio::time::sleep(Duration::from_secs(2)).await;
+
+	format!("127.0.0.1:{socks_port}")
+}
+
 pub async fn run_tcp_echo_server(bind_addr: &str, test_name: &str) -> (tokio::task::JoinHandle<()>, std::net::SocketAddr) {
 	use tokio::{
 		io::{AsyncReadExt, AsyncWriteExt},
@@ -56,7 +265,6 @@ pub async fn run_tcp_echo_server(bind_addr: &str, test_name: &str) -> (tokio::ta
 	(echo_task, echo_addr)
 }
 
-// Helper function to create and run a UDP echo server
 pub async fn run_udp_echo_server(
 	bind_addr: &str,
 	test_name: &str,
@@ -100,13 +308,12 @@ pub async fn run_udp_echo_server(
 	(echo_task, echo_addr, echo_server)
 }
 
-// Helper function to test TCP connection through SOCKS5
 pub async fn test_tcp_through_socks5(
 	socks5_addr: &str,
 	target_addr: std::net::SocketAddr,
 	test_data: &[u8],
 	test_name: &str,
-) -> Result<bool, String> {
+) -> bool {
 	use fast_socks5::client::{Config, Socks5Stream};
 	use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
@@ -135,53 +342,51 @@ pub async fn test_tcp_through_socks5(
 
 			if let Err(e) = stream.write_all(test_data).await {
 				error!("[{}] Failed to send data: {}", test_name, e);
-				return Err(format!("Failed to send data: {}", e));
+				return false;
 			}
 
 			info!("[{}] Data sent successfully", test_name);
 			tokio::time::sleep(Duration::from_millis(500)).await;
 
 			let mut buffer = vec![0u8; test_data.len()];
-			match timeout(Duration::from_secs(10), stream.read_exact(&mut buffer)).await {
+			match timeout(Duration::from_secs(3), stream.read_exact(&mut buffer)).await {
 				Ok(Ok(_)) => {
 					info!("[{}] Received {} bytes: {:?}", test_name, buffer.len(), &buffer);
 
 					if buffer.as_slice() == test_data {
 						info!("[{}] ✓ TCP echo test PASSED - data matches!", test_name);
-						Ok(true)
+						true
 					} else {
 						error!("[{}] ✗ TCP echo test FAILED - data mismatch!", test_name);
 						error!("[{}] Expected: {:?}", test_name, test_data);
 						error!("[{}] Got: {:?}", test_name, &buffer);
-						Err("Data mismatch".to_string())
+						false
 					}
 				}
 				Ok(Err(e)) => {
 					error!("[{}] Failed to read response: {}", test_name, e);
-					Err(format!("Failed to read response: {}", e))
+					false
 				}
 				Err(_) => {
 					error!("[{}] Timeout waiting for response", test_name);
-					Err("Timeout waiting for TCP response".to_string())
+					false
 				}
 			}
 		}
 		Err(e) => {
 			error!("[{}] Failed to connect to SOCKS5 proxy: {}", test_name, e);
-			Err(format!("Failed to connect to SOCKS5 proxy: {}", e))
+			false
 		}
 	}
 }
 
-// Helper function to test UDP connection through SOCKS5
-// Returns Ok(true) on success, Err with detailed message on failure
 pub async fn test_udp_through_socks5(
 	socks5_addr: &str,
 	target_addr: std::net::SocketAddr,
 	test_data: &[u8],
 	test_name: &str,
 	bind_addr: std::net::SocketAddr,
-) -> Result<bool, String> {
+) -> bool {
 	use fast_socks5::client::Socks5Datagram;
 	use tokio::net::TcpStream;
 
@@ -219,51 +424,50 @@ pub async fn test_udp_through_socks5(
 							info!("[{}] Waiting for echo response...", test_name);
 
 							let mut buffer = vec![0u8; 1024];
-							match timeout(Duration::from_secs(10), socks.recv_from(&mut buffer)).await {
+							match timeout(Duration::from_secs(5), socks.recv_from(&mut buffer)).await {
 								Ok(Ok((len, addr))) => {
 									info!("[{}] Received {} bytes from {:?}", test_name, len, addr);
 									info!("[{}] Response data: {:?}", test_name, &buffer[..len]);
 
 									if &buffer[..len] == test_data {
 										info!("[{}] ✓ UDP echo test PASSED - data matches!", test_name);
-										Ok(true)
+										true
 									} else {
 										error!("[{}] ✗ UDP echo test FAILED - data mismatch!", test_name);
 										error!("[{}] Expected: {:?}", test_name, test_data);
 										error!("[{}] Got: {:?}", test_name, &buffer[..len]);
-										Err("Data mismatch".to_string())
+										false
 									}
 								}
 								Ok(Err(e)) => {
 									error!("[{}] Failed to receive response: {}", test_name, e);
-									Err(format!("Failed to receive response: {}", e))
+									false
 								}
 								Err(_) => {
 									error!("[{}] Timeout waiting for response", test_name);
-									Err("Timeout waiting for response".to_string())
+									false
 								}
 							}
 						}
 						Err(e) => {
 							error!("[{}] Failed to send data: {}", test_name, e);
-							Err(format!("Failed to send data: {}", e))
+							false
 						}
 					}
 				}
 				Err(e) => {
 					error!("[{}] Failed to bind UDP through SOCKS5: {:?}", test_name, e);
-					Err(format!("Failed to bind UDP through SOCKS5: {:?}", e))
+					false
 				}
 			}
 		}
 		Err(e) => {
 			error!("[{}] Failed to connect to SOCKS5 proxy: {:?}", test_name, e);
-			Err(format!("Failed to connect to SOCKS5 proxy: {:?}", e))
+			false
 		}
 	}
 }
 
-// Helper function to create and run a SOCKS5 server
 // This server can be used as a proxy for testing TUIC client proxy
 // configuration
 pub async fn run_socks5_server(

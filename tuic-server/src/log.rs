@@ -1,27 +1,38 @@
-use std::io;
+use std::{cmp::max, io};
 
-use eyre::Context as _;
+use eyre::{Context as _, Result};
 use tracing::level_filters::LevelFilter;
+use tracing_appender::{
+	non_blocking::{NonBlocking, WorkerGuard},
+	rolling,
+};
 use tracing_subscriber::{Layer, fmt::time::LocalTime, layer::SubscriberExt as _, util::SubscriberInitExt as _};
 
-use crate::config::{Config, LogConfig, LogFormat, LogRotation};
+use crate::config::{Config, LogConfig, LogFormat, LogLevel, LogRotation};
 
 /// RAII guards that keep background tasks alive for the program's lifetime.
 pub struct LogGuards {
-	_file_guard: Option<tracing_appender::non_blocking::WorkerGuard>,
+	_file_guard: Option<WorkerGuard>,
 }
 
 /// Initialise tracing from [`Config`].
-pub fn init(config: &Config) -> eyre::Result<LogGuards> {
+pub fn init(config: &Config) -> Result<LogGuards> {
+	let t = &config.log;
+
 	let filter = tracing_subscriber::filter::Targets::new()
 		.with_targets(vec![
-			("tuic", config.log_level),
-			("tuic_quinn", config.log_level),
-			("tuic_server", config.log_level),
+			("tuic_core", LevelFilter::from(config.log_level)),
+			("tuic_server", LevelFilter::from(config.log_level)),
+			("wind_core", LevelFilter::from(config.log_level)),
+			("wind_tuic", LevelFilter::from(config.log_level)),
+			("wind_socks", LevelFilter::from(config.log_level)),
+			("wind_acme", LevelFilter::from(config.log_level)),
+			("wind_base", LevelFilter::from(config.log_level)),
+			("wind_dns", LevelFilter::from(config.log_level)),
 		])
-		.with_default(LevelFilter::INFO);
+		.with_default(max(LogLevel::Info, config.log_level));
 
-	let (file_writer, file_guard) = build_file_writer(&config.log)?;
+	let (file_writer, file_guard) = build_file_writer(t)?;
 	let writer = move || -> Box<dyn io::Write + Send> {
 		match file_writer.as_ref() {
 			Some(fw) => Box::new(TeeWriter {
@@ -36,10 +47,11 @@ pub fn init(config: &Config) -> eyre::Result<LogGuards> {
 		"[year repr:last_two]-[month]-[day] [hour]:[minute]:[second]"
 	));
 
-	let fmt_layer: BoxedLayer<tracing_subscriber::Registry> = match config.log.format {
-		LogFormat::Text if config.log.compact => tracing_subscriber::fmt::layer()
+	let fmt_layer: BoxedLayer<tracing_subscriber::Registry> = match t.format {
+		LogFormat::Text if t.compact => tracing_subscriber::fmt::layer()
 			.with_target(false)
 			.with_thread_ids(false)
+			.with_thread_names(false)
 			.with_timer(timer)
 			.with_writer(writer)
 			.compact()
@@ -48,6 +60,7 @@ pub fn init(config: &Config) -> eyre::Result<LogGuards> {
 		LogFormat::Text => tracing_subscriber::fmt::layer()
 			.with_target(false)
 			.with_thread_ids(false)
+			.with_thread_names(false)
 			.with_timer(timer)
 			.with_writer(writer)
 			.with_filter(filter)
@@ -63,21 +76,15 @@ pub fn init(config: &Config) -> eyre::Result<LogGuards> {
 			.boxed(),
 	};
 
-	tracing_subscriber::registry()
-		.with(fmt_layer)
-		.try_init()
-		.context("installing tracing subscriber")?;
+	let subscriber = tracing_subscriber::registry().with(fmt_layer);
+
+	subscriber.try_init().context("installing tracing subscriber")?;
 
 	Ok(LogGuards { _file_guard: file_guard })
 }
 
 /// Build a cloneable, non-blocking file writer if `log_file` is set.
-fn build_file_writer(
-	t: &LogConfig,
-) -> eyre::Result<(
-	Option<tracing_appender::non_blocking::NonBlocking>,
-	Option<tracing_appender::non_blocking::WorkerGuard>,
-)> {
+fn build_file_writer(t: &LogConfig) -> Result<(Option<NonBlocking>, Option<WorkerGuard>)> {
 	let Some(path) = t.log_file.as_ref() else {
 		return Ok((None, None));
 	};
@@ -94,9 +101,9 @@ fn build_file_writer(
 	}
 
 	let appender = match t.log_rotation {
-		LogRotation::Never => tracing_appender::rolling::never(&dir, &file_name),
-		LogRotation::Hourly => tracing_appender::rolling::hourly(&dir, &file_name),
-		LogRotation::Daily => tracing_appender::rolling::daily(&dir, &file_name),
+		LogRotation::Never => rolling::never(&dir, &file_name),
+		LogRotation::Hourly => rolling::hourly(&dir, &file_name),
+		LogRotation::Daily => rolling::daily(&dir, &file_name),
 	};
 	let (nb, guard) = tracing_appender::non_blocking(appender);
 	Ok((Some(nb), Some(guard)))

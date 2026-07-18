@@ -1,0 +1,3 @@
+[submodule "forks/wind"]
+	path = forks/wind
+	url = https://github.com/rust-proxy/wind.git

@@ -1,42 +1,61 @@
 use std::{
-	net::{SocketAddr, TcpListener as StdTcpListener},
-	sync::{
-		Arc,
-		atomic::{AtomicU16, Ordering},
-	},
+	net::{IpAddr, Ipv4Addr, SocketAddr, TcpListener as StdTcpListener},
+	sync::atomic::{AtomicU16, Ordering},
 };
 
+use fast_socks5::{ReplyError, Socks5Command, server::Socks5ServerProtocol};
+use once_cell::sync::OnceCell;
 use socket2::{Domain, Protocol, SockAddr, Socket, Type};
-use socks5_server::{
-	Auth, Connection, Server as Socks5Server,
-	auth::{NoAuth, Password},
-};
-use tokio::net::TcpListener;
-use tracing::{debug, info, warn};
+use tokio::net::{TcpListener, TcpStream};
+use tokio_util::sync::CancellationToken;
+use tracing::{Instrument, debug, info, warn};
 
-use crate::error::Error;
+use crate::{config::Local, error::Error};
 
 mod handle_task;
 mod udp_session;
 
-pub use self::udp_session::UdpSession;
+static SERVER: OnceCell<Server> = OnceCell::new();
+
+/// SOCKS5 authentication configuration derived from the client `Local` config.
+enum AuthConfig {
+	NoAuth,
+	Password { username: String, password: String },
+}
 
 pub struct Server {
-	inner: Socks5Server,
+	listener: TcpListener,
 	dual_stack: Option<bool>,
 	max_pkt_size: usize,
 	next_assoc_id: AtomicU16,
+	auth: AuthConfig,
 }
 
 impl Server {
-	pub fn new(
+	pub fn set_config(cfg: Local) -> Result<(), Error> {
+		SERVER
+			.set(Self::new(
+				cfg.server,
+				cfg.dual_stack,
+				cfg.max_packet_size,
+				cfg.username,
+				cfg.password,
+			)?)
+			// Called more than once (SERVER already initialized): return an error
+			// instead of `unwrap()`-panicking the caller.
+			.map_err(|_| Error::Socks5("socks5 server already initialized".to_string()))?;
+
+		Ok(())
+	}
+
+	fn new(
 		addr: SocketAddr,
 		dual_stack: Option<bool>,
 		max_pkt_size: usize,
 		username: Option<Vec<u8>>,
 		password: Option<Vec<u8>>,
 	) -> Result<Self, Error> {
-		let socket = {
+		let listener = {
 			let domain = match addr {
 				SocketAddr::V4(_) => Domain::IPV4,
 				SocketAddr::V6(_) => Domain::IPV6,
@@ -73,55 +92,123 @@ impl Server {
 				.map_err(|err| Error::Socket("failed to create socks5 server socket", err))?
 		};
 
-		let auth: Arc<dyn Auth + Send + Sync> = match (username, password) {
-			(Some(username), Some(password)) => Arc::new(Password::new(username, password)),
-			(None, None) => Arc::new(NoAuth),
+		// `fast_socks5` verifies credentials via a closure, so the username and
+		// password are kept as UTF-8 strings. Config supplies raw bytes; lossy
+		// decoding preserves the previous behaviour for well-formed credentials.
+		let auth = match (username, password) {
+			(Some(username), Some(password)) => AuthConfig::Password {
+				username: String::from_utf8_lossy(&username).into_owned(),
+				password: String::from_utf8_lossy(&password).into_owned(),
+			},
+			(None, None) => AuthConfig::NoAuth,
 			_ => return Err(Error::InvalidSocks5Auth),
 		};
 
 		Ok(Self {
-			inner: Socks5Server::new(socket, auth),
+			listener,
 			dual_stack,
 			max_pkt_size,
 			next_assoc_id: AtomicU16::new(0),
+			auth,
 		})
 	}
 
-	pub async fn start(ctx: Arc<crate::AppContext>) {
-		let server = ctx.socks5.clone();
+	/// Accept SOCKS5 connections until `cancel` fires, then wait for in-flight
+	/// session tasks to wind down (each gets a child token, so cancellation
+	/// aborts handshakes and relays promptly).
+	pub async fn start(cancel: CancellationToken) {
+		let server = SERVER.get().unwrap();
 
-		warn!("[socks5] server started, listening on {}", server.inner.local_addr().unwrap());
+		info!(
+			"[socks5] server started, listening on {}",
+			server.listener.local_addr().unwrap()
+		);
 
+		let conn_tasks = tokio_util::task::TaskTracker::new();
 		loop {
-			match server.inner.accept().await {
-				Ok((conn, addr)) => {
-					debug!("[socks5] [{addr}] connection established");
-
-					let server = server.clone();
-					let ctx = ctx.clone();
-					tokio::spawn(async move {
-						match conn.handshake().await {
-							Ok(Connection::Associate(associate, _)) => {
-								let assoc_id = server.next_assoc_id.fetch_add(1, Ordering::Relaxed);
-								info!("[socks5] [{addr}] [associate] [{assoc_id:#06x}]");
-								Self::handle_associate(associate, assoc_id, server.dual_stack, server.max_pkt_size, ctx).await;
-							}
-							Ok(Connection::Bind(bind, _)) => {
-								info!("[socks5] [{addr}] [bind]");
-								Self::handle_bind(bind).await;
-							}
-							Ok(Connection::Connect(connect, target_addr)) => {
-								info!("[socks5] [{addr}] [connect] {target_addr}");
-								Self::handle_connect(connect, target_addr, ctx).await;
-							}
-							Err(err) => warn!("[socks5] [{addr}] handshake error: {err}"),
-						};
-
-						debug!("[socks5] [{addr}] connection closed");
-					});
+			tokio::select! {
+				_ = cancel.cancelled() => {
+					info!("[socks5] cancellation received, shutting down");
+					break;
 				}
-				Err(err) => warn!("[socks5] failed to establish connection: {err}"),
+				res = server.listener.accept() => match res {
+					Ok((stream, addr)) => {
+						let span = tracing::info_span!("socks5", peer = %addr);
+						let conn_cancel = cancel.child_token();
+						conn_tasks.spawn(
+							async move {
+								tokio::select! {
+									_ = conn_cancel.cancelled() => {
+										debug!("session aborted by shutdown");
+									}
+									_ = Self::handle_socks5_conn(server, stream, addr) => {}
+								}
+							}
+							.instrument(span),
+						);
+					}
+					Err(err) => warn!("[socks5] failed to establish connection: {err}"),
+				}
 			}
 		}
+		conn_tasks.close();
+		conn_tasks.wait().await;
+	}
+
+	async fn handle_socks5_conn(server: &Server, stream: TcpStream, peer_addr: SocketAddr) {
+		debug!("connection established");
+
+		// The relay UDP socket (for UDP ASSOCIATE) is bound on and reported with
+		// the local IP of the accepted control connection, mirroring the previous
+		// behaviour. Captured before the stream is consumed by the handshake.
+		let local_ip = stream.local_addr().map(|a| a.ip()).unwrap_or(IpAddr::V4(Ipv4Addr::LOCALHOST));
+
+		// SOCKS5 authentication handshake.
+		let proto = match &server.auth {
+			AuthConfig::NoAuth => match Socks5ServerProtocol::accept_no_auth(stream).await {
+				Ok(proto) => proto,
+				Err(err) => {
+					warn!(error = %err, "handshake error");
+					return;
+				}
+			},
+			AuthConfig::Password { username, password } => {
+				match Socks5ServerProtocol::accept_password_auth(stream, |u, p| u == *username && p == *password).await {
+					Ok((proto, _)) => proto,
+					Err(err) => {
+						warn!(error = %err, "authentication error");
+						return;
+					}
+				}
+			}
+		};
+
+		let (proto, cmd, target_addr) = match proto.read_command().await {
+			Ok(res) => res,
+			Err(err) => {
+				warn!(error = %err, "reading command error");
+				return;
+			}
+		};
+
+		match cmd {
+			Socks5Command::TCPConnect => {
+				info!(target = %target_addr, "connect");
+				Self::handle_connect(proto, target_addr, peer_addr).await;
+			}
+			Socks5Command::UDPAssociate => {
+				let assoc_id = server.next_assoc_id.fetch_add(1, Ordering::Relaxed);
+				info!(assoc_id = format_args!("{assoc_id:#06x}"), "associate");
+				Self::handle_associate(proto, assoc_id, peer_addr, local_ip, server.dual_stack, server.max_pkt_size).await;
+			}
+			Socks5Command::TCPBind => {
+				warn!("[socks5] [{peer_addr}] [bind] command not supported");
+				if let Err(err) = proto.reply_error(&ReplyError::CommandNotSupported).await {
+					warn!("[socks5] [{peer_addr}] [bind] command reply error: {err}");
+				}
+			}
+		}
+
+		debug!("connection closed");
 	}
 }

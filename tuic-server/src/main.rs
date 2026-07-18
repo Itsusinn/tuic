@@ -1,31 +1,17 @@
-use std::process;
+use std::{process, time::Duration};
 
 use clap::Parser;
-#[cfg(all(feature = "jemallocator", not(feature = "dhat-heap")))]
+#[cfg(feature = "jemallocator")]
 use tikv_jemallocator::Jemalloc;
-use tuic_server::{
-	config::{Cli, Control, EnvState, ResolvedRuntime, parse_config},
-	log,
-};
+use tokio_util::sync::CancellationToken;
+use tuic_server::config::{Cli, Control, EnvState, parse_config};
 
-// dhat takes over the global allocator to trace every heap allocation, so it
-// must be the sole `#[global_allocator]`; jemalloc is disabled whenever
-// `dhat-heap` is enabled.
-#[cfg(all(feature = "jemallocator", not(feature = "dhat-heap")))]
+#[cfg(feature = "jemallocator")]
 #[global_allocator]
 static GLOBAL: Jemalloc = Jemalloc;
 
-#[cfg(feature = "dhat-heap")]
-#[global_allocator]
-static ALLOC: dhat::Alloc = dhat::Alloc;
-
-fn main() -> eyre::Result<()> {
-	// Profile the whole process. Dropping the guard on graceful shutdown writes
-	// `dhat-heap.json`; its at-exit ("t-end") stats show allocations still live
-	// at exit, i.e. leaked resources.
-	#[cfg(feature = "dhat-heap")]
-	let _dhat = dhat::Profiler::new_heap();
-
+#[tokio::main]
+async fn main() -> eyre::Result<()> {
 	#[cfg(feature = "aws-lc-rs")]
 	{
 		_ = rustls::crypto::aws_lc_rs::default_provider().install_default();
@@ -37,18 +23,9 @@ fn main() -> eyre::Result<()> {
 	}
 	let cli = Cli::parse();
 	let env_state = EnvState::from_system();
-
-	// Create a temporary single-threaded runtime just to parse config
-	// asynchronously
-	let cfg = tokio::runtime::Builder::new_current_thread()
-		.enable_all()
-		.build()?
-		.block_on(async { parse_config(cli, env_state).await });
-
-	let cfg = match cfg {
+	let cfg = match parse_config(cli, env_state).await {
 		Ok(cfg) => cfg,
 		Err(err) => {
-			// Check if it's a Control error (Help or Version)
 			if let Some(control) = err.downcast_ref::<Control>() {
 				println!("{}", control);
 				process::exit(0);
@@ -56,20 +33,49 @@ fn main() -> eyre::Result<()> {
 			return Err(err);
 		}
 	};
-	let _log_guards = log::init(&cfg)?;
+	let _guards = tuic_server::log::init(&cfg)?;
 
-	let mut builder = match cfg.tokio_runtime.resolve() {
-		ResolvedRuntime::MultiThread => tokio::runtime::Builder::new_multi_thread(),
-		ResolvedRuntime::CurrentThread => tokio::runtime::Builder::new_current_thread(),
-	};
+	// Own the cancel token here so the ctrl-c branch can actually trigger a
+	// graceful shutdown of the running server. Previously `tuic_server::run`
+	// constructed its own token internally, so the `select!` "Received Ctrl-C"
+	// arm dropped straight into `Ok(())` and the listen task + every spawned
+	// connection handler were left to be killed by runtime drop — log guards
+	// never flushed, in-flight QUIC streams got reset instead of cleanly closed.
+	let cancel = CancellationToken::new();
+	let mut server = tokio::spawn(tuic_server::run_with_cancel(cfg, cancel.clone()));
 
-	let rt = builder.enable_all().build()?;
+	tokio::select! {
+		res = &mut server => {
+			match res {
+				Ok(Ok(())) => {}
+				Ok(Err(err)) => {
+					tracing::error!("Server exited with error: {err}");
+					return Err(err);
+				}
+				Err(join_err) => {
+					tracing::error!("Server task panicked or was cancelled: {join_err}");
+					return Err(eyre::eyre!("Server task panicked or was cancelled: {join_err}"));
+				}
+			}
+		}
+		_ = wind_core::shutdown_signal() => {
+			tracing::info!("Received shutdown signal, shutting down.");
+			cancel.cancel();
 
-	rt.block_on(async move {
-		let guard = tuic_server::run(cfg).await?;
-		tokio::signal::ctrl_c().await?;
-		guard.cancel.cancel();
-		tracing::info!("Received Ctrl-C, shutting down.");
-		Ok(())
-	})
+			// Give the server up to 10 seconds to drain in-flight connections
+			// before we drop out of main and force the runtime to abort
+			// anything still running. The bound here is the same as the
+			// per-connection idle timeout; tune via configuration if longer
+			// drains become normal.
+			match tokio::time::timeout(Duration::from_secs(10), server).await {
+				Ok(Ok(Ok(()))) => {}
+				Ok(Ok(Err(err))) => tracing::warn!("Server drained with error: {err}"),
+				Ok(Err(join_err)) => tracing::warn!("Server task drain join error: {join_err}"),
+				Err(_) => tracing::warn!(
+					"Server did not drain within 10s of shutdown signal; aborting outstanding tasks"
+				),
+			}
+		}
+	}
+	Ok(())
 }

@@ -1,0 +1,16 @@
+{
+    // Client relay configuration
+    relay: {
+        server: 'example.com:8443',
+        uuid: '00000000-0000-0000-0000-000000000000',
+        password: 'test_password',
+        /* Optional settings */
+        udp_relay_mode: 'native',
+        congestion_control: 'cubic',
+    },
+    // Local server configuration
+    local: {
+        server: '127.0.0.1:1080',
+    },
+    log_level: 'info', // Set logging level
+}

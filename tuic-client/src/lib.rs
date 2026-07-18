@@ -1,134 +1,65 @@
 // Library interface for tuic-client
 // This allows the client to be used as a library in integration tests
 
-use std::{
-	collections::HashMap,
-	sync::{
-		Arc,
-		atomic::{AtomicBool, AtomicU16, Ordering},
-	},
-};
+use std::sync::Arc;
 
-use tokio::{
-	sync::{Mutex as AsyncMutex, RwLock as AsyncRwLock},
-	time::{Duration, sleep},
-};
-use tracing::{error, warn};
+use tokio_util::sync::CancellationToken;
+use wind_core::AppContext;
 
 pub mod config;
-pub mod connection;
 pub mod error;
 pub mod forward;
 pub mod socks5;
 pub mod utils;
+pub mod wind_adapter;
 
 pub use config::Config;
 
-/// Application-level context holding all shared state.
-/// Passed as `Arc<AppContext>` throughout the client; eliminates global
-/// statics.
-pub struct AppContext {
-	/// Manages the QUIC endpoint and current connection
-	pub conn_mgr: Arc<connection::ConnectionManager>,
-	/// SOCKS5 proxy server
-	pub socks5: Arc<socks5::Server>,
-	/// UDP session registry for SOCKS5 UDP associate
-	pub socks5_udp_sessions: Arc<AsyncRwLock<HashMap<u16, socks5::UdpSession>>>,
-	/// UDP session registry for TCP/UDP port forwarding
-	pub fwd_udp_sessions: Arc<AsyncRwLock<HashMap<u16, forward::ForwardUdpSession>>>,
-	/// Next association ID counter for UDP forwarding (high bit set to avoid
-	/// collisions with SOCKS5 IDs)
-	pub next_fwd_assoc_id: AtomicU16,
-	/// Startup connection behavior.
-	pub startup_mode: config::StartupMode,
-	/// Whether the first relay connection has been established at least once.
-	pub first_connected: AtomicBool,
-	/// Serializes first-connection logic under non-eager modes.
-	pub first_connect_lock: AsyncMutex<()>,
-}
-
-impl AppContext {
-	/// Get or re-establish the TUIC relay connection.
-	pub async fn get_conn(&self) -> Result<connection::Connection, error::Error> {
-		if self.first_connected.load(Ordering::Relaxed) {
-			return self
-				.conn_mgr
-				.get_conn(self.socks5_udp_sessions.clone(), self.fwd_udp_sessions.clone())
-				.await;
-		}
-
-		let _guard = self.first_connect_lock.lock().await;
-		if self.first_connected.load(Ordering::Relaxed) {
-			return self
-				.conn_mgr
-				.get_conn(self.socks5_udp_sessions.clone(), self.fwd_udp_sessions.clone())
-				.await;
-		}
-
-		match self.startup_mode {
-			config::StartupMode::Eager | config::StartupMode::Lazy => {
-				let conn = self
-					.conn_mgr
-					.get_conn(self.socks5_udp_sessions.clone(), self.fwd_udp_sessions.clone())
-					.await
-					.unwrap_or_else(|err| {
-						error!("[relay] first on-demand connection failed: {err}");
-						std::process::exit(1);
-					});
-				self.first_connected.store(true, Ordering::Relaxed);
-				Ok(conn)
-			}
-			config::StartupMode::Loop => loop {
-				match self
-					.conn_mgr
-					.get_conn(self.socks5_udp_sessions.clone(), self.fwd_udp_sessions.clone())
-					.await
-				{
-					Ok(conn) => {
-						self.first_connected.store(true, Ordering::Relaxed);
-						return Ok(conn);
-					}
-					Err(err) => {
-						warn!("[relay] first on-demand connection failed in loop mode, retrying: {err}");
-						sleep(Duration::from_secs(1)).await;
-					}
-				}
-			},
-		}
-	}
-}
-
-/// Run the TUIC client with the given configuration.
+/// Run the TUIC client with the given configuration (using wind-tuic).
+///
+/// Constructs its own [`CancellationToken`] internally; callers that want to
+/// drive a graceful shutdown from outside should use [`run_with_cancel`].
 pub async fn run(cfg: Config) -> eyre::Result<()> {
-	let startup_mode = cfg.relay.startup_mode;
-	let conn_mgr = Arc::new(connection::ConnectionManager::build(cfg.relay).await?);
-	let socks5 = Arc::new(socks5::Server::new(
-		cfg.local
-			.server
-			.ok_or_else(|| eyre::eyre!("`local.server` (SOCKS5 listen address) is required"))?,
-		cfg.local.dual_stack,
-		cfg.local.max_packet_size,
-		cfg.local.username,
-		cfg.local.password,
-	)?);
-	let ctx = Arc::new(AppContext {
-		conn_mgr,
-		socks5,
-		socks5_udp_sessions: Arc::new(AsyncRwLock::new(HashMap::new())),
-		fwd_udp_sessions: Arc::new(AsyncRwLock::new(HashMap::new())),
-		next_fwd_assoc_id: AtomicU16::new(0),
-		startup_mode,
-		first_connected: AtomicBool::new(false),
-		first_connect_lock: AsyncMutex::new(()),
-	});
+	run_with_cancel(cfg, CancellationToken::new()).await
+}
 
-	// Eager mode keeps the original behavior: connect at startup and exit on
-	// failure.
-	if matches!(startup_mode, config::StartupMode::Eager) {
-		ctx.get_conn().await?;
+/// Run the TUIC client with a caller-owned cancel token.
+///
+/// Cancelling `cancel` stops the SOCKS5 accept loop and the TCP/UDP
+/// forwarders, closes the TUIC connection (so the server sees the client go
+/// away immediately instead of waiting out its idle timeout), and waits for
+/// tracked background tasks to drain. Pair with `tokio::select!` on
+/// [`wind_core::shutdown_signal`] so signal-triggered shutdown (Ctrl-C /
+/// SIGTERM) is graceful instead of relying on runtime drop.
+pub async fn run_with_cancel(cfg: Config, cancel: CancellationToken) -> eyre::Result<()> {
+	// The context token is the caller's token, so the outbound's heartbeat poll
+	// task (which closes the QUIC connection on cancellation) and every UDP
+	// session task wind down from the same `cancel()`.
+	let ctx = Arc::new(AppContext {
+		tasks: tokio_util::task::TaskTracker::new(),
+		token: cancel.clone(),
+	});
+	wind_adapter::create_connection(ctx.clone(), cfg.relay).await?;
+
+	tracing::info!("TUIC client initialized with wind-tuic backend");
+
+	// Start forwarders (tracked in ctx.tasks, cancelled via ctx.token).
+	forward::start(cfg.local.tcp_forward.clone(), cfg.local.udp_forward.clone(), &ctx).await;
+
+	// Start SOCKS5 server
+	match socks5::Server::set_config(cfg.local) {
+		Ok(()) => {}
+		Err(err) => {
+			return Err(err.into());
+		}
 	}
 
-	forward::start(ctx.clone(), cfg.local.tcp_forward, cfg.local.udp_forward).await;
-	socks5::Server::start(ctx.clone()).await;
+	socks5::Server::start(cancel.clone()).await;
+
+	// `start` only returns once cancelled; drain the tracked background tasks
+	// (heartbeat poll, forwarder loops, UDP sessions) before returning so the
+	// QUIC close frames flush while the runtime is still alive.
+	ctx.tasks.close();
+	ctx.tasks.wait().await;
 	Ok(())
 }

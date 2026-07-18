@@ -1,0 +1,11 @@
+acl = """
+allow localhost
+reject 192.168.0.0/16
+allow google.com
+"""
+
+[users]
+"123e4567-e89b-12d3-a456-426614174000" = "password"
+
+[tls]
+self_sign = true

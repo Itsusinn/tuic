@@ -9,6 +9,5 @@
     "congestion_control": "bbr",
     "max_idle_time": "60s",
     "initial_mtu": 1500,
-    "restful_server": "0.0.0.0:8080",
     "tls": {}
 }

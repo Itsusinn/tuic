@@ -1,30 +1,19 @@
-use std::{process, str::FromStr};
+use std::{process, str::FromStr, time::Duration};
 
 use chrono::{Offset, TimeZone};
 use clap::Parser;
-#[cfg(all(feature = "jemallocator", not(feature = "dhat-heap")))]
+#[cfg(feature = "jemallocator")]
 use tikv_jemallocator::Jemalloc;
+use tokio_util::sync::CancellationToken;
 use tracing::level_filters::LevelFilter;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
-use tuic_client::config::{Cli, Config, EnvState, ResolvedRuntime};
-// dhat takes over the global allocator to trace every heap allocation, so it
-// must be the sole `#[global_allocator]`; jemalloc is disabled whenever
-// `dhat-heap` is enabled.
-#[cfg(all(feature = "jemallocator", not(feature = "dhat-heap")))]
+use tuic_client::config::{Cli, Config, EnvState};
+#[cfg(feature = "jemallocator")]
 #[global_allocator]
 static GLOBAL: Jemalloc = Jemalloc;
 
-#[cfg(feature = "dhat-heap")]
-#[global_allocator]
-static ALLOC: dhat::Alloc = dhat::Alloc;
-
-fn main() -> eyre::Result<()> {
-	// Profile the whole process. Dropping the guard on graceful shutdown writes
-	// `dhat-heap.json`; its at-exit ("t-end") stats show allocations still live
-	// at exit, i.e. leaked resources.
-	#[cfg(feature = "dhat-heap")]
-	let _dhat = dhat::Profiler::new_heap();
-
+#[tokio::main]
+async fn main() -> eyre::Result<()> {
 	#[cfg(feature = "aws-lc-rs")]
 	{
 		_ = rustls::crypto::aws_lc_rs::default_provider().install_default();
@@ -45,8 +34,21 @@ fn main() -> eyre::Result<()> {
 		}
 	};
 	let level = tracing::Level::from_str(&cfg.log_level)?;
+	// Cover the crates and custom targets the client actually logs under. The
+	// old list (`tuic`, `tuic_quinn`) predated the wind-tuic split, so relay
+	// debug (emitted under `wind_tuic` / the `tuic_out` and `udp` targets) fell
+	// through to the default INFO filter and `log_level = "debug"` was
+	// ineffective for it.
 	let filter = tracing_subscriber::filter::Targets::new()
-		.with_targets(vec![("tuic", level), ("tuic_quinn", level), ("tuic_client", level)])
+		.with_targets(vec![
+			("tuic_client", level),
+			("tuic_core", level),
+			("tuic_out", level),
+			("udp", level),
+			("wind_core", level),
+			("wind_quic", level),
+			("wind_tuic", level),
+		])
 		.with_default(LevelFilter::INFO);
 	let registry = tracing_subscriber::registry();
 	registry
@@ -63,35 +65,40 @@ fn main() -> eyre::Result<()> {
 				)),
 		)
 		.try_init()?;
+	// Own the cancel token here so the ctrl-c branch can trigger a graceful
+	// shutdown: stop the SOCKS5/forwarder accept loops, close the TUIC
+	// connection (the server learns we left instead of waiting out its idle
+	// timeout), and drain background tasks — same structure as tuic-server.
+	let cancel = CancellationToken::new();
+	let mut client = tokio::spawn(tuic_client::run_with_cancel(cfg, cancel.clone()));
 
-	let mut builder = match cfg.tokio_runtime.resolve() {
-		ResolvedRuntime::MultiThread => tokio::runtime::Builder::new_multi_thread(),
-		ResolvedRuntime::CurrentThread => tokio::runtime::Builder::new_current_thread(),
-	};
-
-	let rt = builder.enable_all().build()?;
-
-	// `run` never returns on its own (the SOCKS5 accept loop runs forever), so a
-	// plain Ctrl-C would hard-kill the process and skip the profiler's `Drop`.
-	// Under `dhat-heap`, race it against Ctrl-C so shutdown is graceful and
-	// `dhat-heap.json` gets written.
-	#[cfg(feature = "dhat-heap")]
-	let result = rt.block_on(async move {
-		tokio::select! {
-			res = tuic_client::run(cfg) => res,
-			_ = tokio::signal::ctrl_c() => {
-				tracing::info!("Received Ctrl-C, shutting down.");
-				Ok(())
+	tokio::select! {
+		res = &mut client => {
+			match res {
+				Ok(Ok(())) => {}
+				Ok(Err(err)) => {
+					tracing::error!("Client exited with error: {err}");
+					return Err(err);
+				}
+				Err(join_err) => {
+					tracing::error!("Client task panicked or was cancelled: {join_err}");
+					return Err(eyre::eyre!("Client task panicked or was cancelled: {join_err}"));
+				}
 			}
 		}
-	});
+		_ = wind_core::shutdown_signal() => {
+			tracing::info!("Received shutdown signal, shutting down.");
+			cancel.cancel();
 
-	#[cfg(not(feature = "dhat-heap"))]
-	let result = rt.block_on(async move { tuic_client::run(cfg).await });
-
-	// Drop the runtime (aborting spawned tasks and freeing their resources)
-	// before `_dhat` falls out of scope, so the leak report reflects a clean
-	// shutdown rather than in-flight work.
-	drop(rt);
-	result
+			// Give in-flight sessions up to 10 seconds to drain before dropping
+			// out of main and letting runtime teardown abort the rest.
+			match tokio::time::timeout(Duration::from_secs(10), client).await {
+				Ok(Ok(Ok(()))) => {}
+				Ok(Ok(Err(err))) => tracing::warn!("Client drained with error: {err}"),
+				Ok(Err(join_err)) => tracing::warn!("Client task drain join error: {join_err}"),
+				Err(_) => tracing::warn!("Client did not drain within 10s of shutdown signal; aborting outstanding tasks"),
+			}
+		}
+	}
+	Ok(())
 }

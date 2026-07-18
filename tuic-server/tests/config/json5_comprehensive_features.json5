@@ -27,12 +27,5 @@
             controller: "bbr",
             initial_window: 1500000, // trailing comma in nested object
         },
-    },
-    
-    // RESTful API
-    restful: {
-        addr: "127.0.0.1:8888",
-        secret: "json5_secret",
-        maximum_clients_per_user: 10,
     }, // trailing comma
 }

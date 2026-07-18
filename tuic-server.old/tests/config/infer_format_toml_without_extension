@@ -1,0 +1,9 @@
+log_level = "info"
+server = "127.0.0.1:8080"
+
+[tls]
+self_sign = true
+hostname = "test.com"
+
+[users]
+"123e4567-e89b-12d3-a456-426614174000" = "password1"

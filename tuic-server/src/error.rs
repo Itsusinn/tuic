@@ -1,10 +1,14 @@
 use std::{io::Error as IoError, net::SocketAddr};
 
+use quinn::ConnectionError;
 use rustls::Error as RustlsError;
 use thiserror::Error;
-use tuic_core::quinn::{ConnectionError, Error as ModelError};
 use uuid::Uuid;
 
+// NOTE: many variants are currently unconstructed inside the workspace but are
+// `pub` API — downstream binaries / future call sites may construct them, so
+// we keep them all. If they remain unconstructed for several releases, prune
+// then.
 #[derive(Debug, Error)]
 pub enum Error {
 	#[error(transparent)]
@@ -17,8 +21,6 @@ pub enum Error {
 	TimedOut,
 	#[error("connection locally closed")]
 	LocallyClosed,
-	#[error(transparent)]
-	Model(#[from] ModelError),
 	#[error("duplicated authentication")]
 	DuplicatedAuth,
 	#[error("authentication failed: {0}")]

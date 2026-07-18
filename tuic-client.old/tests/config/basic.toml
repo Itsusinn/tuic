@@ -1,0 +1,11 @@
+log_level = "warn"
+
+[relay]
+server = "test.example.com:9443"
+uuid = "12345678-1234-5678-1234-567812345678"
+password = "secure_pass"
+udp_relay_mode = "quic"
+zero_rtt_handshake = true
+
+[local]
+server = "127.0.0.1:1080"

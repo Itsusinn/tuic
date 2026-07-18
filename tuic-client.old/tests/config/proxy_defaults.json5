@@ -1,0 +1,15 @@
+{
+  relay: {
+    server: "example.com:443",
+    uuid: "00000000-0000-0000-0000-000000000000",
+    password: "password123",
+    proxy: {
+      server: "127.0.0.1:1080"
+      // username and password are optional
+      // udp_buffer_size should use default value
+    }
+  },
+  local: {
+    server: "127.0.0.1:1081"
+  }
+}

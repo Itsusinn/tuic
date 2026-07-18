@@ -1,0 +1,39 @@
+{
+	// TUIC Client Configuration - JSON5 format
+	// This is a test configuration file demonstrating JSON5 features
+	
+	relay: {
+		server: 'example.com:8443',
+		uuid: '00000000-0000-0000-0000-000000000000',
+		password: 'test_password',
+		
+		// Optional relay settings
+		udp_relay_mode: 'native',
+		congestion_control: 'bbr',
+		zero_rtt_handshake: false,
+		disable_sni: false,
+		
+		// Timeouts and intervals
+		timeout: '8s',
+		heartbeat: '3s',
+		gc_interval: '3s',
+		gc_lifetime: '15s',
+		
+		// QUIC settings
+		initial_mtu: 1200,
+		min_mtu: 1200,
+		gso: true,
+		pmtu: true,
+		
+		// Window sizes
+		send_window: 16777216,
+		receive_window: 8388608,
+	},
+	
+	local: {
+		server: '127.0.0.1:1080',
+		max_packet_size: 1500,
+	},
+	
+	log_level: 'info',
+}

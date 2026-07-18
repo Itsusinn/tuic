@@ -1,0 +1,10 @@
+{
+  "relay": {
+    "server": "minimal.example.com:8443",
+    "uuid": "00000000-0000-0000-0000-000000000000",
+    "password": "minimal_pass"
+  },
+  "local": {
+    "server": "127.0.0.1:1080"
+  }
+}

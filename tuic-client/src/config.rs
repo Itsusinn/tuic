@@ -72,40 +72,6 @@ pub struct Config {
 
 	#[educe(Default = "info")]
 	pub log_level: String,
-
-	#[educe(Default(expression = TokioRuntime::Auto))]
-	pub tokio_runtime: TokioRuntime,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize, serde::Serialize)]
-#[serde(rename_all = "snake_case")]
-pub enum TokioRuntime {
-	#[default]
-	Auto,
-	MultiThread,
-	CurrentThread,
-}
-
-impl TokioRuntime {
-	pub fn resolve(self) -> ResolvedRuntime {
-		match self {
-			TokioRuntime::MultiThread => ResolvedRuntime::MultiThread,
-			TokioRuntime::CurrentThread => ResolvedRuntime::CurrentThread,
-			TokioRuntime::Auto => {
-				if num_cpus::get() <= 2 {
-					ResolvedRuntime::CurrentThread
-				} else {
-					ResolvedRuntime::MultiThread
-				}
-			}
-		}
-	}
-}
-
-#[derive(Debug, Clone, Copy)]
-pub enum ResolvedRuntime {
-	MultiThread,
-	CurrentThread,
 }
 
 #[derive(Debug, Deserialize, serde::Serialize, Educe)]
@@ -154,9 +120,6 @@ pub struct Relay {
 	#[serde(with = "humantime_serde")]
 	pub timeout: Duration,
 
-	#[educe(Default(expression = StartupMode::Lazy))]
-	pub startup_mode: StartupMode,
-
 	#[educe(Default(expression = Duration::from_secs(3)))]
 	#[serde(with = "humantime_serde")]
 	pub heartbeat: Duration,
@@ -190,23 +153,25 @@ pub struct Relay {
 	#[serde(with = "humantime_serde")]
 	pub gc_lifetime: Duration,
 
-	#[educe(Default(expression = 1280u32))]
-	pub max_concurrent_streams: u32,
-
 	#[educe(Default = false)]
 	pub skip_cert_verify: bool,
 
 	#[educe(Default = None)]
 	pub proxy: Option<ProxyConfig>,
-}
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, serde::Serialize, Default)]
-#[serde(rename_all = "lowercase")]
-pub enum StartupMode {
-	Eager,
-	#[default]
-	Lazy,
-	Loop,
+	/// Automatically reconnect to the relay after the connection drops.
+	#[educe(Default = true)]
+	pub reconnect: bool,
+
+	/// Delay before the first reconnect attempt; doubled after each failure.
+	#[educe(Default(expression = Duration::from_millis(500)))]
+	#[serde(with = "humantime_serde")]
+	pub reconnect_initial_backoff: Duration,
+
+	/// Upper bound on the reconnect backoff delay.
+	#[educe(Default(expression = Duration::from_secs(30)))]
+	#[serde(with = "humantime_serde")]
+	pub reconnect_max_backoff: Duration,
 }
 
 #[derive(Debug, Deserialize, serde::Serialize, Educe, Clone, PartialEq, Eq)]
@@ -231,8 +196,8 @@ pub struct ProxyConfig {
 #[educe(Default)]
 #[serde(deny_unknown_fields, default)]
 pub struct Local {
-	#[educe(Default = None)]
-	pub server: Option<SocketAddr>,
+	#[educe(Default(expression = "127.0.0.1:1080".parse().unwrap()))]
+	pub server: SocketAddr,
 
 	#[educe(Default = None)]
 	#[serde(deserialize_with = "deserialize_optional_bytes")]
@@ -247,10 +212,6 @@ pub struct Local {
 
 	#[educe(Default = 1500)]
 	pub max_packet_size: usize,
-
-	#[educe(Default(expression = Duration::from_secs(300)))]
-	#[serde(with = "humantime_serde")]
-	pub socks5_udp_idle_timeout: Duration,
 
 	#[educe(Default(expression = Vec::new()))]
 	pub tcp_forward: Vec<TcpForward>,
@@ -283,12 +244,10 @@ fn default_udp_timeout() -> Duration {
 
 impl Config {
 	pub fn parse(cli: Cli, env_state: EnvState) -> eyre::Result<Self> {
-		// Require config file
 		let path = cli.config.ok_or(ConfigError::NoConfig)?;
 
-		// Check if config file exists
 		if !path.exists() {
-			Err(ConfigError::ConfigNotFound(path.clone()))?;
+			return Err(ConfigError::ConfigNotFound(path))?;
 		}
 
 		let figmet = Figment::from(Serialized::defaults(Config::default()));
@@ -307,7 +266,6 @@ impl Config {
 				_ => format = ConfigFormat::Unknown,
 			}
 		} else {
-			// Fall back to file extension
 			match path
 				.extension()
 				.and_then(|v| v.to_str())
@@ -327,7 +285,6 @@ impl Config {
 			ConfigFormat::Toml => figmet.merge(Toml::file(&path)),
 			ConfigFormat::Yaml => figmet.merge(Yaml::file(&path)),
 			ConfigFormat::Unknown => {
-				// Try to infer format from file content
 				let content = std::fs::read_to_string(&path)?;
 				let inferred_format = infer_config_format(&content);
 
@@ -359,7 +316,6 @@ enum ConfigFormat {
 fn infer_config_format(content: &str) -> ConfigFormat {
 	let trimmed = content.trim();
 
-	// Check for YAML indicators
 	if trimmed.lines().any(|line| {
 		let line = line.trim();
 		// YAML typically has keys followed by colons (not in quotes)
@@ -375,7 +331,6 @@ fn infer_config_format(content: &str) -> ConfigFormat {
 		return ConfigFormat::Yaml;
 	}
 
-	// Check for TOML indicators (section headers)
 	if trimmed.lines().any(|line| {
 		let line = line.trim();
 		line.starts_with('[') && line.ends_with(']') && !line.contains('{')
@@ -383,7 +338,6 @@ fn infer_config_format(content: &str) -> ConfigFormat {
 		return ConfigFormat::Toml;
 	}
 
-	// Check for JSON/JSON5 indicators
 	if trimmed.starts_with('{') || trimmed.starts_with('[') {
 		return ConfigFormat::Json;
 	}
@@ -405,19 +359,31 @@ pub fn deserialize_server<'de, D>(deserializer: D) -> Result<(String, u16), D::E
 where
 	D: Deserializer<'de>,
 {
-	let mut s = String::deserialize(deserializer)?;
+	let s = String::deserialize(deserializer)?;
 
-	let (domain, port) = s.rsplit_once(':').ok_or(DeError::custom("invalid server address"))?;
-
-	let port = port.parse().map_err(DeError::custom)?;
-	s.truncate(domain.len());
-
-	// Strip brackets from IPv6 addresses (e.g., "[::1]" -> "::1")
-	if s.starts_with('[') && s.ends_with(']') {
-		s = s[1..s.len() - 1].to_string();
+	// Bracketed IPv6: "[host]:port" — the host may itself contain colons.
+	if let Some(rest) = s.strip_prefix('[') {
+		let (host, after) = rest
+			.split_once(']')
+			.ok_or_else(|| DeError::custom("unterminated '[' in IPv6 server address"))?;
+		let port = after
+			.strip_prefix(':')
+			.ok_or_else(|| DeError::custom("expected ':port' after ']' in server address"))?;
+		let port = port.parse().map_err(DeError::custom)?;
+		return Ok((host.to_string(), port));
 	}
 
-	Ok((s, port))
+	let (host, port) = s
+		.rsplit_once(':')
+		.ok_or_else(|| DeError::custom("server address must be 'host:port'"))?;
+	// A leftover colon in the host means an unbracketed IPv6 literal, which is
+	// ambiguous (`rsplit_once` would treat part of the address as the port).
+	if host.contains(':') {
+		return Err(DeError::custom("IPv6 server address must be bracketed as '[addr]:port'"));
+	}
+	let port = port.parse().map_err(DeError::custom)?;
+
+	Ok((host.to_string(), port))
 }
 
 pub fn deserialize_password<'de, D>(deserializer: D) -> Result<Arc<[u8]>, D::Error>
@@ -490,6 +456,26 @@ impl From<toml::de::Error> for ConfigError {
 mod tests {
 	use super::*;
 
+	fn parse_server(s: &str) -> Result<(String, u16), serde::de::value::Error> {
+		use serde::de::IntoDeserializer;
+		deserialize_server(s.into_deserializer())
+	}
+
+	#[test]
+	fn deserialize_server_handles_ipv6_domains_and_rejects_ambiguous() {
+		assert_eq!(parse_server("example.com:443").unwrap(), ("example.com".to_string(), 443));
+		assert_eq!(parse_server("1.2.3.4:8443").unwrap(), ("1.2.3.4".to_string(), 8443));
+		assert_eq!(parse_server("[2001:db8::1]:443").unwrap(), ("2001:db8::1".to_string(), 443));
+		assert_eq!(parse_server("[::1]:8443").unwrap(), ("::1".to_string(), 8443));
+
+		// Unbracketed IPv6 is ambiguous and must be rejected rather than split wrong.
+		assert!(parse_server("2001:db8::1").is_err());
+		assert!(parse_server("::1").is_err());
+		// Missing port / malformed.
+		assert!(parse_server("example.com").is_err());
+		assert!(parse_server("[2001:db8::1]").is_err());
+	}
+
 	// Helper function for testing config file parsing
 	fn test_parse_config(config_content: &str, extension: &str) -> eyre::Result<Config> {
 		test_parse_config_with_env(config_content, extension, EnvState::default())
@@ -507,22 +493,18 @@ mod tests {
 
 		fs::write(&config_path, config_content).unwrap();
 
-		// Temporarily set command line arguments for clap to parse
 		let os_args = vec![
 			"test_binary".to_owned(),
 			"--config".to_owned(),
 			config_path.to_string_lossy().into_owned(),
 		];
 
-		// Parse CLI with test arguments
 		let cli = Cli::try_parse_from(os_args).map_err(|e| ConfigError::Figment(figment::Error::from(e.to_string())))?;
 
-		// Call parse with the CLI and env_state
 		Config::parse(cli, env_state)
 	}
 	#[test]
 	fn test_backward_compatibility_standard_json() {
-		// Test backward compatibility with standard JSON format
 		let json_config = include_str!("../tests/config/backward_compatibility_standard_json.json");
 
 		let config = test_parse_config(json_config, ".json5");
@@ -536,7 +518,6 @@ mod tests {
 
 	#[test]
 	fn test_json5_comments() {
-		// Test JSON5 comment support (single-line and multi-line)
 		let json5_config = include_str!("../tests/config/json5_comments.json5");
 
 		let config = test_parse_config(json5_config, ".json5");
@@ -545,7 +526,6 @@ mod tests {
 
 	#[test]
 	fn test_json5_trailing_commas() {
-		// Test JSON5 trailing comma support
 		let json5_config = include_str!("../tests/config/json5_trailing_commas.json5");
 
 		let config = test_parse_config(json5_config, ".json5");
@@ -554,7 +534,6 @@ mod tests {
 
 	#[test]
 	fn test_json5_unquoted_keys() {
-		// Test JSON5 unquoted object keys
 		let json5_config = include_str!("../tests/config/json5_unquoted_keys.json5");
 
 		let config = test_parse_config(json5_config, ".json5");
@@ -563,7 +542,6 @@ mod tests {
 
 	#[test]
 	fn test_json5_single_quotes() {
-		// Test JSON5 single-quoted strings
 		let json5_config = include_str!("../tests/config/json5_single_quotes.json5");
 
 		let config = test_parse_config(json5_config, ".json5");
@@ -572,7 +550,6 @@ mod tests {
 
 	#[test]
 	fn test_json5_multiline_strings() {
-		// Test JSON5 multiline strings with escaped newlines
 		let json5_config = include_str!("../tests/config/json5_multiline_strings.json5");
 
 		let config = test_parse_config(json5_config, ".json5");
@@ -581,7 +558,6 @@ mod tests {
 
 	#[test]
 	fn test_json5_mixed_features() {
-		// Test multiple JSON5 features combined
 		let json5_config = include_str!("../tests/config/json5_mixed_features.json5");
 
 		let config = test_parse_config(json5_config, ".json5");
@@ -593,7 +569,6 @@ mod tests {
 
 	#[test]
 	fn test_complex_config_with_all_fields() {
-		// Test a more complete configuration with various optional fields
 		let json5_config = include_str!("../tests/config/complex_config_with_all_fields.json5");
 
 		let config = test_parse_config(json5_config, ".json5");
@@ -610,7 +585,6 @@ mod tests {
 
 		let config = test_parse_config(json5_config, ".json5").unwrap();
 
-		// Check default values
 		assert_eq!(config.log_level, "info");
 		assert_eq!(config.relay.ipstack_prefer, StackPrefer::V4first);
 		assert_eq!(config.relay.udp_relay_mode, UdpRelayMode::Native);
@@ -618,7 +592,6 @@ mod tests {
 		assert!(!config.relay.zero_rtt_handshake);
 		assert!(!config.relay.disable_sni);
 		assert_eq!(config.relay.timeout, Duration::from_secs(8));
-		assert_eq!(config.relay.startup_mode, StartupMode::Lazy);
 		assert_eq!(config.relay.heartbeat, Duration::from_secs(3));
 		assert!(!config.relay.disable_native_certs);
 		assert_eq!(config.relay.send_window, 16 * 1024 * 1024);
@@ -630,44 +603,38 @@ mod tests {
 		assert_eq!(config.relay.gc_interval, Duration::from_secs(3));
 		assert_eq!(config.relay.gc_lifetime, Duration::from_secs(15));
 		assert!(!config.relay.skip_cert_verify);
+		// Reconnect defaults: enabled, 500ms initial backoff capped at 30s.
+		assert!(config.relay.reconnect);
+		assert_eq!(config.relay.reconnect_initial_backoff, Duration::from_millis(500));
+		assert_eq!(config.relay.reconnect_max_backoff, Duration::from_secs(30));
 		assert_eq!(config.local.max_packet_size, 1500);
-		assert_eq!(config.local.server, Some("127.0.0.1:1080".parse().unwrap()));
 	}
 
 	#[test]
-	fn test_startup_mode_string_values() {
-		let json5_config = r#"
-		{
-			relay: {
-				server: "example.com:443",
-				uuid: "00000000-0000-0000-0000-000000000000",
-				password: "test",
-				startup_mode: "loop",
-			},
-			local: { server: "127.0.0.1:1080" },
-		}
-		"#;
+	fn test_reconnect_can_be_disabled_and_tuned() {
+		// A config omitting reconnect keeps the defaults (backward compatible).
+		let default_cfg = r#"{ "relay": { "server": "example.com:8443", "uuid": "00000000-0000-0000-0000-000000000000", "password": "pw" } }"#;
+		let config = test_parse_config(default_cfg, ".json5").unwrap();
+		assert!(config.relay.reconnect);
 
-		let config = test_parse_config(json5_config, ".json5").unwrap();
-		assert_eq!(config.relay.startup_mode, StartupMode::Loop);
+		// Explicit values are honoured, including disabling reconnect and
+		// humantime-formatted backoff durations.
+		let tuned = r#"{
+			"relay": {
+				"server": "example.com:8443",
+				"uuid": "00000000-0000-0000-0000-000000000000",
+				"password": "pw",
+				"reconnect": false,
+				"reconnect_initial_backoff": "2s",
+				"reconnect_max_backoff": "1m"
+			}
+		}"#;
+		let config = test_parse_config(tuned, ".json5").unwrap();
+		assert!(!config.relay.reconnect);
+		assert_eq!(config.relay.reconnect_initial_backoff, Duration::from_secs(2));
+		assert_eq!(config.relay.reconnect_max_backoff, Duration::from_secs(60));
 	}
 
-	#[test]
-	fn test_startup_mode_eager() {
-		let toml_config = r#"
-		[relay]
-		server = "example.com:443"
-		uuid = "00000000-0000-0000-0000-000000000000"
-		password = "test"
-		startup_mode = "eager"
-
-		[local]
-		server = "127.0.0.1:1080"
-		"#;
-
-		let config = test_parse_config(toml_config, ".toml").unwrap();
-		assert_eq!(config.relay.startup_mode, StartupMode::Eager);
-	}
 	#[test]
 	fn test_tcp_udp_forward() {
 		let json5_config = include_str!("../tests/config/tcp_udp_forward.json5");
@@ -770,10 +737,8 @@ server = "127.0.0.1:1081"
 		let proxy = config.relay.proxy.unwrap();
 		assert_eq!(proxy.server.0, "proxy.example.com");
 		assert_eq!(proxy.server.1, 1080);
-		// username and password should be None when not provided
 		assert!(proxy.username.is_none());
 		assert!(proxy.password.is_none());
-		// Should use default udp_buffer_size
 		assert_eq!(proxy.udp_buffer_size, 2048);
 	}
 
@@ -787,7 +752,6 @@ server = "127.0.0.1:1081"
 		assert_eq!(proxy.server.1, 1080);
 		assert!(proxy.username.is_none());
 		assert!(proxy.password.is_none());
-		// Default udp_buffer_size should be 2048
 		assert_eq!(proxy.udp_buffer_size, 2048);
 	}
 
@@ -796,7 +760,6 @@ server = "127.0.0.1:1081"
 		let toml_config = include_str!("../tests/config/no_proxy.toml");
 
 		let config = test_parse_config(toml_config, ".toml").unwrap();
-		// proxy should be None when not configured
 		assert!(config.relay.proxy.is_none());
 	}
 
@@ -805,8 +768,8 @@ server = "127.0.0.1:1081"
 		let json5_config = include_str!("../tests/config/ipv6_server_address.json5");
 
 		let config = test_parse_config(json5_config, ".json5").unwrap();
-		assert!(config.local.server.as_ref().unwrap().is_ipv6());
-		assert_eq!(config.local.server.unwrap().to_string(), "[::1]:1080");
+		assert!(config.local.server.is_ipv6());
+		assert_eq!(config.local.server.to_string(), "[::1]:1080");
 	}
 
 	#[test]
@@ -829,7 +792,7 @@ server = "127.0.0.1:1081"
 		assert_eq!(config.log_level, "info");
 		assert_eq!(config.relay.server.0, "example.com");
 		assert_eq!(config.relay.server.1, 443);
-		assert_eq!(config.local.server, Some("127.0.0.1:1080".parse().unwrap()));
+		assert_eq!(config.local.server.to_string(), "127.0.0.1:1080");
 	}
 
 	#[test]
@@ -838,7 +801,6 @@ server = "127.0.0.1:1081"
 
 		let config = test_parse_config(toml_config, ".toml").unwrap();
 
-		// Test default values
 		assert_eq!(config.log_level, "info");
 		assert_eq!(config.relay.congestion_control, CongestionControl::Bbr);
 		assert_eq!(config.relay.udp_relay_mode, UdpRelayMode::Native);
@@ -879,7 +841,7 @@ server = "127.0.0.1:1081"
 		assert!(!config.relay.pmtu);
 		assert_eq!(config.relay.gc_interval, Duration::from_secs(5));
 		assert_eq!(config.relay.gc_lifetime, Duration::from_secs(20));
-		assert_eq!(config.local.server, Some("[::1]:1080".parse().unwrap()));
+		assert_eq!(config.local.server.to_string(), "[::1]:1080");
 		assert_eq!(config.local.dual_stack, Some(false));
 		assert_eq!(config.local.max_packet_size, 2000);
 	}
@@ -964,7 +926,6 @@ server = "127.0.0.1:1081"
 	fn test_env_var_force_toml() {
 		let config_content = include_str!("../tests/config/env_var_force_toml.toml");
 
-		// Create EnvState with force_toml enabled
 		let env_state = EnvState {
 			tuic_force_toml: true,
 			tuic_config_format: None,
@@ -979,7 +940,6 @@ server = "127.0.0.1:1081"
 	fn test_env_var_config_format() {
 		let config_content = include_str!("../tests/config/env_yaml.toml");
 
-		// Create EnvState with config_format set to YAML
 		let env_state = EnvState {
 			tuic_force_toml: false,
 			tuic_config_format: Some("yaml".to_string()),
@@ -1017,12 +977,10 @@ server = "127.0.0.1:1081"
 
 	#[test]
 	fn test_backward_compat_json_to_toml() {
-		// Test that configs can be converted from JSON5 to TOML
 		let json5_content = include_str!("../tests/config/compat_json.json5");
 
 		let json_config = test_parse_config(json5_content, ".json5").unwrap();
 
-		// Verify the config is parsed correctly
 		assert_eq!(json_config.relay.server.0, "compat.example.com");
 		assert_eq!(json_config.relay.server.1, 8443);
 		assert_eq!(json_config.log_level, "warn");
@@ -1058,40 +1016,11 @@ server = "127.0.0.1:1081"
 		assert_eq!(config.relay.gc_lifetime, Duration::from_secs(60));
 		assert!(config.relay.skip_cert_verify);
 
-		assert_eq!(config.local.server.unwrap().to_string(), "[::1]:9999");
+		assert_eq!(config.local.server.to_string(), "[::1]:9999");
 		assert_eq!(config.local.username, Some(b"user123".to_vec()));
 		assert_eq!(config.local.password, Some(b"pass456".to_vec()));
 		assert_eq!(config.local.dual_stack, Some(true));
 		assert_eq!(config.local.max_packet_size, 2000);
-	}
-
-	#[test]
-	fn test_no_local_server() {
-		let toml_config = r#"
-		[relay]
-		server = "example.com:443"
-		uuid = "00000000-0000-0000-0000-000000000000"
-		password = "test"
-
-		[local]
-		tcp_forward = []
-		"#;
-
-		let config = test_parse_config(toml_config, ".toml").unwrap();
-		assert_eq!(config.local.server, None);
-	}
-
-	#[test]
-	fn test_no_local_section() {
-		let toml_config = r#"
-		[relay]
-		server = "example.com:443"
-		uuid = "00000000-0000-0000-0000-000000000000"
-		password = "test"
-		"#;
-
-		let config = test_parse_config(toml_config, ".toml").unwrap();
-		assert_eq!(config.local.server, None);
 	}
 
 	#[test]

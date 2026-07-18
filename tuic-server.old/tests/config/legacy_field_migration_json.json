@@ -1,0 +1,14 @@
+{
+    "users": {
+        "123e4567-e89b-12d3-a456-426614174000": "password"
+    },
+    "self_sign": true,
+    "certificate": "cert.pem",
+    "private_key": "key.pem",
+    "hostname": "example.com",
+    "congestion_control": "bbr",
+    "max_idle_time": "60s",
+    "initial_mtu": 1500,
+    "restful_server": "0.0.0.0:8080",
+    "tls": {}
+}

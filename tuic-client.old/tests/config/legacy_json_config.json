@@ -1,0 +1,14 @@
+{
+  "relay": {
+    "server": "legacy.example.com:8443",
+    "uuid": "11111111-2222-3333-4444-555555555555",
+    "password": "legacy_password",
+    "udp_relay_mode": "native",
+    "congestion_control": "bbr",
+    "zero_rtt_handshake": false
+  },
+  "local": {
+    "server": "127.0.0.1:1080"
+  },
+  "log_level": "info"
+}

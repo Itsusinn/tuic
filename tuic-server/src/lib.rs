@@ -1,71 +1,45 @@
-// Library interface for tuic-server
-// This allows the server to be used as a library in integration tests
+use std::sync::Arc;
 
-use std::{
-	collections::HashMap,
-	sync::{Arc, atomic::AtomicUsize},
-};
-
-use moka::future::Cache;
 use tokio_util::sync::CancellationToken;
-use uuid::Uuid;
-
-pub mod acl;
-pub mod acme;
-pub mod camouflage;
-pub mod compat;
+// The legacy ACL dialect (space-separated `<outbound> [address] [ports]
+// [hijack]`) is specific to tuic-server — it is not Hysteria's ACL despite the
+// superficial resemblance. The parser lives in this crate's `legacy` module.
+pub mod legacy;
+use wind_core::AbstractInbound;
 pub mod config;
-pub mod connection;
 pub mod error;
-pub mod io;
 pub mod log;
-pub mod restful;
-pub mod server;
 pub mod tls;
 pub mod utils;
+pub mod wind_adapter;
 
 pub use config::{Cli, Config, Control};
 
 pub struct AppContext {
 	pub cfg: Config,
-	pub online_counter: HashMap<Uuid, AtomicUsize>,
-	pub online_clients: Cache<Uuid, Arc<Cache<usize, compat::QuicClient>>>,
-	pub traffic_stats: HashMap<Uuid, (AtomicUsize, AtomicUsize)>,
 	pub cancel: CancellationToken,
 }
 
-pub struct ServerGuard {
-	pub local_addr: std::net::SocketAddr,
-	pub cancel: CancellationToken,
+/// Run the TUIC server with the given configuration (using wind-tuic).
+///
+/// Constructs its own [`CancellationToken`] internally; callers that want to
+/// drive a graceful shutdown from outside should use [`run_with_cancel`].
+pub async fn run(cfg: Config) -> eyre::Result<()> {
+	run_with_cancel(cfg, CancellationToken::new()).await
 }
 
-/// Run the TUIC server with the given configuration.
-/// Returns a [`ServerGuard`] containing the actual bound address and
-/// a cancellation token for graceful shutdown.
-pub async fn run(cfg: Config) -> eyre::Result<ServerGuard> {
-	let mut online_counter = HashMap::new();
-	for user in cfg.users.keys() {
-		online_counter.insert(user.to_owned(), AtomicUsize::new(0));
-	}
+/// Run the TUIC server with a caller-owned cancel token.
+///
+/// Cancelling `cancel` causes the listen loop to exit and every spawned
+/// connection/UDP-session handler to wind down via its child token. Pair with
+/// `tokio::select!` on [`wind_core::shutdown_signal`] so signal-triggered
+/// shutdown (Ctrl-C / SIGTERM) is graceful instead of relying on runtime drop.
+pub async fn run_with_cancel(cfg: Config, cancel: CancellationToken) -> eyre::Result<()> {
+	let ctx = Arc::new(AppContext { cancel, cfg });
 
-	let mut traffic_stats = HashMap::new();
-	for user in cfg.users.keys() {
-		traffic_stats.insert(user.to_owned(), (AtomicUsize::new(0), AtomicUsize::new(0)));
-	}
+	let (inbound, adapter) = wind_adapter::create_inbound(ctx).await?;
 
-	let ctx = Arc::new(AppContext {
-		online_counter,
-		online_clients: Cache::new(cfg.users.len() as u64),
-		traffic_stats,
-		cfg,
-		cancel: CancellationToken::new(),
-	});
-	let server = server::Server::init(ctx.clone()).await?;
-	let local_addr = server.local_addr()?;
-	let cancel = ctx.cancel.clone();
-	tokio::spawn(async move {
-		server.start().await;
-	});
-	Ok(ServerGuard { local_addr, cancel })
+	tracing::info!("Starting TUIC server");
+
+	inbound.listen(&adapter).await
 }
-pub mod h3_quinn_compat;

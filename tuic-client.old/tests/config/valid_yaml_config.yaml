@@ -1,0 +1,64 @@
+# TUIC Client Configuration - YAML format
+# This is a test configuration file
+
+log_level: warn
+
+relay:
+  server: "yaml.example.com:7443"
+  uuid: "87654321-4321-8765-4321-876543218765"
+  password: "yaml_password"
+  
+  # Stack and relay mode
+  ipstack_prefer: v6v4
+  udp_relay_mode: native
+  congestion_control: bbr
+  
+  # Security settings
+  zero_rtt_handshake: true
+  disable_sni: true
+  skip_cert_verify: false
+  disable_native_certs: false
+  
+  # ALPN protocols
+  alpn:
+    - h3
+    - h2
+  
+  # Timeouts and intervals
+  timeout: 15s
+  heartbeat: 7s
+  gc_interval: 4s
+  gc_lifetime: 30s
+  
+  # QUIC transport settings
+  initial_mtu: 1500
+  min_mtu: 1280
+  gso: true
+  pmtu: true
+  
+  # Flow control
+  send_window: 25000000
+  receive_window: 12000000
+
+local:
+  server: "[::1]:1080"
+  username: "socks_user"
+  password: "socks_pass"
+  dual_stack: false
+  max_packet_size: 1600
+  
+  # TCP forwarding
+  tcp_forward:
+    - listen: "127.0.0.1:3306"
+      remote: "mysql.example.com:3306"
+    - listen: "127.0.0.1:5432"
+      remote: "postgres.example.com:5432"
+  
+  # UDP forwarding
+  udp_forward:
+    - listen: "127.0.0.1:53"
+      remote: "8.8.8.8:53"
+      timeout: 30s
+    - listen: "127.0.0.1:123"
+      remote: "time.google.com:123"
+      timeout: 120s

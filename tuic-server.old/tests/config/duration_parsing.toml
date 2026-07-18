@@ -1,0 +1,11 @@
+auth_timeout = "5s"
+task_negotiation_timeout = "10s"
+gc_interval = "30s"
+gc_lifetime = "1m"
+stream_timeout = "2m"
+
+[users]
+"123e4567-e89b-12d3-a456-426614174000" = "password"
+
+[tls]
+self_sign = true

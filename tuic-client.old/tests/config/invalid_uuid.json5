@@ -1,0 +1,10 @@
+{
+    relay: {
+        server: 'example.com:443',
+        uuid: 'not-a-valid-uuid',
+        password: 'password'
+    },
+    local: {
+        server: '127.0.0.1:1080'
+    }
+}
