@@ -52,6 +52,12 @@ pub struct ConnectionTracker {
 	inner: DashMap<u64, ConnMeta>,
 }
 
+impl Default for ConnectionTracker {
+	fn default() -> Self {
+		Self::new()
+	}
+}
+
 impl ConnectionTracker {
 	pub fn new() -> Self {
 		Self { inner: DashMap::new() }
@@ -139,6 +145,7 @@ pub trait KickConnections: Send + Sync + 'static {
 	fn kick_user(&self, user: &UserId) -> usize;
 	fn count_for(&self, user: &UserId) -> usize;
 	fn len(&self) -> usize;
+	fn is_empty(&self) -> bool;
 }
 #[async_trait]
 impl KickConnections for ActiveConnections {
@@ -152,6 +159,10 @@ impl KickConnections for ActiveConnections {
 
 	fn len(&self) -> usize {
 		self.len()
+	}
+
+	fn is_empty(&self) -> bool {
+		self.is_empty()
 	}
 }
 
@@ -171,6 +182,10 @@ impl KickConnections for NoopConnections {
 	fn len(&self) -> usize {
 		0
 	}
+
+	fn is_empty(&self) -> bool {
+		true
+	}
 }
 
 #[async_trait]
@@ -185,6 +200,10 @@ impl KickConnections for ConnectionTracker {
 
 	fn len(&self) -> usize {
 		self.len()
+	}
+
+	fn is_empty(&self) -> bool {
+		self.is_empty()
 	}
 }
 
@@ -279,8 +298,8 @@ async fn traffic_handler(State(state): State<Arc<RestfulState>>, headers: Header
 	// Map UserId back to UUID string for the response.
 	let uuid_map: HashMap<Vec<u8>, String> = state
 		.users
-		.iter()
-		.map(|(uuid, _)| (uuid.as_bytes().to_vec(), uuid.to_string()))
+		.keys()
+		.map(|uuid| (uuid.as_bytes().to_vec(), uuid.to_string()))
 		.collect();
 	for t in &all {
 		let key = match uuid_map.get(t.user_id.as_bytes()) {
@@ -314,8 +333,8 @@ async fn reset_traffic_handler(State(state): State<Arc<RestfulState>>, headers: 
 	let batch = stats.reset_all();
 	let uuid_map: HashMap<Vec<u8>, String> = state
 		.users
-		.iter()
-		.map(|(uuid, _)| (uuid.as_bytes().to_vec(), uuid.to_string()))
+		.keys()
+		.map(|uuid| (uuid.as_bytes().to_vec(), uuid.to_string()))
 		.collect();
 	let mut result = serde_json::Map::new();
 	for t in &batch {
