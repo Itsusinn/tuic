@@ -157,6 +157,149 @@ impl TuicRouter {
 	}
 }
 
+#[cfg(test)]
+mod tests {
+	use std::net::IpAddr;
+
+	use tempfile::tempdir;
+	use wind_core::utils::StackPrefer;
+
+	use super::*;
+
+	struct FakeResolver;
+	impl wind_core::Resolver for FakeResolver {
+		fn resolve<'a>(
+			&'a self,
+			_host: &'a str,
+		) -> std::pin::Pin<Box<dyn std::future::Future<Output = eyre::Result<IpAddr>> + Send + 'a>> {
+			Box::pin(async { Ok("127.0.0.1".parse().unwrap()) })
+		}
+
+		fn resolve_all<'a>(
+			&'a self,
+			_host: &'a str,
+		) -> std::pin::Pin<Box<dyn std::future::Future<Output = eyre::Result<Vec<IpAddr>>> + Send + 'a>> {
+			Box::pin(async { Ok(vec!["127.0.0.1".parse().unwrap()]) })
+		}
+	}
+
+	fn default_resolver() -> Arc<dyn wind_core::Resolver> {
+		Arc::new(FakeResolver)
+	}
+
+	#[test]
+	fn test_make_outbound_action_socks5_does_not_panic() {
+		let rule = OutboundRule {
+			kind: "socks5".to_string(),
+			ip_mode: None,
+			addr: Some("127.0.0.1:1080".to_string()),
+			username: Some("user".to_string()),
+			password: Some("pass".to_string()),
+			allow_udp: Some(true),
+			bind_ipv4: None,
+			bind_ipv6: None,
+			bind_device: None,
+		};
+		let _action = make_outbound_action(&rule, default_resolver(), Duration::from_secs(30));
+	}
+
+	#[test]
+	fn test_make_outbound_action_direct_does_not_panic() {
+		let rule = OutboundRule {
+			kind: "direct".to_string(),
+			ip_mode: None,
+			addr: None,
+			username: None,
+			password: None,
+			allow_udp: None,
+			bind_ipv4: None,
+			bind_ipv6: None,
+			bind_device: None,
+		};
+		let _action = make_outbound_action(&rule, default_resolver(), Duration::from_secs(30));
+	}
+
+	#[test]
+	fn test_make_outbound_action_unknown_falls_back_to_direct() {
+		let rule = OutboundRule {
+			kind: "bogus".to_string(),
+			ip_mode: None,
+			addr: None,
+			username: None,
+			password: None,
+			allow_udp: None,
+			bind_ipv4: None,
+			bind_ipv6: None,
+			bind_device: None,
+		};
+		let _action = make_outbound_action(&rule, default_resolver(), Duration::from_secs(30));
+	}
+
+	#[test]
+	fn test_make_outbound_action_socks5_with_all_options() {
+		let rule = OutboundRule {
+			kind: "socks5".to_string(),
+			ip_mode: Some(StackPrefer::V4first),
+			addr: Some("192.168.0.1:8888".to_string()),
+			username: Some("admin".to_string()),
+			password: Some("secret".to_string()),
+			allow_udp: Some(false),
+			bind_ipv4: None,
+			bind_ipv6: None,
+			bind_device: None,
+		};
+		let _action = make_outbound_action(&rule, default_resolver(), Duration::from_secs(0));
+	}
+
+	#[tokio::test]
+	async fn test_load_cert_from_files_success() {
+		let dir = tempdir().unwrap();
+		let cert_path = dir.path().join("cert.pem");
+		let key_path = dir.path().join("key.pem");
+
+		let (cert_pem, key_pem) = {
+			let mut params = rcgen::CertificateParams::default();
+			params
+				.distinguished_name
+				.push(rcgen::DnType::CommonName, "localhost");
+			params.subject_alt_names = vec![rcgen::SanType::DnsName(
+				rcgen::string::Ia5String::try_from("localhost".to_string()).unwrap(),
+			)];
+			let key_pair = rcgen::KeyPair::generate().unwrap();
+			let cert = params.self_signed(&key_pair).unwrap();
+			(cert.pem(), key_pair.serialize_pem())
+		};
+
+		std::fs::write(&cert_path, &cert_pem).unwrap();
+		std::fs::write(&key_path, &key_pem).unwrap();
+
+		let (certs, _key) = load_cert_from_files(&cert_path, &key_path).unwrap();
+		assert!(!certs.is_empty());
+	}
+
+	#[test]
+	fn test_load_cert_from_files_missing_cert() {
+		let dir = tempdir().unwrap();
+		let cert_path = dir.path().join("noexist.pem");
+		let key_path = dir.path().join("noexist.key");
+
+		let result = load_cert_from_files(&cert_path, &key_path);
+		assert!(result.is_err());
+	}
+
+	#[test]
+	fn test_load_cert_from_files_invalid_pem() {
+		let dir = tempdir().unwrap();
+		let cert_path = dir.path().join("bad.pem");
+		let key_path = dir.path().join("bad.key");
+		std::fs::write(&cert_path, b"not a certificate").unwrap();
+		std::fs::write(&key_path, b"not a key").unwrap();
+
+		let result = load_cert_from_files(&cert_path, &key_path);
+		assert!(result.is_err());
+	}
+}
+
 /// Load TLS certificate and private key from PEM files.
 pub fn load_cert_from_files(
 	cert_path: &std::path::Path,

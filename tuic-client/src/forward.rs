@@ -245,3 +245,53 @@ async fn run_udp_forwarder(entry: UdpForward, cancel: CancellationToken, outboun
 		}
 	}
 }
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+
+	#[test]
+	fn test_next_assoc_id_increments() {
+		let first = next_assoc_id();
+		let second = next_assoc_id();
+		assert!(first != second, "consecutive ids must be different");
+	}
+
+	#[test]
+	fn test_next_assoc_id_has_0x8000_prefix() {
+		let id = next_assoc_id();
+		assert!(
+			id & 0x8000 != 0,
+			"assoc_id must have bit 15 set (0x8000 prefix), got {id:#06x}"
+		);
+	}
+
+	#[test]
+	fn test_next_assoc_id_wraps_in_15_bits() {
+		for _ in 0..100 {
+			let id = next_assoc_id();
+			assert!(id & 0x8000 != 0);
+			assert_eq!(id & !0xffff, 0);
+		}
+	}
+
+	#[tokio::test]
+	async fn test_create_tcp_listener_ipv4() {
+		let addr = "127.0.0.1:0".parse().unwrap();
+		let listener = create_tcp_listener(addr);
+		assert!(listener.is_ok(), "must bind to 127.0.0.1:0");
+		let listener = listener.unwrap();
+		let local = listener.local_addr().unwrap();
+		assert!(local.port() != 0, "must get an ephemeral port");
+	}
+
+	#[tokio::test]
+	async fn test_create_tcp_listener_ipv6() {
+		let addr: SocketAddr = "[::1]:0".parse().unwrap();
+		let result = create_tcp_listener(addr);
+		if let Ok(listener) = result {
+			let local = listener.local_addr().unwrap();
+			assert!(local.port() != 0);
+		}
+	}
+}

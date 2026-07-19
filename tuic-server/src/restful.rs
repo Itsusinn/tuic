@@ -389,3 +389,486 @@ pub async fn serve(state: Arc<RestfulState>, addr: SocketAddr, cancel: Cancellat
 
 	Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+	use std::net::SocketAddr;
+
+	use axum::{body::Body, http::{Request, StatusCode}};
+	use tokio_util::sync::CancellationToken;
+	use tower::ServiceExt;
+	use wind_core::hooks::{ConnInfo, ConnectDecision, Protocol};
+
+	use super::*;
+
+	fn make_conn_info(id: u64, remote: SocketAddr) -> ConnInfo {
+		ConnInfo {
+			remote_addr: remote,
+			protocol: Protocol::Tuic,
+			conn_id: id,
+		}
+	}
+
+	fn make_state(
+		active: Arc<dyn KickConnections>,
+		secret: &str,
+		users: HashMap<Uuid, String>,
+	) -> Arc<RestfulState> {
+		Arc::new(RestfulState {
+			active,
+			stats: None,
+			tracker: None,
+			secret: secret.to_string(),
+			users,
+		})
+	}
+
+	// ── ConnectionTracker tests ──────────────────────────────────────────
+
+	#[tokio::test]
+	async fn test_tracker_new_is_empty() {
+		let t = ConnectionTracker::new();
+		assert_eq!(t.len(), 0);
+		assert!(t.is_empty());
+	}
+
+	#[tokio::test]
+	async fn test_tracker_on_connect_increments_len() {
+		let t = ConnectionTracker::new();
+		let info = make_conn_info(1, "127.0.0.1:1000".parse().unwrap());
+		let d = t.on_connect(&info).await;
+		assert!(matches!(d, ConnectDecision::Accept));
+		assert_eq!(t.len(), 1);
+		assert!(!t.is_empty());
+	}
+
+	#[tokio::test]
+	async fn test_tracker_on_authenticated_sets_user() {
+		let t = ConnectionTracker::new();
+		let info = make_conn_info(1, "127.0.0.1:1000".parse().unwrap());
+		let user = UserId::from("alice");
+		t.on_connect(&info).await;
+		t.on_authenticated(&info, &user).await;
+		assert_eq!(t.count_for(&user), 1);
+	}
+
+	#[tokio::test]
+	async fn test_tracker_on_disconnect_removes_entry() {
+		let t = ConnectionTracker::new();
+		let info = make_conn_info(1, "127.0.0.1:2000".parse().unwrap());
+		t.on_connect(&info).await;
+		assert_eq!(t.len(), 1);
+		t.on_disconnect(&info, None).await;
+		assert_eq!(t.len(), 0);
+	}
+
+	#[tokio::test]
+	async fn test_tracker_count_for_multiple_users() {
+		let t = ConnectionTracker::new();
+		let alice = UserId::from("alice");
+		let bob = UserId::from("bob");
+
+		let info1 = make_conn_info(1, "127.0.0.1:1".parse().unwrap());
+		let info2 = make_conn_info(2, "127.0.0.1:2".parse().unwrap());
+		let info3 = make_conn_info(3, "127.0.0.1:3".parse().unwrap());
+
+		t.on_connect(&info1).await;
+		t.on_authenticated(&info1, &alice).await;
+		t.on_connect(&info2).await;
+		t.on_authenticated(&info2, &alice).await;
+		t.on_connect(&info3).await;
+		t.on_authenticated(&info3, &bob).await;
+
+		assert_eq!(t.count_for(&alice), 2);
+		assert_eq!(t.count_for(&bob), 1);
+		assert_eq!(t.count_for(&UserId::from("nobody")), 0);
+	}
+
+	#[tokio::test]
+	async fn test_tracker_kick_user_cancels_and_counts() {
+		let t = ConnectionTracker::new();
+		let alice = UserId::from("alice");
+		let bob = UserId::from("bob");
+
+		let info1 = make_conn_info(1, "127.0.0.1:1".parse().unwrap());
+		let info2 = make_conn_info(2, "127.0.0.1:2".parse().unwrap());
+		let info3 = make_conn_info(3, "127.0.0.1:3".parse().unwrap());
+
+		t.on_connect(&info1).await;
+		t.on_authenticated(&info1, &alice).await;
+		t.on_connect(&info2).await;
+		t.on_authenticated(&info2, &bob).await;
+		t.on_connect(&info3).await;
+		t.on_authenticated(&info3, &alice).await;
+
+		assert_eq!(t.len(), 3);
+		assert_eq!(t.count_for(&alice), 2);
+		assert_eq!(t.count_for(&bob), 1);
+
+		// kick_user cancels tokens (notifies the connection to shut down)
+		// but entries remain in the tracker until on_disconnect fires.
+		let kicked = t.kick_user(&alice);
+		assert_eq!(kicked, 2);
+		// Entries are still present; they'll be removed on the actual disconnect.
+		assert_eq!(t.len(), 3);
+		assert_eq!(t.count_for(&bob), 1);
+	}
+
+	#[tokio::test]
+	async fn test_tracker_detailed_online() {
+		let t = ConnectionTracker::new();
+		let alice = Uuid::new_v4();
+		let bob = Uuid::new_v4();
+		let alice_uid = UserId::from(alice);
+		let bob_uid = UserId::from(bob);
+
+		let info1 = make_conn_info(1, "10.0.0.1:443".parse().unwrap());
+		let info2 = make_conn_info(2, "10.0.0.2:443".parse().unwrap());
+		let info3 = make_conn_info(3, "192.168.1.1:80".parse().unwrap());
+
+		t.on_connect(&info1).await;
+		t.on_authenticated(&info1, &alice_uid).await;
+		t.on_connect(&info2).await;
+		t.on_authenticated(&info2, &alice_uid).await;
+		t.on_connect(&info3).await;
+		t.on_authenticated(&info3, &bob_uid).await;
+
+		let mut uuid_lookup = HashMap::new();
+		uuid_lookup.insert(alice, "alice".to_string());
+		uuid_lookup.insert(bob, "bob".to_string());
+
+		let detail = t.detailed_online(&uuid_lookup);
+		assert_eq!(detail.len(), 2);
+		assert_eq!(detail.get(&alice).unwrap().len(), 2);
+		assert_eq!(detail.get(&bob).unwrap().len(), 1);
+	}
+
+	#[tokio::test]
+	async fn test_tracker_kick_user_token_gets_cancelled() {
+		let t = ConnectionTracker::new();
+		let alice = UserId::from("alice");
+
+		let info = make_conn_info(1, "127.0.0.1:1".parse().unwrap());
+		t.on_connect(&info).await;
+		t.on_authenticated(&info, &alice).await;
+
+		let kicked = t.kick_user(&alice);
+		assert_eq!(kicked, 1);
+	}
+
+	// ── NoopConnections tests ────────────────────────────────────────────
+
+	#[tokio::test]
+	async fn test_noop_kick_returns_zero() {
+		let noop = NoopConnections;
+		assert_eq!(noop.kick_user(&UserId::from("alice")), 0);
+	}
+
+	#[tokio::test]
+	async fn test_noop_count_for_returns_zero() {
+		let noop = NoopConnections;
+		assert_eq!(noop.count_for(&UserId::from("alice")), 0);
+	}
+
+	#[tokio::test]
+	async fn test_noop_len_and_is_empty() {
+		let noop = NoopConnections;
+		assert_eq!(noop.len(), 0);
+		assert!(noop.is_empty());
+	}
+
+	// ── KickConnections trait tests ──────────────────────────────────────
+
+	#[tokio::test]
+	async fn test_tracker_as_kick_connections_delegates() {
+		let t = ConnectionTracker::new();
+		let kc: &dyn KickConnections = &t;
+		assert_eq!(kc.len(), 0);
+		assert!(kc.is_empty());
+		assert_eq!(kc.count_for(&UserId::from("x")), 0);
+		assert_eq!(kc.kick_user(&UserId::from("x")), 0);
+	}
+
+	// ── Auth tests ───────────────────────────────────────────────────────
+
+	#[test]
+	fn test_auth_empty_secret_always_passes() {
+		let headers = HeaderMap::new();
+		assert!(is_authorized(&headers, ""));
+	}
+
+	#[test]
+	fn test_auth_valid_bearer_passes() {
+		let mut headers = HeaderMap::new();
+		headers.insert("authorization", "Bearer my-secret-token".parse().unwrap());
+		assert!(is_authorized(&headers, "my-secret-token"));
+	}
+
+	#[test]
+	fn test_auth_invalid_bearer_fails() {
+		let mut headers = HeaderMap::new();
+		headers.insert("authorization", "Bearer wrong-token".parse().unwrap());
+		assert!(!is_authorized(&headers, "my-secret-token"));
+	}
+
+	#[test]
+	fn test_auth_no_header_fails() {
+		let headers = HeaderMap::new();
+		assert!(!is_authorized(&headers, "my-secret-token"));
+	}
+
+	#[test]
+	fn test_auth_wrong_scheme_fails() {
+		let mut headers = HeaderMap::new();
+		headers.insert("authorization", "Basic dXNlcjpwYXNz".parse().unwrap());
+		assert!(!is_authorized(&headers, "my-secret-token"));
+	}
+
+	#[test]
+	fn test_auth_empty_bearer_token_fails() {
+		let mut headers = HeaderMap::new();
+		headers.insert("authorization", "Bearer ".parse().unwrap());
+		assert!(!is_authorized(&headers, "my-secret-token"));
+	}
+
+	#[tokio::test]
+	async fn test_unauthorized_returns_401() {
+		let (status, json) = unauthorized();
+		assert_eq!(status, StatusCode::UNAUTHORIZED);
+		assert_eq!(json.0, json!("unauthorized"));
+	}
+
+	// ── REST endpoint tests ──────────────────────────────────────────────
+
+	fn build_router(state: Arc<RestfulState>) -> axum::Router {
+		axum::Router::new()
+			.route("/kick", axum::routing::post(kick_handler))
+			.route("/online", axum::routing::get(online_handler))
+			.route("/detailed_online", axum::routing::get(detailed_online_handler))
+			.route("/traffic", axum::routing::get(traffic_handler))
+			.route("/reset_traffic", axum::routing::get(reset_traffic_handler))
+			.with_state(state)
+	}
+
+	#[tokio::test]
+	async fn test_kick_handler_unauthorized_when_secret_set() {
+		let state = make_state(Arc::new(NoopConnections), "secret", HashMap::new());
+		let app = build_router(state);
+
+		let response = app
+			.oneshot(
+				Request::builder()
+					.uri("/kick")
+					.method("POST")
+					.header("content-type", "application/json")
+					.body(Body::from("[]"))
+					.unwrap(),
+			)
+			.await
+			.unwrap();
+
+		assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+	}
+
+	#[tokio::test]
+	async fn test_kick_handler_authorized_with_noop() {
+		let state = make_state(Arc::new(NoopConnections), "secret", HashMap::new());
+		let app = build_router(state);
+
+		let response = app
+			.oneshot(
+				Request::builder()
+					.uri("/kick")
+					.method("POST")
+					.header("content-type", "application/json")
+					.header("authorization", "Bearer secret")
+					.body(Body::from(
+						serde_json::to_string(&vec![Uuid::nil()]).unwrap(),
+					))
+					.unwrap(),
+			)
+			.await
+			.unwrap();
+
+		assert_eq!(response.status(), StatusCode::OK);
+		let body = axum::body::to_bytes(response.into_body(), 1024).await.unwrap();
+		let v: Value = serde_json::from_slice(&body).unwrap();
+		assert_eq!(v, json!({"kicked": 0}));
+	}
+
+	#[tokio::test]
+	async fn test_online_handler_empty_when_no_users_online() {
+		let state = make_state(Arc::new(NoopConnections), "", {
+			let mut m = HashMap::new();
+			m.insert(Uuid::nil(), "alice".to_string());
+			m
+		});
+		let app = build_router(state);
+
+		let response = app
+			.oneshot(Request::builder().uri("/online").method("GET").body(Body::empty()).unwrap())
+			.await
+			.unwrap();
+
+		assert_eq!(response.status(), StatusCode::OK);
+		let body = axum::body::to_bytes(response.into_body(), 1024).await.unwrap();
+		assert_eq!(&body[..], b"{}");
+	}
+
+	#[tokio::test]
+	async fn test_detailed_online_handler_without_tracker() {
+		let uuid = Uuid::nil();
+		let state = {
+			let mut users = HashMap::new();
+			users.insert(uuid, "alice".to_string());
+			Arc::new(RestfulState {
+				active: Arc::new(NoopConnections),
+				stats: None,
+				tracker: None,
+				secret: String::new(),
+				users,
+			})
+		};
+		let app = build_router(state);
+
+		let response = app
+			.oneshot(Request::builder().uri("/detailed_online").method("GET").body(Body::empty()).unwrap())
+			.await
+			.unwrap();
+
+		assert_eq!(response.status(), StatusCode::OK);
+		let body = axum::body::to_bytes(response.into_body(), 1024).await.unwrap();
+		assert_eq!(&body[..], b"{}");
+	}
+
+	#[tokio::test]
+	async fn test_detailed_online_handler_with_tracker() {
+		let uuid = Uuid::nil();
+		let tracker = Arc::new(ConnectionTracker::new());
+		let user = UserId::from(uuid);
+		let info = make_conn_info(1, "10.0.0.1:443".parse().unwrap());
+		tracker.on_connect(&info).await;
+		tracker.on_authenticated(&info, &user).await;
+
+		let state = {
+			let mut users = HashMap::new();
+			users.insert(uuid, "alice".to_string());
+			Arc::new(RestfulState {
+				active: Arc::new(NoopConnections),
+				stats: None,
+				tracker: Some(tracker),
+				secret: String::new(),
+				users,
+			})
+		};
+		let app = build_router(state);
+
+		let response = app
+			.oneshot(Request::builder().uri("/detailed_online").method("GET").body(Body::empty()).unwrap())
+			.await
+			.unwrap();
+
+		assert_eq!(response.status(), StatusCode::OK);
+		let body = axum::body::to_bytes(response.into_body(), 1024).await.unwrap();
+		let v: Value = serde_json::from_slice(&body).unwrap();
+		let addrs = v.get(uuid.to_string()).unwrap().as_array().unwrap();
+		assert_eq!(addrs.len(), 1);
+		assert_eq!(addrs[0], json!("10.0.0.1:443"));
+	}
+
+	#[tokio::test]
+	async fn test_traffic_handler_no_stats_returns_empty() {
+		let state = Arc::new(RestfulState {
+			active: Arc::new(NoopConnections),
+			stats: None,
+			tracker: None,
+			secret: String::new(),
+			users: HashMap::new(),
+		});
+		let app = build_router(state);
+
+		let response = app
+			.oneshot(Request::builder().uri("/traffic").method("GET").body(Body::empty()).unwrap())
+			.await
+			.unwrap();
+
+		assert_eq!(response.status(), StatusCode::OK);
+		let body = axum::body::to_bytes(response.into_body(), 1024).await.unwrap();
+		assert_eq!(&body[..], b"{}");
+	}
+
+	#[tokio::test]
+	async fn test_reset_traffic_handler_no_stats_returns_empty() {
+		let state = Arc::new(RestfulState {
+			active: Arc::new(NoopConnections),
+			stats: None,
+			tracker: None,
+			secret: String::new(),
+			users: HashMap::new(),
+		});
+		let app = build_router(state);
+
+		let response = app
+			.oneshot(Request::builder().uri("/reset_traffic").method("GET").body(Body::empty()).unwrap())
+			.await
+			.unwrap();
+
+		assert_eq!(response.status(), StatusCode::OK);
+		let body = axum::body::to_bytes(response.into_body(), 1024).await.unwrap();
+		assert_eq!(&body[..], b"{}");
+	}
+
+	#[tokio::test]
+	async fn test_traffic_handler_unauthorized_when_secret_set() {
+		let state = make_state(Arc::new(NoopConnections), "secret", HashMap::new());
+		let app = build_router(state);
+
+		let response = app
+			.oneshot(Request::builder().uri("/traffic").method("GET").body(Body::empty()).unwrap())
+			.await
+			.unwrap();
+
+		assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+	}
+
+	#[tokio::test]
+	async fn test_online_handler_unauthorized_when_secret_set() {
+		let state = make_state(Arc::new(NoopConnections), "secret", HashMap::new());
+		let app = build_router(state);
+
+		let response = app
+			.oneshot(Request::builder().uri("/online").method("GET").body(Body::empty()).unwrap())
+			.await
+			.unwrap();
+
+		assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+	}
+
+	#[tokio::test]
+	async fn test_handler_with_empty_secret_allows_access() {
+		let uuid = Uuid::nil();
+		let state = make_state(Arc::new(NoopConnections), "", {
+			let mut m = HashMap::new();
+			m.insert(uuid, "alice".to_string());
+			m
+		});
+		let app = build_router(state);
+
+		// Kick without auth header should work when secret is empty
+		let response = app
+			.oneshot(
+				Request::builder()
+					.uri("/kick")
+					.method("POST")
+					.header("content-type", "application/json")
+					.body(Body::from(
+						serde_json::to_string(&vec![uuid]).unwrap(),
+					))
+					.unwrap(),
+			)
+			.await
+			.unwrap();
+
+		assert_eq!(response.status(), StatusCode::OK);
+	}
+}

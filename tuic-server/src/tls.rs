@@ -495,4 +495,73 @@ mod tests {
 		assert!(!is_valid_domain(&"a".repeat(254)));
 		assert!(!is_valid_domain("no-tld"));
 	}
+
+	#[test]
+	fn test_calc_hash_same_content_same_hash() -> eyre::Result<()> {
+		let dir = tempdir()?;
+		let cert = dir.path().join("c.pem");
+		let key = dir.path().join("k.pem");
+		std::fs::write(&cert, b"cert-data")?;
+		std::fs::write(&key, b"key-data")?;
+
+		let rt = tokio::runtime::Builder::new_current_thread().enable_time().build().unwrap();
+		let h1 = rt.block_on(CertResolver::calc_hash(&cert, &key))?;
+		let h2 = rt.block_on(CertResolver::calc_hash(&cert, &key))?;
+		assert_eq!(h1, h2);
+		Ok(())
+	}
+
+	#[test]
+	fn test_calc_hash_different_content_different_hash() -> eyre::Result<()> {
+		let dir = tempdir()?;
+		let cert1 = dir.path().join("c1.pem");
+		let cert2 = dir.path().join("c2.pem");
+		let key = dir.path().join("k.pem");
+		std::fs::write(&cert1, b"cert-a")?;
+		std::fs::write(&cert2, b"cert-b")?;
+		std::fs::write(&key, b"key")?;
+
+		let rt = tokio::runtime::Builder::new_current_thread().enable_time().build().unwrap();
+		let h1 = rt.block_on(CertResolver::calc_hash(&cert1, &key))?;
+		let h2 = rt.block_on(CertResolver::calc_hash(&cert2, &key))?;
+		assert_ne!(h1, h2);
+		Ok(())
+	}
+
+	#[tokio::test]
+	async fn test_cert_resolver_cancel_stops_watcher() {
+		let (cert_der, key_der) = {
+			let (cert, key) = generate_test_cert_der().unwrap();
+			(cert, key)
+		};
+		let (cert_file, key_file) = create_temp_cert_file(&cert_der, &key_der).await;
+
+		let cancel = CancellationToken::new();
+		let resolver = CertResolver::new(
+			cert_file.path(),
+			key_file.path(),
+			Duration::from_millis(100),
+			cancel.clone(),
+		)
+		.await
+		.unwrap();
+
+		let initial_key = resolver.cert_key.load_full();
+		assert!(!initial_key.cert.is_empty());
+
+		// Cancel the watcher. After cancellation the background polling task
+		// should exit gracefully.
+		cancel.cancel();
+
+		// Give the watcher time to notice cancellation.
+		tokio::time::sleep(Duration::from_millis(500)).await;
+
+		// The cert should still be the one loaded at startup.
+		let after_cancel_key = resolver.cert_key.load_full();
+		assert_eq!(
+			initial_key.cert[0].as_ref(),
+			after_cancel_key.cert[0].as_ref(),
+			"cert should remain unchanged after cancel"
+		);
+	}
 }

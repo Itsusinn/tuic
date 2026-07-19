@@ -94,3 +94,83 @@ impl ServerAddr {
 		}
 	}
 }
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+
+	#[test]
+	fn test_server_addr_strips_ipv6_brackets() {
+		let addr = ServerAddr::new("[::1]".to_string(), 443, None, StackPrefer::V4first);
+		assert_eq!(addr.domain, "::1");
+	}
+
+	#[test]
+	fn test_server_addr_preserves_hostname() {
+		let addr = ServerAddr::new("example.com".to_string(), 443, None, StackPrefer::V4first);
+		assert_eq!(addr.domain, "example.com");
+	}
+
+	#[test]
+	fn test_server_addr_strips_brackets_preserves_ipv4() {
+		let addr = ServerAddr::new("192.168.1.1".to_string(), 443, None, StackPrefer::V4first);
+		assert_eq!(addr.domain, "192.168.1.1");
+	}
+
+	#[test]
+	fn test_server_name_defaults_to_domain() {
+		let addr = ServerAddr::new("example.com".to_string(), 443, None, StackPrefer::V4first);
+		assert_eq!(addr.server_name(), "example.com");
+	}
+
+	#[test]
+	fn test_server_name_uses_sni_when_provided() {
+		let addr = ServerAddr::with_sni(
+			"real.internal".to_string(),
+			443,
+			None,
+			StackPrefer::V4first,
+			Some("public.example.com".to_string()),
+		);
+		assert_eq!(addr.server_name(), "public.example.com");
+	}
+
+	#[test]
+	fn test_server_name_uses_domain_when_sni_none() {
+		let addr = ServerAddr::with_sni("example.com".to_string(), 443, None, StackPrefer::V4first, None);
+		assert_eq!(addr.server_name(), "example.com");
+	}
+
+	#[tokio::test]
+	async fn test_resolve_with_explicit_ip() {
+		let ip: IpAddr = "10.0.0.1".parse().unwrap();
+		let addr = ServerAddr::new("ignored".to_string(), 8080, Some(ip), StackPrefer::V4first);
+		let results: Vec<SocketAddr> = addr.resolve().await.unwrap().collect();
+		assert_eq!(results.len(), 1);
+		assert_eq!(results[0], SocketAddr::new(ip, 8080));
+	}
+
+	#[tokio::test]
+	async fn test_resolve_with_explicit_ipv6() {
+		let ip: IpAddr = "::1".parse().unwrap();
+		let addr = ServerAddr::new("[::1]".to_string(), 9090, Some(ip), StackPrefer::V6first);
+		let results: Vec<SocketAddr> = addr.resolve().await.unwrap().collect();
+		assert_eq!(results.len(), 1);
+		assert_eq!(results[0], SocketAddr::new(ip, 9090));
+	}
+
+	#[test]
+	fn test_construct_with_standard_port() {
+		let addr = ServerAddr::new("localhost".to_string(), 22, None, StackPrefer::V4first);
+		assert_eq!(addr.port, 22);
+		assert_eq!(addr.domain, "localhost");
+	}
+
+	#[test]
+	fn test_ipstack_prefer_values_distinct() {
+		assert_ne!(
+			StackPrefer::V4only, StackPrefer::V6only,
+			"prefer values must be distinct"
+		);
+	}
+}

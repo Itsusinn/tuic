@@ -98,4 +98,5 @@ ip_network = "0.4"
 tempfile = "3"
 tokio = { version = "1", features = ["full", "test-util"] }
 tokio-test = "0.4"
+tower = "0.5"
 geosite-rs = "0.1.6"

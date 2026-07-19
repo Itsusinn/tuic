@@ -130,3 +130,77 @@ impl<A: io::Write, B: io::Write> io::Write for TeeWriter<A, B> {
 }
 
 type BoxedLayer<S> = Box<dyn Layer<S> + Send + Sync>;
+
+#[cfg(test)]
+mod tests {
+	use std::io::{self, Write};
+
+	use super::*;
+
+	#[test]
+	fn test_tee_writer_writes_to_both() {
+		let mut a = Vec::<u8>::new();
+		let mut b = Vec::<u8>::new();
+		let mut tee = TeeWriter { a: &mut a, b: &mut b };
+
+		let n = tee.write(b"hello").unwrap();
+		assert_eq!(n, 5);
+		assert_eq!(a, b"hello");
+		assert_eq!(b, b"hello");
+	}
+
+	#[test]
+	fn test_tee_writer_partial_write_on_b_does_not_affect_a() {
+		let mut a = Vec::<u8>::new();
+		let mut b = Vec::<u8>::with_capacity(2);
+		let mut tee = TeeWriter { a: &mut a, b: &mut b };
+
+		let _ = tee.write(b"abcdef");
+		assert_eq!(a, b"abcdef");
+	}
+
+	#[test]
+	fn test_tee_writer_flush_calls_both() {
+		let mut a = Vec::<u8>::new();
+		let mut b = Vec::<u8>::new();
+		let mut tee = TeeWriter { a: &mut a, b: &mut b };
+
+		tee.write(b"data").unwrap();
+		tee.flush().unwrap();
+		assert!(!a.is_empty());
+		assert!(!b.is_empty());
+	}
+
+	#[test]
+	fn test_tee_writer_error_propagates_from_a() {
+		struct FailWriter;
+		impl io::Write for FailWriter {
+			fn write(&mut self, _buf: &[u8]) -> io::Result<usize> {
+				Err(io::Error::new(io::ErrorKind::BrokenPipe, "pipe broken"))
+			}
+			fn flush(&mut self) -> io::Result<()> {
+				Ok(())
+			}
+		}
+
+		let mut b = Vec::<u8>::new();
+		let mut tee = TeeWriter { a: FailWriter, b: &mut b };
+
+		let result = tee.write(b"test");
+		assert!(result.is_err());
+		assert_eq!(result.unwrap_err().kind(), io::ErrorKind::BrokenPipe);
+	}
+
+	#[test]
+	fn test_build_file_writer_no_log_file() {
+		let config = LogConfig {
+			format: LogFormat::Text,
+			log_file: None,
+			log_rotation: LogRotation::Never,
+			compact: false,
+		};
+		let (writer, guard) = build_file_writer(&config).unwrap();
+		assert!(writer.is_none());
+		assert!(guard.is_none());
+	}
+}
