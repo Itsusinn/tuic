@@ -20,10 +20,10 @@ jemallocator = ["tikv-jemallocator"]
 [dependencies]
 
 # Wind framework
-wind-base = { path = "../forks/wind/crates/wind-base" }
-wind-core = { path = "../forks/wind/crates/wind-core" }
-wind-socks = { path = "../forks/wind/crates/wind-socks" }
-wind-tuic = { path = "../forks/wind/crates/wind-tuic", features = ["client", "quinn"] }
+wind-base = { path = "../wind/crates/wind-base" }
+wind-core = { path = "../wind/crates/wind-core" }
+wind-socks = { path = "../wind/crates/wind-socks" }
+wind-tuic = { path = "../wind/crates/wind-tuic", features = ["client", "quinn"] }
 
 async-trait = "0.1"
 

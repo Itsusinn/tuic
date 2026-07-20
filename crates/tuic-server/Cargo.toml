@@ -26,14 +26,14 @@ quiche = ["wind-tuic/quiche"]
 [dependencies]
 
 # Wind framework
-wind-core = { path = "../forks/wind/crates/wind-core" }
-wind-base = { path = "../forks/wind/crates/wind-base" }
-wind-dns = { path = "../forks/wind/crates/wind-dns" }
-wind-socks = { path = "../forks/wind/crates/wind-socks" }
-wind-tuic = { path = "../forks/wind/crates/wind-tuic", features = ["server"] }
-wind-acme = { path = "../forks/wind/crates/wind-acme" }
-wind-acl = { path = "../forks/wind/crates/wind-acl" }
-wind-geodata = { path = "../forks/wind/crates/wind-geodata" }
+wind-core = { path = "../wind/crates/wind-core" }
+wind-base = { path = "../wind/crates/wind-base" }
+wind-dns = { path = "../wind/crates/wind-dns" }
+wind-socks = { path = "../wind/crates/wind-socks" }
+wind-tuic = { path = "../wind/crates/wind-tuic", features = ["server"] }
+wind-acme = { path = "../wind/crates/wind-acme" }
+wind-acl = { path = "../wind/crates/wind-acl" }
+wind-geodata = { path = "../wind/crates/wind-geodata" }
 
 toml = "1.0"
 clap = { version = "4", features = ["derive"] }

@@ -21,11 +21,11 @@ aws-lc-rs = ["wind-tuic/aws-lc-rs", "dep:aws-lc-rs", "rustls/aws-lc-rs", "tuic-c
 h3-masquerade-test = ["wind-tuic/masquerade", "dep:reqwest", "dep:http"]
 
 [dependencies]
-wind-core = { version = "0.1.1", path = "../forks/wind/crates/wind-core" }
-tuic-core = { path = "../forks/wind/crates/tuic-core" }
+wind-core = { version = "0.1.1", path = "../wind/crates/wind-core" }
+tuic-core = { path = "../wind/crates/tuic-core" }
 tuic-client = { path = "../tuic-client", default-features = false }
 tuic-server = { path = "../tuic-server", default-features = false }
-wind-tuic = { path = "../forks/wind/crates/wind-tuic", default-features = false, features = ["server", "client", "quinn"] }
+wind-tuic = { path = "../wind/crates/wind-tuic", default-features = false, features = ["server", "client", "quinn"] }
 
 bytes = "1"
 json5 = { version = "1.3" }
@@ -59,6 +59,6 @@ unexpected_cfgs = { level = "warn", check-cfg = ['cfg(reqwest_unstable)'] }
 # test files compile to nothing. (The quiche backend itself builds on 32-bit too.)
 [target.'cfg(target_pointer_width = "64")'.dependencies]
 tuic-server = { path = "../tuic-server", default-features = false, features = ["quiche"] }
-wind-tuic = { path = "../forks/wind/crates/wind-tuic", default-features = false, features = ["quiche"] }
+wind-tuic = { path = "../wind/crates/wind-tuic", default-features = false, features = ["quiche"] }
 quinn = { workspace = true, default-features = false, features = ["runtime-tokio", "rustls-aws-lc-rs"] }
 rcgen = { version = "0.14", default-features = false, features = ["crypto", "pem", "aws_lc_rs"] }

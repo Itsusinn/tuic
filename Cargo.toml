@@ -1,5 +1,5 @@
 [workspace]
-members = ["tuic-server", "tuic-client", "tuic-tests"]
+members = ["crates/tuic-server", "crates/tuic-client", "crates/tuic-tests"]
 exclude = ["forks", "tuic-core.old", "tuic-server.old", "tuic-client.old", "tuic-tests.old"]
 resolver = "2"
 
@@ -19,8 +19,8 @@ quinn-proto = { branch = "bbrv3", git = "https://github.com/Tipuch/quinn.git", d
 quinn-congestions = { git = "https://github.com/proxy-rs/quinn-congestions.git", default-features = false}
 
 [patch.crates-io]
-datagram-socket = { path = "forks/wind/forks/quiche/datagram-socket" }
-tokio-quiche = { path = "forks/wind/forks/quiche/tokio-quiche" }
+datagram-socket = { path = "crates/wind/forks/quiche/datagram-socket" }
+tokio-quiche = { path = "crates/wind/forks/quiche/tokio-quiche" }
 
 [workspace.lints.clippy]
 unwrap_used = "deny"
