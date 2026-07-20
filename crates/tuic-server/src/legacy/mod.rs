@@ -1,11 +1,5 @@
-//! tuic-server legacy ACL syntax.
-//!
-//! A tuic-server–specific rule dialect. This is **not** Hysteria's ACL: real
-//! Hysteria 2 uses a function-call form (`outbound(address, proto/port,
-//! hijack)`), whereas this dialect is space-separated. Parses lines of the
-//! shape `<outbound> [address] [ports] [hijack]`, e.g. `proxy 10.6.0.0/16
-//! tcp/443` — into [`AclRule`]s and compiles them to `wind_core::rule::Rule`s
-//! via [`acl_to_rules`].
+//! Legacy ACL syntax. Parses `<outbound> [address] [ports] [hijack]` lines
+//! into [`AclRule`]s and compiles them to [`wind_core::rule::Rule`]s.
 
 #[cfg(test)]
 use std::net::{IpAddr, SocketAddr};
@@ -2114,9 +2108,7 @@ addr = "private"
 		assert!(!rules.iter().any(|r| r.matches(&ctx_pub)));
 	}
 
-	// ------------------------------------------------------------------
-	// PR4-O regression tests for `address_to_rule_types`
-	// ------------------------------------------------------------------
+	// address_to_rule_types regression tests
 
 	/// IPv6 literals must produce a `/128` host route, not a `/32` network
 	/// route. Previously `format!("{ip}/32").parse::<ipnet::IpNet>()` was
@@ -2185,10 +2177,7 @@ addr = "private"
 		assert!(rules.is_empty(), "malformed IP must drop the rule");
 	}
 
-	// ------------------------------------------------------------------
-	// PR5-K regression: `format_protocol` / `format_optional_parts` Display
-	// output must still match the parser-accepted spelling.
-	// ------------------------------------------------------------------
+	// format_protocol / format_optional_parts Display regression
 
 	#[test]
 	fn format_protocol_zero_alloc_output() {

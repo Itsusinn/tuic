@@ -30,7 +30,7 @@ impl Plugin for TuicServerPlugin {
 	fn build(self, app: App) -> App {
 		let mut cfg = self.cfg;
 
-		// ── DNS resolver ─────────────────────────────────────────────────────
+		// DNS resolver
 		let default_ip_mode = cfg.outbound.default.ip_mode.unwrap_or(StackPrefer::V4first);
 		let resolver: Arc<dyn wind_core::Resolver> = match wind_dns::build(&cfg.dns).unwrap() {
 			Some(hickory) => {
@@ -43,14 +43,14 @@ impl Plugin for TuicServerPlugin {
 			}
 		};
 
-		// ── Geo data (blocking io: decode + mmap) ────────────────────────────
+		// Geo data (blocking io: decode + mmap)
 		let geodata = load_geodata_blocking(&cfg);
 
-		// ── Router ───────────────────────────────────────────────────────────
+		// Router
 		let router = wind_adapter::TuicRouter::new(&cfg, resolver.clone(), geodata.clone()).unwrap();
 		let app = app.set_router(router);
 
-		// ── Outbound handlers ────────────────────────────────────────────────
+		// Outbound handlers
 		let stream_timeout = cfg.stream_timeout;
 		let app = app.add_outbound(
 			"default",
@@ -62,10 +62,10 @@ impl Plugin for TuicServerPlugin {
 			app = app.add_outbound(name, handler);
 		}
 
-		// ── TUIC auth ────────────────────────────────────────────────────────
+		// TUIC auth
 		let app = app.set_tuic_authenticator(Arc::new(StaticTuicAuth::from_passwords(&cfg.users)));
 
-		// ── Hooks: stats + connection tracking + active registry ─────────────
+		// Hooks: stats + connection tracking + active registry
 		let stats = Arc::new(StatsCollector::new());
 		let active = if cfg.restful.maximum_clients_per_user > 0 || cfg.restful.enabled {
 			Some(ActiveConnections::new())
@@ -93,7 +93,7 @@ impl Plugin for TuicServerPlugin {
 		let auth_timeout = cfg.auth_timeout;
 		let zero_rtt = cfg.zero_rtt_handshake;
 
-		// ── Inbound factory ──────────────────────────────────────────────────
+		// Inbound factory
 		match cfg.backend.mode {
 			crate::config::BackendMode::Quinn => {
 				let quinn = cfg.backend.quinn.clone();
@@ -219,7 +219,7 @@ impl Plugin for TuicServerPlugin {
 			}
 		}
 
-		// ── RESTful API (spawned as a background task) ───────────────────────
+		// RESTful API (spawned as a background task)
 		if restful_cfg.enabled {
 			let rf_active: Arc<dyn restful::KickConnections> = match active {
 				Some(a) => Arc::new(a) as Arc<dyn restful::KickConnections>,
@@ -245,7 +245,7 @@ impl Plugin for TuicServerPlugin {
 	}
 }
 
-// ─── Geo-data loading (blocking) ─────────────────────────────────────────────
+// Geo-data loading (blocking)
 
 fn load_geodata_blocking(cfg: &Config) -> Option<Arc<wind_geodata::GeoData>> {
 	if !cfg.geodata.is_enabled() {
@@ -274,7 +274,7 @@ fn load_geodata_blocking(cfg: &Config) -> Option<Arc<wind_geodata::GeoData>> {
 	}
 }
 
-// ─── Self-signed cert generation ─────────────────────────────────────────────
+// Self-signed cert generation
 
 fn generate_self_signed(
 	hostname: &str,

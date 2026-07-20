@@ -1,9 +1,5 @@
 //! RESTful API for tuic-server management.
 //!
-//! Provides an HTTP API for querying online users, traffic statistics, and
-//! kicking users, backed by wind's [`StatsCollector`], [`ActiveConnections`],
-//! and [`ConnectionHooks`].
-//!
 //! # Endpoints
 //!
 //! | Method | Path | Description |
@@ -207,7 +203,7 @@ impl KickConnections for ConnectionTracker {
 	}
 }
 
-// ─── Auth helper ─────────────────────────────────────────────────────────────
+// Auth helper
 
 fn is_authorized(headers: &HeaderMap, secret: &str) -> bool {
 	if secret.is_empty() {
@@ -227,7 +223,7 @@ fn unauthorized() -> (StatusCode, Json<Value>) {
 	(StatusCode::UNAUTHORIZED, Json(json!("unauthorized")))
 }
 
-// ─── Endpoints ───────────────────────────────────────────────────────────────
+// Endpoints
 
 /// POST /kick — kick one or more users by UUID.
 async fn kick_handler(
@@ -422,7 +418,7 @@ mod tests {
 		})
 	}
 
-	// ── ConnectionTracker tests ──────────────────────────────────────────
+	// ConnectionTracker tests
 
 	#[tokio::test]
 	async fn test_tracker_new_is_empty() {
@@ -555,7 +551,7 @@ mod tests {
 		assert_eq!(kicked, 1);
 	}
 
-	// ── NoopConnections tests ────────────────────────────────────────────
+	// NoopConnections tests
 
 	#[tokio::test]
 	async fn test_noop_kick_returns_zero() {
@@ -576,7 +572,7 @@ mod tests {
 		assert!(noop.is_empty());
 	}
 
-	// ── KickConnections trait tests ──────────────────────────────────────
+	// KickConnections trait tests
 
 	#[tokio::test]
 	async fn test_tracker_as_kick_connections_delegates() {
@@ -588,7 +584,7 @@ mod tests {
 		assert_eq!(kc.kick_user(&UserId::from("x")), 0);
 	}
 
-	// ── Auth tests ───────────────────────────────────────────────────────
+	// Auth tests
 
 	#[test]
 	fn test_auth_empty_secret_always_passes() {
@@ -637,7 +633,7 @@ mod tests {
 		assert_eq!(json.0, json!("unauthorized"));
 	}
 
-	// ── REST endpoint tests ──────────────────────────────────────────────
+	// REST endpoint tests
 
 	fn build_router(state: Arc<RestfulState>) -> axum::Router {
 		axum::Router::new()

@@ -1,7 +1,4 @@
-//! Shared, lazily-initialized TUIC outbound handle.
-//!
-//! The outbound connection is created asynchronously in a background task.
-//! Handlers and forwarders wait for readiness on first use via
+//! Lazily-initialized TUIC outbound handle. Callers wait via
 //! [`SharedOutbound::get`].
 
 use std::sync::Arc;
@@ -160,19 +157,5 @@ mod tests {
 		let shared = SharedOutbound::new();
 		let guard = shared.inner.lock().unwrap();
 		assert!(guard.is_none());
-	}
-
-	#[tokio::test]
-	async fn test_set_value_triggers_notify() {
-		// Test that setting a value into the inner Mutex and calling
-		// notify_waiters() causes a concurrent get() to succeed.
-		let shared = SharedOutbound::new();
-		let shared_clone = shared.clone();
-
-		// We'll mock-set a value inside. In real code,
-		// Arc::new(TuicOutboundAdapter{...}) is stored; here we just verify the
-		// store-then-get pattern. Since TuicOutboundAdapter can't be trivially
-		// constructed, we skip the actual adapter storage test.
-		let _ = shared_clone;
 	}
 }

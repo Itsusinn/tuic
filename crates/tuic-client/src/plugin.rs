@@ -56,7 +56,7 @@ impl TuicClientPlugin {
 
 impl Plugin for TuicClientPlugin {
 	fn build(self, app: App) -> App {
-		// ── Shared outbound handle ────────────────────────────────────────
+		// Shared outbound handle
 		let shared = SharedOutbound::new();
 
 		// Spawn outbound connection setup (async) as a tracked task.
@@ -73,14 +73,14 @@ impl Plugin for TuicClientPlugin {
 			}
 		});
 
-		// ── Outbound handler for the dispatcher ───────────────────────────
+		// Outbound handler
 		let handler = Arc::new(LazyHandler { shared: shared.clone() });
 		let app = app.add_outbound("default", handler);
 
-		// ── Router ───────────────────────────────────────────────────────
+		// Router
 		let app = app.set_router(ClientRouter);
 
-		// ── SOCKS5 inbound ────────────────────────────────────────────────
+		// SOCKS5 inbound
 		let local = self.cfg.local.clone();
 		let auth = match (&local.username, &local.password) {
 			(Some(u), Some(p)) => AuthMode::Password {
@@ -103,7 +103,7 @@ impl Plugin for TuicClientPlugin {
 			SocksInbound::new(opts, ctx.token.clone())
 		});
 
-		// ── TCP tunnel inbounds ───────────────────────────────────────────
+		// TCP tunnel inbounds
 		let mut app = app;
 		for entry in local.tcp_forward {
 			let listen = entry.listen;
@@ -113,7 +113,7 @@ impl Plugin for TuicClientPlugin {
 			});
 		}
 
-		// ── UDP tunnel inbounds ───────────────────────────────────────────
+		// UDP tunnel inbounds
 		for entry in local.udp_forward {
 			let listen = entry.listen;
 			let remote = entry.remote;

@@ -56,7 +56,7 @@ impl std::fmt::Display for Control {
 
 impl std::error::Error for Control {}
 
-/// TUIC Server - A minimalistic TUIC server implementation
+/// Command-line arguments for tuic-server.
 #[derive(Parser, Debug)]
 #[command(name = "tuic-server")]
 #[command(author, version, about, long_about = None)]
@@ -76,10 +76,6 @@ pub struct Cli {
 }
 
 /// GeoIP / GeoSite database configuration.
-///
-/// Point `geosite` and `geoip` at v2ray-format `.dat` files; on startup they
-/// are compiled into a cache under `data_dir` and used to evaluate `GEOSITE` /
-/// `GEOIP` routing rules. When unset, geo rules never match.
 #[derive(Deserialize, Serialize, Educe, Clone, Debug)]
 #[educe(Default)]
 #[serde(default, deny_unknown_fields)]
@@ -97,11 +93,7 @@ impl GeoDataConfig {
 	}
 }
 
-/// RESTful API configuration for server management endpoints.
-///
-/// When enabled, exposes an HTTP API for querying online users, traffic
-/// statistics, and kicking users. Uses Bearer token authentication when
-/// `secret` is set.
+/// HTTP management API configuration.
 #[derive(Deserialize, Serialize, Clone)]
 #[serde(default, deny_unknown_fields)]
 pub struct RestfulConfig {
@@ -257,11 +249,7 @@ pub struct Config {
 	#[serde(default, rename = "initial_window")]
 	#[deprecated]
 	pub __initial_window: Option<u64>,
-	// NOTE: these renames previously had `send_window`/`receive_window` swapped
-	// (each field renamed to the OTHER name's wire form), so a legacy top-level
-	// `send_window` key deserialised into `__receive_window` and was migrated
-	// into `quic.receive_window`. QUIC flow-control parameters were silently
-	// transposed on every load of a deprecated config layout.
+	// NOTE: historical config had swapped send/receive window renames; migration corrects them.
 	#[serde(default, rename = "send_window")]
 	#[deprecated]
 	pub __send_window: Option<u64>,
@@ -761,17 +749,7 @@ fn infer_config_format(content: &str) -> ConfigFormat {
 		false
 	});
 
-	// Check for TOML format (common indicators).
-	//
-	// 1. TOML uses `[section]` tables — match a bracketed prefix that has no inner
-	//    colon (`:` would suggest a YAML mapping with a list-marker key).
-	// 2. TOML uses `=` for assignments — but ONLY of the form `<identifier> = ...`.
-	//    The previous heuristic was `... || trimmed_line.contains('=')` (with
-	//    bare-OR precedence over `&&`!), so any YAML line containing an `=` in a
-	//    VALUE — for example `secret: aGVsbG8=` — was flagged as TOML. The combined
-	//    check then wrongly classified those YAML files as TOML and parsing failed.
-	//    The check below uses a strict identifier prefix and is properly
-	//    parenthesised.
+	// Check for TOML format: [section] tables and <ident> = assignments.
 	let is_toml_assignment = |s: &str| -> bool {
 		let bytes = s.as_bytes();
 		if bytes.is_empty() || !(bytes[0].is_ascii_alphabetic() || bytes[0] == b'_') {
@@ -846,7 +824,6 @@ async fn find_config_in_dir(dir: &PathBuf) -> eyre::Result<PathBuf> {
 		));
 	}
 
-	// Sort to ensure consistent behavior (alphabetical order)
 	config_files.sort();
 
 	Ok(config_files[0].clone())
@@ -2008,13 +1985,9 @@ rules = ["INVALID_TYPE,value,target"]
 		assert!(result.is_err());
 	}
 
-	// ------------------------------------------------------------------
-	// PR4-L regression tests for `infer_config_format`
-	// ------------------------------------------------------------------
+	// infer_config_format regression tests
 
-	/// Previously a YAML value that happened to contain `=` (e.g. a base64
-	/// secret like `aGVsbG8=`) was misclassified as TOML because the heuristic
-	/// reduced to `trimmed.contains('=')` due to `&&`/`||` precedence.
+	/// YAML values containing `=` must not be misclassified as TOML.
 	#[test]
 	fn yaml_with_equals_in_value_is_yaml() {
 		let yaml = "secret: aGVsbG8=\nfoo: bar\n";
@@ -2023,13 +1996,8 @@ rules = ["INVALID_TYPE,value,target"]
 
 	#[test]
 	fn toml_section_still_detected() {
-		// `infer_config_format` short-circuits `starts_with('[')` to JSON, so
-		// any TOML file starting with a `[section]` would be misidentified as
-		// JSON regardless of the PR4-L heuristic fix. That JSON shortcut is a
-		// pre-existing bug orthogonal to this PR; here we just verify a
-		// TOML file whose FIRST non-comment line is a `key = value`
-		// assignment is still detected as TOML — covering the case PR4-L
-		// actually changed.
+		// `infer_config_format` short-circuits `starts_with('[')` to JSON.
+		// Verify TOML is still detected when first non-comment line is `key = value`.
 		let toml = "# config\nlog_level = \"info\"\n[server]\nport = 9443\n";
 		assert_eq!(infer_config_format(toml), ConfigFormat::Toml);
 	}

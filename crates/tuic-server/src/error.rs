@@ -5,10 +5,7 @@ use rustls::Error as RustlsError;
 use thiserror::Error;
 use uuid::Uuid;
 
-// NOTE: many variants are currently unconstructed inside the workspace but are
-// `pub` API — downstream binaries / future call sites may construct them, so
-// we keep them all. If they remain unconstructed for several releases, prune
-// then.
+// Some variants may be unused in-tree but are kept as public API.
 #[derive(Debug, Error)]
 pub enum Error {
 	#[error(transparent)]

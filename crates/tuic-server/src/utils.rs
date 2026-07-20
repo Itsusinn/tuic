@@ -1,29 +1,5 @@
-// Re-export common types from wind-core and wind-tuic
 pub use wind_core::StackPrefer;
-pub use wind_tuic::quinn::UdpRelayMode;
-
-// Type alias for backward compatibility
 pub type CongestionController = wind_tuic::quinn::CongestionControl;
-
-pub trait FutResultExt<T, E, Fut> {
-	fn log_err(self) -> impl std::future::Future<Output = Option<T>>;
-}
-impl<T, Fut> FutResultExt<T, eyre::Report, Fut> for Fut
-where
-	Fut: std::future::Future<Output = Result<T, eyre::Report>> + Send,
-	T: Send,
-{
-	#[inline(always)]
-	async fn log_err(self) -> Option<T> {
-		match self.await {
-			Ok(v) => Some(v),
-			Err(e) => {
-				tracing::error!("{:?}", e);
-				None
-			}
-		}
-	}
-}
 
 #[cfg(test)]
 mod tests {

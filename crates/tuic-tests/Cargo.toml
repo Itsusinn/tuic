@@ -21,7 +21,7 @@ aws-lc-rs = ["wind-tuic/aws-lc-rs", "dep:aws-lc-rs", "rustls/aws-lc-rs", "tuic-c
 h3-masquerade-test = ["wind-tuic/masquerade", "dep:reqwest", "dep:http"]
 
 [dependencies]
-wind-core = { version = "0.1.1", path = "../wind/crates/wind-core" }
+wind-core = { path = "../wind/crates/wind-core" }
 tuic-core = { path = "../wind/crates/tuic-core" }
 tuic-client = { path = "../tuic-client", default-features = false }
 tuic-server = { path = "../tuic-server", default-features = false }

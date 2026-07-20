@@ -34,11 +34,7 @@ async fn main() -> eyre::Result<()> {
 		}
 	};
 	let level = tracing::Level::from_str(&cfg.log_level)?;
-	// Cover the crates and custom targets the client actually logs under. The
-	// old list (`tuic`, `tuic_quinn`) predated the wind-tuic split, so relay
-	// debug (emitted under `wind_tuic` / the `tuic_out` and `udp` targets) fell
-	// through to the default INFO filter and `log_level = "debug"` was
-	// ineffective for it.
+	// Logging targets for client-related crates.
 	let filter = tracing_subscriber::filter::Targets::new()
 		.with_targets(vec![
 			("tuic_client", level),
@@ -65,10 +61,8 @@ async fn main() -> eyre::Result<()> {
 				)),
 		)
 		.try_init()?;
-	// Own the cancel token here so the ctrl-c branch can trigger a graceful
-	// shutdown: stop the SOCKS5/forwarder accept loops, close the TUIC
-	// connection (the server learns we left instead of waiting out its idle
-	// timeout), and drain background tasks — same structure as tuic-server.
+	// Graceful shutdown via cancel token: stop accept loops, close connection,
+	// drain tasks.
 	let cancel = CancellationToken::new();
 	let mut client = tokio::spawn(tuic_client::run_with_cancel(cfg, cancel.clone()));
 

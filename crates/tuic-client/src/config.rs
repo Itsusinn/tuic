@@ -1,9 +1,7 @@
 use std::{
-	fmt::Display,
 	io::Error as IoError,
 	net::{IpAddr, SocketAddr},
 	path::PathBuf,
-	str::FromStr,
 	sync::Arc,
 	time::Duration,
 };
@@ -17,7 +15,6 @@ use figment::{
 };
 use figment_json5::Json5;
 use humantime::Duration as HumanDuration;
-use json5::Error as Json5Error;
 use serde::{Deserialize, Deserializer, de::Error as DeError};
 use thiserror::Error;
 use uuid::Uuid;
@@ -41,19 +38,7 @@ impl EnvState {
 	}
 }
 
-/// Control flow results for CLI parsing
-#[derive(Debug)]
-pub struct Control(&'static str);
-
-impl std::fmt::Display for Control {
-	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-		write!(f, "{}", self.0)
-	}
-}
-
-impl std::error::Error for Control {}
-
-/// TUIC Client - A minimalistic TUIC client implementation
+/// Command-line arguments for tuic-client.
 #[derive(Parser, Debug)]
 #[command(name = "tuic-client")]
 #[command(author, version, about, long_about = None)]
@@ -256,12 +241,9 @@ impl Config {
 		let figmet = Figment::from(Serialized::defaults(Config::default()));
 		let format;
 
-		// Priority: TUIC_FORCE_TOML > TUIC_CONFIG_FORMAT > file extension > content
-		// inference
 		if env_state.tuic_force_toml {
 			format = ConfigFormat::Toml;
 		} else if let Some(ref env_format) = env_state.tuic_config_format {
-			// TUIC_CONFIG_FORMAT has higher priority than file extension
 			match env_format.to_lowercase().as_str() {
 				"json" | "json5" => format = ConfigFormat::Json,
 				"yaml" | "yml" => format = ConfigFormat::Yaml,
@@ -344,16 +326,6 @@ fn infer_config_format(content: &str) -> ConfigFormat {
 	}
 
 	ConfigFormat::Unknown
-}
-
-pub fn deserialize_from_str<'de, T, D>(deserializer: D) -> Result<T, D::Error>
-where
-	T: FromStr,
-	<T as FromStr>::Err: Display,
-	D: Deserializer<'de>,
-{
-	let s = String::deserialize(deserializer)?;
-	T::from_str(&s).map_err(DeError::custom)
 }
 
 pub fn deserialize_server<'de, D>(deserializer: D) -> Result<(String, u16), D::Error>
@@ -439,18 +411,8 @@ pub enum ConfigError {
 	UnknownFormat,
 	#[error(transparent)]
 	Io(#[from] IoError),
-	#[error(transparent)]
-	Json5(#[from] Json5Error),
-	#[error("TOML parse error: {0}")]
-	Toml(String),
 	#[error("configuration error: {0}")]
 	Figment(#[from] figment::Error),
-}
-
-impl From<toml::de::Error> for ConfigError {
-	fn from(err: toml::de::Error) -> Self {
-		ConfigError::Toml(err.to_string())
-	}
 }
 
 #[cfg(test)]
@@ -477,12 +439,10 @@ mod tests {
 		assert!(parse_server("[2001:db8::1]").is_err());
 	}
 
-	// Helper function for testing config file parsing
 	fn test_parse_config(config_content: &str, extension: &str) -> eyre::Result<Config> {
 		test_parse_config_with_env(config_content, extension, EnvState::default())
 	}
 
-	// Helper function for testing config file parsing with custom environment state
 	fn test_parse_config_with_env(config_content: &str, extension: &str, env_state: EnvState) -> eyre::Result<Config> {
 		use std::fs;
 

@@ -34,8 +34,7 @@ impl CertResolver {
 			cert_key: ArcSwap::new(cert_key),
 			hash: ArcSwap::new(Arc::new(hash)),
 		});
-		// Start file watcher in background; exits on `cancel` so the task does
-		// not outlive the server when used as a library.
+		// Background cert watcher; exits on cancel.
 		let resolver_clone = resolver.clone();
 		tokio::spawn(async move {
 			if let Err(e) = resolver_clone.start_watch(interval, cancel).await {
@@ -53,12 +52,7 @@ impl CertResolver {
 				_ = interval.tick() => {}
 			}
 
-			// Treat I/O errors here as transient (the cert file may be in the
-			// middle of an ACME-driven `rename`, the directory may be missing
-			// permission briefly during a system update, etc.). Previously
-			// `?` propagated the error out of the spawned watcher task and the
-			// watcher silently died — hot-reload then permanently stopped
-			// working until the process was restarted.
+			// Treat I/O errors as transient (ACME renaming, perm changes, etc.).
 			let new_hash = match Self::calc_hash(&self.cert_path, &self.key_path).await {
 				Ok(h) => h,
 				Err(e) => {
@@ -67,11 +61,7 @@ impl CertResolver {
 				}
 			};
 
-			// Compare against the currently committed hash WITHOUT swapping
-			// first. The previous code did `swap(new_hash)` even when the
-			// reload subsequently failed; the next tick then saw an unchanged
-			// hash and never retried, leaving the old (possibly expired)
-			// certificate served forever with no further warnings.
+			// Compare hash before swapping so failed reloads keep retrying.
 			if self.hash.load().deref().as_ref() == &new_hash {
 				continue;
 			}
@@ -115,7 +105,7 @@ async fn load_cert_key(cert_path: &Path, key_path: &Path) -> eyre::Result<Arc<Ce
 	let der = load_priv_key(key_path).await?;
 	#[cfg(feature = "aws-lc-rs")]
 	let key = rustls::crypto::aws_lc_rs::sign::any_supported_type(&der).context("Unsupported private key type")?;
-	#[cfg(feature = "ring")]
+	#[cfg(all(feature = "ring", not(feature = "aws-lc-rs")))]
 	let key = rustls::crypto::ring::sign::any_supported_type(&der).context("Unsupported private key type")?;
 
 	Ok(Arc::new(CertifiedKey::new(cert_chain, key)))
@@ -146,21 +136,12 @@ async fn load_priv_key(key_path: &Path) -> eyre::Result<PrivateKeyDer<'static>> 
 		return Err(eyre::eyre!("Empty private key file: {}", key_path.display()));
 	}
 
-	// 1. Prefer PEM — `rustls_pemfile::private_key` dispatches between PKCS1
-	//    (-----BEGIN RSA PRIVATE KEY-----), SEC1 (-----BEGIN EC PRIVATE KEY-----)
-	//    and PKCS8 (-----BEGIN PRIVATE KEY-----).
+	// 1. Prefer PEM (PKCS1/SEC1/PKCS8).
 	if let Some(key) = rustls_pemfile::private_key(&mut data.as_slice()).context("Malformed PEM private key")? {
 		return Ok(key);
 	}
 
-	// 2. Not PEM. Previously the loader unconditionally wrapped any non-empty blob
-	//    as PKCS8 DER, so a random/binary file produced an opaque rustls error far
-	//    from the point of failure. Now we do a structural check first: every
-	//    accepted DER key encoding (PKCS8 PrivateKeyInfo, PKCS1 RSAPrivateKey, SEC1
-	//    ECPrivateKey) starts with an ASN.1 SEQUENCE (tag 0x30) whose declared
-	//    length covers the rest of the file. That rejects text/garbage/truncated
-	//    files cheaply while letting any valid DER through to rustls for real
-	//    parsing later.
+	// 2. Verify structural DER before passing to rustls (rejects garbage/text).
 	if !looks_like_der_sequence(&data) {
 		return Err(eyre::eyre!(
 			"Private key at {} is neither a recognized PEM (PKCS1/SEC1/PKCS8) key nor a valid DER ASN.1 SEQUENCE — refusing \
@@ -198,23 +179,6 @@ fn looks_like_der_sequence(data: &[u8]) -> bool {
 	let body = data.len().saturating_sub(header_len);
 	// Allow up to 8 trailing bytes of slack (newline, NUL padding).
 	declared_len <= body && body.saturating_sub(declared_len) <= 8
-}
-
-/// Check if a domain name is valid for ACME certificate issuance
-pub fn is_valid_domain(hostname: &str) -> bool {
-	if hostname.is_empty() || hostname.len() > 253 {
-		return false;
-	}
-
-	hostname.split('.').all(|label| {
-		!label.is_empty()
-			&& label.len() <= 63
-			&& label.chars().all(|c| c.is_ascii_alphanumeric() || c == '-')
-			&& !label.starts_with('-')
-			&& !label.ends_with('-')
-	}) && hostname.contains('.')
-		&& !hostname.starts_with('.')
-		&& !hostname.ends_with('.')
 }
 
 #[cfg(test)]
@@ -392,7 +356,7 @@ mod tests {
 		assert!(resolver_result.is_err());
 	}
 
-	// --- PR1: private-key loader hardening regression tests ----------------
+	// --- Private-key loader regression tests ----------------
 
 	#[tokio::test]
 	async fn test_load_priv_key_rejects_empty_file() {
@@ -476,24 +440,6 @@ mod tests {
 		assert!(!looks_like_der_sequence(&[0x30, 0x82, 0xff, 0xff, 0x01]));
 		// Tolerate one trailing newline byte (some keystores append \n).
 		assert!(looks_like_der_sequence(&[0x30, 0x03, 0x01, 0x02, 0x03, b'\n']));
-	}
-
-	#[test]
-	fn test_domain_validation() {
-		assert!(is_valid_domain("example.com"));
-		assert!(is_valid_domain("sub.domain.co.uk"));
-		assert!(is_valid_domain("a-b.c-d.com"));
-		assert!(is_valid_domain("xn--eckwd4c7c.xn--zckzah.jp"));
-
-		assert!(!is_valid_domain(".leading.dot"));
-		assert!(!is_valid_domain("trailing.dot."));
-		assert!(!is_valid_domain("double..dot"));
-		assert!(!is_valid_domain("-leading-hyphen.com"));
-		assert!(!is_valid_domain("trailing-hyphen-.com"));
-		assert!(!is_valid_domain("space in.domain"));
-		assert!(!is_valid_domain(""));
-		assert!(!is_valid_domain(&"a".repeat(254)));
-		assert!(!is_valid_domain("no-tld"));
 	}
 
 	#[test]
