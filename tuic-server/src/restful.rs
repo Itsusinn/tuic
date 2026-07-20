@@ -91,11 +91,10 @@ async fn list_detailed_online(
 	}
 	let mut result = HashMap::new();
 	for (user, cache) in ctx.online_clients.iter() {
-		let entry_count = cache.entry_count();
-		if entry_count == 0 {
+		let addrs: Vec<SocketAddr> = cache.iter().map(|(_, client)| client.remote_address()).collect();
+		if addrs.is_empty() {
 			continue;
 		}
-		let addrs: Vec<SocketAddr> = cache.iter().map(|(_, client)| client.remote_address()).collect();
 		result.insert(*user, addrs);
 	}
 
@@ -146,32 +145,49 @@ async fn reset_traffic(
 	(StatusCode::OK, Json(result))
 }
 
-pub async fn client_connect(ctx: &AppContext, uuid: &Uuid, conn: QuinnConnection) {
-	if let Some(cfg) = ctx.cfg.restful.as_ref() {
-		let Some(counter) = ctx.online_counter.get(uuid) else {
-			warn!("UUID {uuid} not in users table during client_connect, closing connection");
-			conn.close(VarInt::from_u32(6003), b"Internal error");
-			return;
-		};
-		let current = counter.fetch_add(1, Ordering::Release);
-		if cfg.maximum_clients_per_user != 0 && current > cfg.maximum_clients_per_user {
-			conn.close(VarInt::from_u32(6001), b"Reached maximum clients limitation");
-			return;
-		}
-		let cap = if cfg.maximum_clients_per_user == 0 {
-			10000
-		} else {
-			cfg.maximum_clients_per_user as u64
-		};
-		let cache = ctx.online_clients.get_with(*uuid, async { Arc::new(Cache::new(cap)) }).await;
+pub async fn client_connect(ctx: &AppContext, uuid: &Uuid, conn: QuinnConnection) -> bool {
+	let Some(cfg) = ctx.cfg.restful.as_ref() else {
+		return true;
+	};
+	let Some(counter) = ctx.online_counter.get(uuid) else {
+		warn!("UUID {uuid} not in users table during client_connect, closing connection");
+		conn.close(VarInt::from_u32(6003), b"Internal error");
+		return false;
+	};
 
-		let client: crate::compat::QuicClient = conn.into();
-		cache.insert(client.stable_id(), client).await;
+	loop {
+		let current = counter.load(Ordering::Acquire);
+		if cfg.maximum_clients_per_user != 0 && current >= cfg.maximum_clients_per_user {
+			conn.close(VarInt::from_u32(6001), b"Reached maximum clients limitation");
+			return false;
+		}
+		if counter
+			.compare_exchange(current, current + 1, Ordering::AcqRel, Ordering::Acquire)
+			.is_ok()
+		{
+			break;
+		}
 	}
+
+	let cap = if cfg.maximum_clients_per_user == 0 {
+		10000
+	} else {
+		cfg.maximum_clients_per_user as u64
+	};
+	let cache = ctx.online_clients.get_with(*uuid, async { Arc::new(Cache::new(cap)) }).await;
+
+	let client: crate::compat::QuicClient = conn.into();
+	cache.insert(client.stable_id(), client).await;
+	true
 }
 pub async fn client_disconnect(ctx: &AppContext, uuid: &Uuid, conn: QuinnConnection) {
 	if let Some(counter) = ctx.online_counter.get(uuid) {
-		counter.fetch_sub(1, Ordering::SeqCst);
+		if counter
+			.fetch_update(Ordering::AcqRel, Ordering::Acquire, |current| current.checked_sub(1))
+			.is_err()
+		{
+			warn!("UUID {uuid} online counter already zero during client_disconnect");
+		}
 	} else {
 		warn!("UUID {uuid} not in users table during client_disconnect");
 	}

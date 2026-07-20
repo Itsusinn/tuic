@@ -1,6 +1,9 @@
 use std::{
 	collections::HashMap,
-	sync::{Arc, Weak},
+	sync::{
+		Arc, Weak,
+		atomic::{AtomicBool, Ordering},
+	},
 	time::Duration,
 };
 
@@ -56,6 +59,7 @@ pub struct Connection {
 	inner: QuinnConnection,
 	model: Model<side::Server>,
 	auth: Authenticated,
+	registered: Arc<AtomicBool>,
 	udp_sessions: Arc<AsyncRwLock<HashMap<u16, Weak<UdpSession>>>>,
 	udp_relay_mode: Arc<ArcSwap<Option<UdpRelayMode>>>,
 }
@@ -157,6 +161,7 @@ impl Connection {
 			inner: conn.clone(),
 			model: Model::<side::Server>::new(conn),
 			auth: Authenticated::new(),
+			registered: Arc::new(AtomicBool::new(false)),
 			udp_sessions: Arc::new(AsyncRwLock::new(HashMap::new())),
 			udp_relay_mode: Arc::new(ArcSwap::new(None.into())),
 		}
@@ -172,6 +177,19 @@ impl Connection {
 			.get(&auth.uuid())
 			.is_some_and(|password| auth.validate(password).unwrap_or(false))
 		{
+			if self.ctx.cfg.restful.is_some() {
+				self.registered.store(true, Ordering::Release);
+				if !restful::client_connect(&self.ctx, &auth.uuid(), self.inner.clone()).await {
+					self.registered.store(false, Ordering::Release);
+					return Err(Error::Other(eyre::eyre!("failed registering authenticated client")));
+				}
+				if self.is_closed() {
+					if self.registered.swap(false, Ordering::AcqRel) {
+						restful::client_disconnect(&self.ctx, &auth.uuid(), self.inner.clone()).await;
+					}
+					return Err(Error::LocallyClosed);
+				}
+			}
 			self.auth.set(auth.uuid()).await;
 			Span::current().record("user", auth.uuid().to_string());
 			Ok(())
@@ -184,9 +202,7 @@ impl Connection {
 		time::sleep(timeout).await;
 
 		match self.auth.get() {
-			Some(uuid) => {
-				restful::client_connect(&self.ctx, &uuid, self.inner).await;
-			}
+			Some(_) => {}
 			None => {
 				warn!("[authenticate] timeout");
 				self.close();
@@ -199,8 +215,14 @@ impl Connection {
 			time::sleep(self.ctx.cfg.gc_interval).await;
 
 			if self.is_closed() {
-				if let Some(uuid) = self.auth.get() {
-					restful::client_disconnect(&self.ctx, &uuid, self.inner).await;
+				match self.auth.get() {
+					Some(uuid) => {
+						if self.registered.swap(false, Ordering::AcqRel) {
+							restful::client_disconnect(&self.ctx, &uuid, self.inner).await;
+						}
+					}
+					None if self.registered.load(Ordering::Acquire) => continue,
+					None => {}
 				}
 				break;
 			}
