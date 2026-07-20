@@ -142,8 +142,80 @@ impl Plugin for TuicServerPlugin {
 			}
 			crate::config::BackendMode::Quiche => {
 				#[cfg(not(feature = "quiche"))]
-				tracing::error!("backend.mode = \"quiche\" requires the `quiche` feature");
-				return app;
+				{
+					tracing::error!("backend.mode = \"quiche\" requires the `quiche` feature");
+					return app;
+				}
+				#[cfg(feature = "quiche")]
+				{
+					use wind_tuic::quiche::{CertStore, CongestionControl as QuicheCC, ConnectionOpts, TuicheInbound};
+
+					let quiche_cfg = cfg.backend.quiche.clone();
+					let tls_self_sign = cfg.tls.self_sign;
+					let hostname = cfg.tls.hostname.clone();
+					let cert_path = cfg.tls.certificate.clone();
+					let key_path = cfg.tls.private_key.clone();
+					let masquerade_enabled = cfg.masquerade.enabled;
+					let masquerade_upstream = cfg.masquerade.upstream.clone();
+					let users = cfg.users.clone();
+
+					let cc = match quiche_cfg.congestion_control.controller {
+						wind_tuic::quinn::CongestionControl::Cubic => QuicheCC::Cubic,
+						wind_tuic::quinn::CongestionControl::Bbr | wind_tuic::quinn::CongestionControl::Bbr3 => QuicheCC::Bbr,
+						wind_tuic::quinn::CongestionControl::NewReno => QuicheCC::Reno,
+					};
+
+					let opts = ConnectionOpts {
+						max_idle_timeout: quiche_cfg.max_idle_time,
+						max_concurrent_bi_streams: quiche_cfg.max_concurrent_bi_streams,
+						max_concurrent_uni_streams: quiche_cfg.max_concurrent_uni_streams,
+						send_window: quiche_cfg.send_window,
+						receive_window: quiche_cfg.receive_window,
+						congestion_control: cc,
+						enable_0rtt: quiche_cfg.zero_rtt || zero_rtt,
+						..Default::default()
+					};
+
+					let quiche_dir = std::env::temp_dir().join("tuic-server-quiche");
+					std::fs::create_dir_all(&quiche_dir).expect("create quiche temp cert dir");
+					let quiche_cert_path = quiche_dir.join("cert.pem");
+					let quiche_key_path = quiche_dir.join("key.pem");
+
+					if tls_self_sign {
+						let generated =
+							rcgen::generate_simple_self_signed(vec![hostname]).expect("quiche self-signed cert generation");
+						std::fs::write(&quiche_cert_path, generated.cert.pem()).expect("write quiche cert.pem");
+						std::fs::write(&quiche_key_path, generated.signing_key.serialize_pem()).expect("write quiche key.pem");
+					} else {
+						std::fs::copy(&cert_path, &quiche_cert_path).expect("copy quiche cert");
+						std::fs::copy(&key_path, &quiche_key_path).expect("copy quiche key");
+					}
+
+					let cert_pem = std::fs::read(&quiche_cert_path).expect("read quiche cert.pem");
+					let key_pem = std::fs::read(&quiche_key_path).expect("read quiche key.pem");
+					let cert_store = CertStore::from_pem(&cert_pem, &key_pem).expect("create quiche cert store");
+
+					let quiche_cert_path_s = quiche_cert_path.to_string_lossy().into_owned();
+					let quiche_key_path_s = quiche_key_path.to_string_lossy().into_owned();
+
+					app = app.add_inbound_with(move |hooks: InboundHooks, ctx: Arc<AppContext>| {
+						let cancel = ctx.token.child_token();
+						ServerInbound::Tuiche(TuicheInbound::new(
+							server,
+							users,
+							opts,
+							quiche_cert_path_s,
+							quiche_key_path_s,
+							cert_store,
+							cancel,
+							masquerade_enabled.then_some(wind_tuic::server::MasqueradeConfig {
+								upstream: masquerade_upstream,
+							}),
+							hooks,
+							active_for_inbound,
+						))
+					});
+				}
 			}
 		}
 
