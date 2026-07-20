@@ -1,7 +1,8 @@
 //! Concurrent-connection stress tests.
 //!
-//! Spawns multiple simultaneous TCP connections through the TUIC proxy to verify
-//! that the multiplexed QUIC transport handles concurrent streams correctly.
+//! Spawns multiple simultaneous TCP connections through the TUIC proxy to
+//! verify that the multiplexed QUIC transport handles concurrent streams
+//! correctly.
 //!
 //! NOTE: `tuic_client::run` installs a process-global connection handle
 //! (`OnceCell`), so at most one client may run per test process. Each `#[test]`

@@ -168,9 +168,6 @@ mod tests {
 
 	#[test]
 	fn test_ipstack_prefer_values_distinct() {
-		assert_ne!(
-			StackPrefer::V4only, StackPrefer::V6only,
-			"prefer values must be distinct"
-		);
+		assert_ne!(StackPrefer::V4only, StackPrefer::V6only, "prefer values must be distinct");
 	}
 }

@@ -394,7 +394,10 @@ pub async fn serve(state: Arc<RestfulState>, addr: SocketAddr, cancel: Cancellat
 mod tests {
 	use std::net::SocketAddr;
 
-	use axum::{body::Body, http::{Request, StatusCode}};
+	use axum::{
+		body::Body,
+		http::{Request, StatusCode},
+	};
 	use tokio_util::sync::CancellationToken;
 	use tower::ServiceExt;
 	use wind_core::hooks::{ConnInfo, ConnectDecision, Protocol};
@@ -409,11 +412,7 @@ mod tests {
 		}
 	}
 
-	fn make_state(
-		active: Arc<dyn KickConnections>,
-		secret: &str,
-		users: HashMap<Uuid, String>,
-	) -> Arc<RestfulState> {
+	fn make_state(active: Arc<dyn KickConnections>, secret: &str, users: HashMap<Uuid, String>) -> Arc<RestfulState> {
 		Arc::new(RestfulState {
 			active,
 			stats: None,
@@ -682,9 +681,7 @@ mod tests {
 					.method("POST")
 					.header("content-type", "application/json")
 					.header("authorization", "Bearer secret")
-					.body(Body::from(
-						serde_json::to_string(&vec![Uuid::nil()]).unwrap(),
-					))
+					.body(Body::from(serde_json::to_string(&vec![Uuid::nil()]).unwrap()))
 					.unwrap(),
 			)
 			.await
@@ -732,7 +729,13 @@ mod tests {
 		let app = build_router(state);
 
 		let response = app
-			.oneshot(Request::builder().uri("/detailed_online").method("GET").body(Body::empty()).unwrap())
+			.oneshot(
+				Request::builder()
+					.uri("/detailed_online")
+					.method("GET")
+					.body(Body::empty())
+					.unwrap(),
+			)
 			.await
 			.unwrap();
 
@@ -764,7 +767,13 @@ mod tests {
 		let app = build_router(state);
 
 		let response = app
-			.oneshot(Request::builder().uri("/detailed_online").method("GET").body(Body::empty()).unwrap())
+			.oneshot(
+				Request::builder()
+					.uri("/detailed_online")
+					.method("GET")
+					.body(Body::empty())
+					.unwrap(),
+			)
 			.await
 			.unwrap();
 
@@ -809,7 +818,13 @@ mod tests {
 		let app = build_router(state);
 
 		let response = app
-			.oneshot(Request::builder().uri("/reset_traffic").method("GET").body(Body::empty()).unwrap())
+			.oneshot(
+				Request::builder()
+					.uri("/reset_traffic")
+					.method("GET")
+					.body(Body::empty())
+					.unwrap(),
+			)
 			.await
 			.unwrap();
 
@@ -861,9 +876,7 @@ mod tests {
 					.uri("/kick")
 					.method("POST")
 					.header("content-type", "application/json")
-					.body(Body::from(
-						serde_json::to_string(&vec![uuid]).unwrap(),
-					))
+					.body(Body::from(serde_json::to_string(&vec![uuid]).unwrap()))
 					.unwrap(),
 			)
 			.await

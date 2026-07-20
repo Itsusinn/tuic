@@ -116,8 +116,10 @@ mod tests {
 
 	#[test]
 	fn test_multiple_waiters_all_woken() {
-		use std::sync::Arc;
-		use std::sync::atomic::{AtomicU32, Ordering};
+		use std::sync::{
+			Arc,
+			atomic::{AtomicU32, Ordering},
+		};
 
 		let notify = Arc::new(Notify::new());
 		let value = Arc::new(Mutex::new(Option::<u32>::None));
@@ -167,10 +169,10 @@ mod tests {
 		let shared = SharedOutbound::new();
 		let shared_clone = shared.clone();
 
-		// We'll mock-set a value inside. In real code, Arc::new(TuicOutboundAdapter{...})
-		// is stored; here we just verify the store-then-get pattern.
-		// Since TuicOutboundAdapter can't be trivially constructed, we skip
-		// the actual adapter storage test.
+		// We'll mock-set a value inside. In real code,
+		// Arc::new(TuicOutboundAdapter{...}) is stored; here we just verify the
+		// store-then-get pattern. Since TuicOutboundAdapter can't be trivially
+		// constructed, we skip the actual adapter storage test.
 		let _ = shared_clone;
 	}
 }

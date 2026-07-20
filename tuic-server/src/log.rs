@@ -178,13 +178,17 @@ mod tests {
 			fn write(&mut self, _buf: &[u8]) -> io::Result<usize> {
 				Err(io::Error::new(io::ErrorKind::BrokenPipe, "pipe broken"))
 			}
+
 			fn flush(&mut self) -> io::Result<()> {
 				Ok(())
 			}
 		}
 
 		let mut b = Vec::<u8>::new();
-		let mut tee = TeeWriter { a: FailWriter, b: &mut b };
+		let mut tee = TeeWriter {
+			a: FailWriter,
+			b: &mut b,
+		};
 
 		let result = tee.write(b"test");
 		assert!(result.is_err());

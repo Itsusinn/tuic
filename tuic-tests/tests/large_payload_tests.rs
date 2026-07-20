@@ -9,9 +9,7 @@ use serial_test::serial;
 use tokio::time::timeout;
 use tracing::info;
 use tracing_test::traced_test;
-use tuic_tests::{
-	install_crypto_provider, run_tcp_echo_server, start_quinn_pair, test_tcp_through_socks5,
-};
+use tuic_tests::{install_crypto_provider, run_tcp_echo_server, start_quinn_pair, test_tcp_through_socks5};
 
 fn make_test_data(size: usize) -> Vec<u8> {
 	(0..size).map(|i| (i % 251) as u8).collect()

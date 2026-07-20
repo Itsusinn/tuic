@@ -259,9 +259,7 @@ mod tests {
 
 		let (cert_pem, key_pem) = {
 			let mut params = rcgen::CertificateParams::default();
-			params
-				.distinguished_name
-				.push(rcgen::DnType::CommonName, "localhost");
+			params.distinguished_name.push(rcgen::DnType::CommonName, "localhost");
 			params.subject_alt_names = vec![rcgen::SanType::DnsName(
 				rcgen::string::Ia5String::try_from("localhost".to_string()).unwrap(),
 			)];

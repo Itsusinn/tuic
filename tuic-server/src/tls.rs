@@ -537,14 +537,9 @@ mod tests {
 		let (cert_file, key_file) = create_temp_cert_file(&cert_der, &key_der).await;
 
 		let cancel = CancellationToken::new();
-		let resolver = CertResolver::new(
-			cert_file.path(),
-			key_file.path(),
-			Duration::from_millis(100),
-			cancel.clone(),
-		)
-		.await
-		.unwrap();
+		let resolver = CertResolver::new(cert_file.path(), key_file.path(), Duration::from_millis(100), cancel.clone())
+			.await
+			.unwrap();
 
 		let initial_key = resolver.cert_key.load_full();
 		assert!(!initial_key.cert.is_empty());
