@@ -394,7 +394,6 @@ mod tests {
 		body::Body,
 		http::{Request, StatusCode},
 	};
-	use tokio_util::sync::CancellationToken;
 	use tower::ServiceExt;
 	use wind_core::hooks::{ConnInfo, ConnectDecision, Protocol};
 
