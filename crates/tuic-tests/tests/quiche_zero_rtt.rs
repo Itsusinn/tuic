@@ -13,7 +13,10 @@
 // These e2e tests drive real QUIC sockets; only *run* them on 64-bit hosts
 // (cross-emulated 32-bit test execution is unreliable for networking). The
 // quiche backend itself now builds on 32-bit too (see patches/tokio-quiche).
-#![cfg(target_pointer_width = "64")]
+#![cfg(all(
+	target_pointer_width = "64",
+	not(any(target_os = "android", target_os = "freebsd", target_arch = "loongarch64"))
+))]
 
 use std::{
 	net::{IpAddr, Ipv4Addr, SocketAddr},
