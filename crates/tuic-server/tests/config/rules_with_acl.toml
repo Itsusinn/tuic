@@ -1,0 +1,21 @@
+# New Metacubex-style rules (evaluated after ACL)
+rules = [
+    "DOMAIN-SUFFIX,ads.example.com,reject",
+    "MATCH,proxy",
+]
+
+[users]
+"123e4567-e89b-12d3-a456-426614174000" = "password"
+
+[tls]
+self_sign = true
+
+# Legacy ACL rules
+[[acl]]
+outbound = "reject"
+addr = "private"
+
+[[acl]]
+outbound = "allow"
+addr = "localhost"
+ports = "udp/53"

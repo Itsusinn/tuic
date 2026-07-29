@@ -1,0 +1,102 @@
+[package]
+name = "tuic-server"
+version.workspace = true
+authors.workspace = true
+description = "Minimalistic TUIC server implementation as a reference"
+categories = ["network-programming"]
+keywords = ["network", "proxy", "quic", "tuic"]
+edition.workspace = true
+rust-version.workspace = true
+readme.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[features]
+default = ["aws-lc-rs", "quinn"]
+ring = ["rustls/ring", "rcgen/ring", "quinn/rustls-ring"]
+aws-lc-rs = ["dep:aws-lc-rs", "rustls/aws-lc-rs", "rcgen/aws_lc_rs", "quinn/rustls-aws-lc-rs"]
+jemallocator = ["tikv-jemallocator"]
+quinn = ["wind-tuic/quinn"]
+# The tokio-quiche backend, now hosted inside wind-tuic behind its `quiche`
+# feature. 64-bit only — tokio-quiche does not compile on 32-bit (its GSO path
+# transmutes `u128` -> `Instant`). Enabled per target via `.github/target.toml`;
+# do NOT enable on 32-bit targets.
+quiche = ["wind-tuic/quiche"]
+
+[dependencies]
+
+# Wind framework
+wind-core = { path = "../wind/crates/wind-core" }
+wind-base = { path = "../wind/crates/wind-base" }
+wind-dns = { path = "../wind/crates/wind-dns" }
+wind-socks = { path = "../wind/crates/wind-socks" }
+wind-tuic = { path = "../wind/crates/wind-tuic", features = ["server"] }
+wind-acme = { path = "../wind/crates/wind-acme" }
+wind-acl = { path = "../wind/crates/wind-acl" }
+wind-geodata = { path = "../wind/crates/wind-geodata" }
+
+toml = "1.0"
+clap = { version = "4", features = ["derive"] }
+socket2 = { version = "0.6", default-features = false }
+arc-swap = "1"
+uuid = { version = "1", default-features = false, features = ["serde", "std", "v4"] }
+sha2 = "0.11"
+
+# QUIC
+quinn = { workspace = true, default-features = false, features = ["runtime-tokio"] }
+quinn-congestions = { workspace = true }
+
+# Tokio/Async
+tokio = { version = "1", default-features = false, features = ["io-util", "macros", "net", "parking_lot", "rt-multi-thread", "time", "fs", "signal", "sync"] }
+tokio-util = { version = "0.7", features = ["rt"] }
+
+# TLS
+rustls = { version = "0.23", default-features = false }
+rustls-pemfile = { version = "2", default-features = false, features = ["std"]}
+rcgen = { version = "0.14", default-features = false, features = ["crypto", "pem"] }
+aws-lc-rs = { version = "1", default-features = false, optional = true, features = ["prebuilt-nasm"] }
+
+# Serde
+bytes = { version = "1", default-features = false, features = ["std"] }
+serde = { version = "1", default-features = false, features = ["derive", "std"] }
+json5 = { version = "1.3", default-features = false }
+serde_json = { version = "1", default-features = false, features = ["std"] }
+figment = { version = "0.10", features = ["toml", "yaml"] }
+figment-json5 = "0.1.1"
+educe = { version = "0.6", default-features = false, features = ["Default"] }
+derive_more = { version = "2", default-features = false, features = ["display"] }
+humantime-serde = "1"
+ipnet = { version = "2", features = ["serde"] }
+regex = "1"
+
+# Legacy ACL parser (space-separated dialect; see `legacy` module)
+pest = "2.8"
+pest_derive = "2.8"
+
+# Logging
+time = { version = "0.3", features = ["macros", "local-offset"] }
+humantime = { version = "2", default-features = false }
+tracing-subscriber = { version = "0.3", default-features = false, features = ["tracing-log", "std", "local-time","fmt", "ansi", "json"] }
+tracing-appender = "0.2"
+tracing = "0.1"
+
+# RESTful API
+axum = { version = "0.8", default-features = false, features = ["json"] }
+dashmap = "6"
+async-trait = "0.1"
+
+# Error handling
+thiserror = { version = "2", default-features = false }
+eyre = { version = "0.6" }
+
+tikv-jemallocator = { version = "0.7", optional = true }
+rand = "0.10"
+
+[dev-dependencies]
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"]}
+ip_network = "0.4"
+tempfile = "3"
+tokio = { version = "1", features = ["full", "test-util"] }
+tokio-test = "0.4"
+tower = "0.5"
+geosite-rs = "0.1.6"

@@ -1,13 +1,15 @@
 [workspace]
-members = ["tuic-core", "tuic-server", "tuic-client", "tuic-tests"]
+members = ["crates/tuic-server", "crates/tuic-client", "crates/tuic-tests"]
+exclude = ["forks", "tuic-core.old", "tuic-server.old", "tuic-client.old", "tuic-tests.old"]
 resolver = "2"
 
 [workspace.package]
-authors = ["EAimTY <ea.imty@gmail.com>", "Itsusinn <sun@ihsin.dev>"]
-version = "1.8.11"
+authors = ["Itsusinn <sun@ihsin.dev>"]
+version = "0.2.0"
 rust-version = "1.85.0"
 edition = "2024"
 readme = "README.md"
+description = "TUIC proxy protocol implementation"
 license = "GPL-3.0-or-later"
 repository = "https://github.com/Itsusinn/tuic"
 
@@ -15,6 +17,10 @@ repository = "https://github.com/Itsusinn/tuic"
 quinn = { branch = "bbrv3", git = "https://github.com/Tipuch/quinn.git", default-features = false }
 quinn-proto = { branch = "bbrv3", git = "https://github.com/Tipuch/quinn.git", default-features = false }
 quinn-congestions = { git = "https://github.com/proxy-rs/quinn-congestions.git", default-features = false}
+
+[patch.crates-io]
+datagram-socket = { path = "crates/wind/forks/quiche/datagram-socket" }
+tokio-quiche = { path = "crates/wind/forks/quiche/tokio-quiche" }
 
 [workspace.lints.clippy]
 unwrap_used = "deny"

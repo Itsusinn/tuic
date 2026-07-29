@@ -1,0 +1,2018 @@
+use std::{
+	collections::HashMap,
+	net::{Ipv4Addr, Ipv6Addr, SocketAddr},
+	path::PathBuf,
+	time::Duration,
+};
+
+use clap::Parser;
+use educe::Educe;
+use figment::{
+	Figment,
+	providers::{Format, Serialized, Toml, Yaml},
+};
+use figment_json5::Json5;
+use rand::{RngExt, distr::Alphanumeric, rng};
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
+use tracing::{level_filters::LevelFilter, warn};
+use uuid::Uuid;
+use wind_core::rule::Rule;
+
+#[cfg(test)]
+use crate::legacy::{AclAddress, AclPorts};
+use crate::{
+	legacy::AclRule,
+	utils::{CongestionController, StackPrefer},
+};
+
+/// Environment state for configuration parsing
+#[derive(Debug, Clone, Default)]
+pub struct EnvState {
+	pub in_docker: bool,
+	pub tuic_force_toml: bool,
+	pub tuic_config_format: Option<String>,
+}
+
+impl EnvState {
+	/// Create EnvState from system environment variables
+	pub fn from_system() -> Self {
+		Self {
+			in_docker: std::env::var("IN_DOCKER").unwrap_or_default().to_lowercase() == "true",
+			tuic_force_toml: std::env::var("TUIC_FORCE_TOML").is_ok(),
+			tuic_config_format: std::env::var("TUIC_CONFIG_FORMAT").ok().map(|v| v.to_lowercase()),
+		}
+	}
+}
+
+/// Control flow results for CLI parsing
+#[derive(Debug)]
+pub struct Control(&'static str);
+
+impl std::fmt::Display for Control {
+	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		write!(f, "{}", self.0)
+	}
+}
+
+impl std::error::Error for Control {}
+
+/// Command-line arguments for tuic-server.
+#[derive(Parser, Debug)]
+#[command(name = "tuic-server")]
+#[command(author, version, about, long_about = None)]
+pub struct Cli {
+	/// Path to the config file
+	#[arg(short, long, value_name = "PATH")]
+	pub config: Option<PathBuf>,
+
+	/// Directory to search for config file (uses first recognizable config file
+	/// found)
+	#[arg(short, long, value_name = "DIR")]
+	pub dir: Option<PathBuf>,
+
+	/// Generate an example configuration file (config.toml)
+	#[arg(short, long)]
+	pub init: bool,
+}
+
+/// GeoIP / GeoSite database configuration.
+#[derive(Deserialize, Serialize, Educe, Clone, Debug)]
+#[educe(Default)]
+#[serde(default, deny_unknown_fields)]
+pub struct GeoDataConfig {
+	/// Path to a v2ray `geosite.dat` file (domain category database).
+	pub geosite: Option<PathBuf>,
+	/// Path to a v2ray `geoip.dat` file (IP country database).
+	pub geoip: Option<PathBuf>,
+}
+
+impl GeoDataConfig {
+	/// Whether both database files are configured (both are required to build).
+	pub fn is_enabled(&self) -> bool {
+		self.geosite.is_some() && self.geoip.is_some()
+	}
+}
+
+/// HTTP management API configuration.
+#[derive(Deserialize, Serialize, Clone)]
+#[serde(default, deny_unknown_fields)]
+pub struct RestfulConfig {
+	/// Whether to start the RESTful API server.
+	pub enabled: bool,
+
+	/// Address to listen on, e.g. `"127.0.0.1:13471"`.
+	#[serde(default = "default_restful_addr")]
+	pub addr: SocketAddr,
+
+	/// Bearer token secret for endpoint authentication. Empty string means no
+	/// auth required (not recommended if the API is exposed publicly).
+	pub secret: String,
+
+	/// Maximum concurrent connections per user (0 = unlimited).
+	pub maximum_clients_per_user: usize,
+}
+
+impl Default for RestfulConfig {
+	fn default() -> Self {
+		Self {
+			enabled: false,
+			addr: default_restful_addr(),
+			secret: String::new(),
+			maximum_clients_per_user: 0,
+		}
+	}
+}
+
+fn default_restful_addr() -> SocketAddr {
+	"127.0.0.1:13471".parse().unwrap()
+}
+
+#[derive(Deserialize, Serialize, Educe)]
+#[educe(Default)]
+#[serde(default, deny_unknown_fields)]
+pub struct Config {
+	pub log_level: LogLevel,
+	#[serde(default)]
+	pub log: LogConfig,
+	#[educe(Default(expression = "[::]:8443".parse().unwrap()))]
+	pub server: SocketAddr,
+	pub users: HashMap<Uuid, String>,
+	pub tls: TlsConfig,
+
+	/// HTTP/3 masquerade: reverse-proxy non-TUIC (HTTP/3 probe) connections to
+	/// a real upstream site so the server is indistinguishable from a web
+	/// server.
+	#[serde(default)]
+	pub masquerade: MasqueradeConfig,
+
+	#[educe(Default = "")]
+	pub data_dir: PathBuf,
+
+	/// QUIC backend selection plus per-backend tuning.
+	///
+	/// `backend.mode` chooses between the quinn-based (`wind-tuic`) and the
+	/// tokio-quiche-based (`wind-tuiche`) implementations; `backend.quinn` and
+	/// `backend.quiche` hold the transport tuning for each.
+	#[serde(default)]
+	pub backend: BackendConfig,
+
+	#[educe(Default = true)]
+	pub udp_relay_ipv6: bool,
+
+	#[educe(Default = false)]
+	pub zero_rtt_handshake: bool,
+
+	#[educe(Default = true)]
+	pub dual_stack: bool,
+
+	#[serde(with = "humantime_serde")]
+	#[educe(Default(expression = Duration::from_secs(3)))]
+	pub auth_timeout: Duration,
+
+	#[serde(with = "humantime_serde")]
+	#[educe(Default(expression = Duration::from_secs(3)))]
+	pub task_negotiation_timeout: Duration,
+
+	#[serde(with = "humantime_serde")]
+	#[educe(Default(expression = Duration::from_secs(10)))]
+	pub gc_interval: Duration,
+
+	#[serde(with = "humantime_serde")]
+	#[educe(Default(expression = Duration::from_secs(30)))]
+	pub gc_lifetime: Duration,
+
+	#[educe(Default = 1500)]
+	pub max_external_packet_size: usize,
+
+	#[serde(with = "humantime_serde")]
+	#[educe(Default(expression = Duration::from_secs(60)))]
+	pub stream_timeout: Duration,
+
+	#[serde(default)]
+	pub outbound: OutboundConfig,
+
+	/// Access Control List rules (legacy format)
+	#[serde(default, deserialize_with = "crate::legacy::deserialize_acl")]
+	#[educe(Default(expression = Vec::new()))]
+	pub acl: Vec<AclRule>,
+
+	/// Metacubex-style routing rules (evaluated after ACL rules).
+	///
+	/// Each entry is a string such as `"DOMAIN-SUFFIX,google.com,proxy"`.
+	/// See [`wind_core::rule::Rule`] for the full list of supported types.
+	#[serde(default, deserialize_with = "deserialize_rules", serialize_with = "serialize_rules")]
+	#[educe(Default(expression = Vec::new()))]
+	pub rules: Vec<wind_core::rule::Rule>,
+
+	pub experimental: ExperimentalConfig,
+
+	#[serde(default)]
+	pub dns: wind_dns::DnsConfig,
+
+	/// GeoIP / GeoSite database for `GEOIP` / `GEOSITE` routing rules. Without
+	/// it, those rules never match (and a warning is logged at startup).
+	#[serde(default)]
+	pub geodata: GeoDataConfig,
+
+	/// RESTful API configuration for server management.
+	#[serde(default)]
+	pub restful: RestfulConfig,
+
+	/// Old configuration fields
+	#[serde(default, rename = "self_sign")]
+	#[deprecated]
+	pub __self_sign: Option<bool>,
+	#[serde(default, rename = "certificate")]
+	#[deprecated]
+	pub __certificate: Option<PathBuf>,
+	#[serde(default, rename = "private_key")]
+	#[deprecated]
+	pub __private_key: Option<PathBuf>,
+	#[serde(default, rename = "auto_ssl")]
+	#[deprecated]
+	pub __auto_ssl: Option<bool>,
+	#[serde(default, rename = "hostname")]
+	#[deprecated]
+	pub __hostname: Option<String>,
+	#[serde(default, rename = "acme_email")]
+	#[deprecated]
+	pub __acme_email: Option<String>,
+	#[serde(default, rename = "congestion_control")]
+	#[deprecated]
+	pub __congestion_control: Option<CongestionController>,
+	#[serde(default, rename = "alpn")]
+	#[deprecated]
+	pub __alpn: Option<Vec<String>>,
+	#[serde(default, rename = "max_idle_time", with = "humantime_serde")]
+	#[deprecated]
+	pub __max_idle_time: Option<Duration>,
+	#[serde(default, rename = "initial_window")]
+	#[deprecated]
+	pub __initial_window: Option<u64>,
+	// NOTE: historical config had swapped send/receive window renames; migration corrects them.
+	#[serde(default, rename = "send_window")]
+	#[deprecated]
+	pub __send_window: Option<u64>,
+	#[serde(default, rename = "receive_window")]
+	#[deprecated]
+	pub __receive_window: Option<u32>,
+	#[serde(default, rename = "initial_mtu")]
+	#[deprecated]
+	pub __initial_mtu: Option<u16>,
+	#[serde(default, rename = "min_mtu")]
+	#[deprecated]
+	pub __min_mtu: Option<u16>,
+	#[serde(default, rename = "gso")]
+	#[deprecated]
+	pub __gso: Option<bool>,
+	#[serde(default, rename = "pmtu")]
+	#[deprecated]
+	pub __pmtu: Option<bool>,
+	/// Deprecated top-level `[quic]` section — migrated into `backend.quinn`.
+	#[serde(default, rename = "quic")]
+	#[deprecated]
+	pub __quic: Option<QuinnConfig>,
+}
+
+/// QUIC backend selection plus per-backend transport tuning.
+#[derive(Deserialize, Serialize, Educe, Clone)]
+#[educe(Default)]
+#[serde(default, deny_unknown_fields)]
+pub struct BackendConfig {
+	/// Which QUIC implementation to run.
+	pub mode: BackendMode,
+	/// Tuning for the quinn backend (`wind-tuic`).
+	pub quinn: QuinnConfig,
+	/// Tuning for the tokio-quiche backend (`wind-tuiche`).
+	pub quiche: QuicheConfig,
+}
+
+/// Selects the inbound QUIC implementation.
+#[derive(Deserialize, Serialize, Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum BackendMode {
+	/// quinn-based backend (`wind-tuic`). The default, fully-featured backend.
+	#[default]
+	Quinn,
+	/// tokio-quiche-based backend (`wind-tuiche`). Experimental, and only
+	/// available when tuic-server is built with the `quiche` cargo feature.
+	Quiche,
+}
+
+#[derive(Deserialize, Serialize, Educe)]
+#[educe(Default)]
+#[serde(default, deny_unknown_fields)]
+pub struct TlsConfig {
+	pub self_sign: bool,
+	#[educe(Default(expression = ""))]
+	pub certificate: PathBuf,
+	#[educe(Default(expression = ""))]
+	pub private_key: PathBuf,
+	#[educe(Default(expression = Vec::new()))]
+	pub alpn: Vec<String>,
+	#[educe(Default(expression = "localhost"))]
+	pub hostname: String,
+	#[educe(Default(expression = false))]
+	pub auto_ssl: bool,
+	#[educe(Default(expression = ""))]
+	pub acme_email: String,
+	#[educe(Default(expression = false))]
+	pub acme_staging: bool,
+}
+
+/// HTTP/3 masquerade configuration.
+///
+/// When `enabled`, a connection that isn't TUIC (its first stream byte isn't
+/// the TUIC version `0x05` — i.e. an active prober speaking real HTTP/3) is
+/// served as a reverse proxy to `upstream`, so the server is indistinguishable
+/// from a normal HTTP/3 website instead of resetting the connection.
+#[derive(Deserialize, Serialize, Educe)]
+#[educe(Default)]
+#[serde(default, deny_unknown_fields)]
+pub struct MasqueradeConfig {
+	#[educe(Default(expression = false))]
+	pub enabled: bool,
+	/// Upstream site to reverse-proxy to, e.g. `https://example.com`.
+	#[educe(Default(expression = "https://example.com"))]
+	pub upstream: String,
+}
+
+/// Transport tuning for the quinn backend (`wind-tuic`).
+#[derive(Deserialize, Serialize, Educe, Clone)]
+#[educe(Default)]
+#[serde(default, deny_unknown_fields)]
+pub struct QuinnConfig {
+	pub congestion_control: CongestionControlConfig,
+
+	#[educe(Default = 1200)]
+	pub initial_mtu: u16,
+
+	#[educe(Default = 1200)]
+	pub min_mtu: u16,
+
+	#[educe(Default = true)]
+	pub gso: bool,
+
+	#[educe(Default = true)]
+	pub pmtu: bool,
+
+	#[educe(Default = 16777216)]
+	pub send_window: u64,
+
+	#[educe(Default = 8388608)]
+	pub receive_window: u32,
+
+	#[serde(with = "humantime_serde")]
+	#[educe(Default(expression = Duration::from_secs(30)))]
+	pub max_idle_time: Duration,
+}
+
+/// Transport tuning for the tokio-quiche backend (`wind-tuiche`).
+#[derive(Deserialize, Serialize, Educe, Clone)]
+#[educe(Default)]
+#[serde(default, deny_unknown_fields)]
+pub struct QuicheConfig {
+	pub congestion_control: CongestionControlConfig,
+
+	#[serde(with = "humantime_serde")]
+	#[educe(Default(expression = Duration::from_secs(30)))]
+	pub max_idle_time: Duration,
+
+	#[educe(Default = 100)]
+	pub max_concurrent_bi_streams: u64,
+
+	#[educe(Default = 100)]
+	pub max_concurrent_uni_streams: u64,
+
+	#[educe(Default = 16777216)]
+	pub send_window: u64,
+
+	#[educe(Default = 8388608)]
+	pub receive_window: u64,
+
+	/// Enable 0-RTT early data (replayable; see the quinn backend's warning).
+	#[educe(Default = false)]
+	pub zero_rtt: bool,
+}
+
+/// The `default` rule is mandatory when named rules are present; other named
+/// rules are optional.
+#[derive(Deserialize, Serialize, Educe, Clone, Debug)]
+#[educe(Default)]
+pub struct OutboundConfig {
+	/// The default outbound rule (used when no name is specified).
+	#[serde(default)]
+	pub default: OutboundRule,
+
+	/// Additional named outbound rules (e.g., `prefer_v4`, `through_socks5`).
+	#[serde(flatten)]
+	pub named: std::collections::HashMap<String, OutboundRule>,
+}
+
+/// Represents a single outbound rule (e.g., direct, socks5).
+#[derive(Deserialize, Serialize, Educe, Clone, Debug)]
+#[educe(Default)]
+#[serde(deny_unknown_fields)]
+pub struct OutboundRule {
+	/// The type of outbound: "direct" or "socks5".
+	#[educe(Default = "direct".to_string())]
+	#[serde(rename = "type")]
+	pub kind: String,
+
+	/// Mode for direct connections: "v4first" (prefer IPv4), "v6first" (prefer
+	/// IPv6), "v4only" (IPv4 only), "v6only" (IPv6 only).
+	#[educe(Default(expression = Some(StackPrefer::V4first)))]
+	pub ip_mode: Option<StackPrefer>,
+
+	/// Optional IPv4 address to bind to for direct connections (only used when
+	/// kind == "direct").
+	#[serde(default)]
+	pub bind_ipv4: Option<Ipv4Addr>,
+
+	/// Optional IPv6 address to bind to for direct connections (only used when
+	/// kind == "direct").
+	#[serde(default)]
+	pub bind_ipv6: Option<Ipv6Addr>,
+
+	/// Optional device/interface name to bind to (only used when kind ==
+	/// "direct").
+	#[serde(default)]
+	pub bind_device: Option<String>,
+
+	/// SOCKS5 address (only used when kind == "socks5").
+	#[serde(default)]
+	pub addr: Option<String>,
+
+	/// Optional SOCKS5 username (only used when kind == "socks5").
+	#[serde(default)]
+	pub username: Option<String>,
+
+	/// Optional SOCKS5 password (only used when kind == "socks5").
+	#[serde(default)]
+	pub password: Option<String>,
+
+	/// Whether to allow UDP traffic when this outbound is selected.
+	/// Only effective for kind == "socks5". Default behavior is to block UDP
+	/// (i.e., drop UDP packets) to avoid leaking QUIC/HTTP3 over direct path.
+	/// Set to true to allow UDP (still sent directly; UDP over SOCKS5 is not
+	/// implemented).
+	#[serde(default)]
+	pub allow_udp: Option<bool>,
+}
+
+#[derive(Deserialize, Serialize, Educe, Clone)]
+#[educe(Default)]
+#[serde(default, deny_unknown_fields)]
+pub struct CongestionControlConfig {
+	pub controller: CongestionController,
+	#[educe(Default = 1048576)]
+	pub initial_window: u64,
+}
+
+#[derive(Deserialize, Serialize, Educe, Clone)]
+#[educe(Default)]
+#[serde(default)]
+pub struct ExperimentalConfig {
+	#[educe(Default = true)]
+	pub drop_loopback: bool,
+	#[educe(Default = true)]
+	pub drop_private: bool,
+}
+
+/// Serialize `Vec<Rule>` as an array of strings.
+fn serialize_rules<S>(rules: &[Rule], serializer: S) -> Result<S::Ok, S::Error>
+where
+	S: Serializer,
+{
+	use serde::ser::SerializeSeq;
+	let mut seq = serializer.serialize_seq(Some(rules.len()))?;
+	for rule in rules {
+		seq.serialize_element(&rule.to_string())?;
+	}
+	seq.end()
+}
+
+/// Deserialize the `rules` field which may be either:
+///   * an array of strings (each a Metacubex-style rule line)
+///   * a single multiline string with one rule per line
+fn deserialize_rules<'de, D>(deserializer: D) -> Result<Vec<Rule>, D::Error>
+where
+	D: Deserializer<'de>,
+{
+	use serde::de::{self, Visitor};
+
+	struct RulesVisitor;
+
+	impl<'de> Visitor<'de> for RulesVisitor {
+		type Value = Vec<Rule>;
+
+		fn expecting(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+			f.write_str("an array of rule strings or a multiline string")
+		}
+
+		fn visit_seq<A>(self, mut seq: A) -> Result<Self::Value, A::Error>
+		where
+			A: de::SeqAccess<'de>,
+		{
+			let mut rules = Vec::new();
+			while let Some(line) = seq.next_element::<String>()? {
+				match Rule::parse(&line) {
+					Ok(rule) => rules.push(rule),
+					Err(wind_core::rule::RuleParseError::EmptyOrComment) => {}
+					Err(e) => return Err(de::Error::custom(format!("invalid rule '{}': {}", line, e))),
+				}
+			}
+			Ok(rules)
+		}
+
+		fn visit_str<E>(self, v: &str) -> Result<Self::Value, E>
+		where
+			E: de::Error,
+		{
+			let mut rules = Vec::new();
+			for line in v.lines() {
+				let line = line.trim();
+				if line.is_empty() || line.starts_with('#') {
+					continue;
+				}
+				match Rule::parse(line) {
+					Ok(rule) => rules.push(rule),
+					Err(e) => return Err(de::Error::custom(format!("invalid rule '{}': {}", line, e))),
+				}
+			}
+			Ok(rules)
+		}
+
+		fn visit_string<E>(self, v: String) -> Result<Self::Value, E>
+		where
+			E: de::Error,
+		{
+			self.visit_str(&v)
+		}
+	}
+
+	deserializer.deserialize_any(RulesVisitor)
+}
+
+fn generate_random_alphanumeric_string(min: usize, max: usize) -> String {
+	let mut rng = rng();
+	let len = rng.random_range(min..=max);
+
+	rng.sample_iter(&Alphanumeric).take(len).map(char::from).collect()
+}
+
+impl Config {
+	pub fn migrate(&mut self) {
+		#[allow(deprecated)]
+		{
+			if let Some(self_sign) = self.__self_sign {
+				self.tls.self_sign = self_sign;
+			}
+			if let Some(certificate) = self.__certificate.take() {
+				self.tls.certificate = certificate;
+			}
+			if let Some(private_key) = self.__private_key.take() {
+				self.tls.private_key = private_key;
+			}
+			if let Some(auto_ssl) = self.__auto_ssl {
+				self.tls.auto_ssl = auto_ssl;
+			}
+			if let Some(hostname) = self.__hostname.take() {
+				self.tls.hostname = hostname;
+			}
+			if let Some(acme_email) = self.__acme_email.take() {
+				self.tls.acme_email = acme_email;
+			}
+			if let Some(alpn) = self.__alpn.take() {
+				self.tls.alpn = alpn;
+			}
+		}
+
+		// Migrate QUIC-related fields into the quinn backend tuning.
+		//
+		// A deprecated top-level `[quic]` section is applied first (as a whole),
+		// then the even-older flat scalar keys override individual fields, so the
+		// historical precedence (flat keys win) is preserved.
+		#[allow(deprecated)]
+		{
+			if let Some(quic) = self.__quic.take() {
+				self.backend.quinn = quic;
+			}
+			if let Some(congestion_control) = self.__congestion_control {
+				self.backend.quinn.congestion_control.controller = congestion_control;
+			}
+			if let Some(max_idle_time) = self.__max_idle_time {
+				self.backend.quinn.max_idle_time = max_idle_time;
+			}
+			if let Some(initial_window) = self.__initial_window {
+				self.backend.quinn.congestion_control.initial_window = initial_window;
+			}
+			if let Some(send_window) = self.__send_window {
+				self.backend.quinn.send_window = send_window;
+			}
+			if let Some(receive_window) = self.__receive_window {
+				self.backend.quinn.receive_window = receive_window;
+			}
+			if let Some(initial_mtu) = self.__initial_mtu {
+				self.backend.quinn.initial_mtu = initial_mtu;
+			}
+			if let Some(min_mtu) = self.__min_mtu {
+				self.backend.quinn.min_mtu = min_mtu;
+			}
+			if let Some(gso) = self.__gso {
+				self.backend.quinn.gso = gso;
+			}
+			if let Some(pmtu) = self.__pmtu {
+				self.backend.quinn.pmtu = pmtu;
+			}
+		}
+	}
+
+	pub fn full_example() -> Self {
+		Self {
+			users: {
+				let mut users = HashMap::new();
+				for _ in 0..5 {
+					users.insert(Uuid::new_v4(), generate_random_alphanumeric_string(30, 50));
+				}
+				users
+			},
+			outbound: OutboundConfig {
+				default: OutboundRule {
+					kind: "direct".into(),
+					ip_mode: Some(StackPrefer::V4first),
+					..Default::default()
+				},
+				..Default::default()
+			},
+			acl: Vec::new(),
+			..Default::default()
+		}
+	}
+}
+
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+#[serde(rename_all = "lowercase")]
+#[derive(Educe)]
+#[educe(Default)]
+pub enum LogLevel {
+	Trace = 0,
+	Debug = 1,
+	#[educe(Default)]
+	Info = 2,
+	Warn = 3,
+	Error = 4,
+	Off = 5,
+}
+
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum LogFormat {
+	#[default]
+	Text,
+	Json,
+}
+
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum LogRotation {
+	#[default]
+	Never,
+	Hourly,
+	Daily,
+}
+
+/// Logging settings.
+#[derive(Debug, Clone, Deserialize, Serialize, Educe)]
+#[serde(deny_unknown_fields)]
+#[educe(Default)]
+pub struct LogConfig {
+	/// Log output format for stdout and log_file.
+	pub format: LogFormat,
+
+	/// Use compact log format (single-line, less verbose). Only applies to
+	/// `text` format.
+	#[educe(Default = true)]
+	pub compact: bool,
+
+	/// Optional log file path. When set, logs are also written to this file
+	/// with the configured `log_rotation` policy.
+	pub log_file: Option<PathBuf>,
+
+	/// Rotation policy for `log_file`.
+	pub log_rotation: LogRotation,
+}
+impl From<LogLevel> for LevelFilter {
+	fn from(value: LogLevel) -> Self {
+		match value {
+			LogLevel::Trace => LevelFilter::TRACE,
+			LogLevel::Debug => LevelFilter::DEBUG,
+			LogLevel::Info => LevelFilter::INFO,
+			LogLevel::Warn => LevelFilter::WARN,
+			LogLevel::Error => LevelFilter::ERROR,
+			LogLevel::Off => LevelFilter::OFF,
+		}
+	}
+}
+
+/// Infer the config format from file content
+fn infer_config_format(content: &str) -> ConfigFormat {
+	let trimmed = content.trim_start();
+
+	if trimmed.starts_with('{') || trimmed.starts_with('[') {
+		return ConfigFormat::Json;
+	}
+
+	// Check for YAML format (common indicators)
+	// YAML typically starts with --- or has key: value patterns
+	if trimmed.starts_with("---") || trimmed.starts_with("%YAML") {
+		return ConfigFormat::Yaml;
+	}
+
+	let lines: Vec<&str> = content
+		.lines()
+		.filter(|l| !l.trim().is_empty() && !l.trim_start().starts_with('#'))
+		.collect();
+	let has_yaml_patterns = lines.iter().any(|line| {
+		let trimmed_line = line.trim();
+		// YAML list items start with -
+		if trimmed_line.starts_with("- ") {
+			return true;
+		}
+		// YAML key-value with colon and typically followed by space or newline
+		if let Some(colon_pos) = trimmed_line.find(':') {
+			let after_colon = &trimmed_line[colon_pos + 1..];
+			// In YAML, after colon there's usually a space, newline, or it's at the end
+			// In TOML, = is used instead of :
+			return after_colon.is_empty() || after_colon.starts_with(' ') || after_colon.starts_with('\t');
+		}
+		false
+	});
+
+	// Check for TOML format: [section] tables and <ident> = assignments.
+	let is_toml_assignment = |s: &str| -> bool {
+		let bytes = s.as_bytes();
+		if bytes.is_empty() || !(bytes[0].is_ascii_alphabetic() || bytes[0] == b'_') {
+			return false;
+		}
+		let mut i = 1;
+		while i < bytes.len() && (bytes[i].is_ascii_alphanumeric() || bytes[i] == b'_' || bytes[i] == b'-') {
+			i += 1;
+		}
+		while i < bytes.len() && (bytes[i] == b' ' || bytes[i] == b'\t') {
+			i += 1;
+		}
+		matches!(bytes.get(i), Some(b'='))
+	};
+	let has_toml_patterns = lines.iter().any(|line| {
+		let trimmed = line.trim();
+		(trimmed.starts_with('[') && trimmed.contains(']') && !trimmed.contains(':')) || is_toml_assignment(trimmed)
+	});
+
+	if has_toml_patterns && !has_yaml_patterns {
+		ConfigFormat::Toml
+	} else if has_yaml_patterns && !has_toml_patterns {
+		ConfigFormat::Yaml
+	} else if has_toml_patterns && has_yaml_patterns {
+		// If both patterns exist, prefer TOML as it's more distinctive
+		// (YAML could have = in values, but TOML [sections] are more specific)
+		ConfigFormat::Toml
+	} else {
+		ConfigFormat::Unknown
+	}
+}
+
+#[derive(Debug, PartialEq, Eq)]
+enum ConfigFormat {
+	Json,
+	Toml,
+	Yaml,
+	Unknown,
+}
+
+/// Find the first recognizable config file in a directory
+async fn find_config_in_dir(dir: &PathBuf) -> eyre::Result<PathBuf> {
+	if !dir.exists() {
+		return Err(eyre::eyre!("Directory not found: {}", dir.display()));
+	}
+
+	if !dir.is_dir() {
+		return Err(eyre::eyre!("Path is not a directory: {}", dir.display()));
+	}
+
+	let mut entries = tokio::fs::read_dir(dir).await?;
+	let mut config_files = Vec::new();
+
+	while let Some(entry) = entries.next_entry().await? {
+		let path = entry.path();
+		if path.is_file() {
+			if let Some(ext) = path.extension().and_then(|s| s.to_str()) {
+				match ext.to_lowercase().as_str() {
+					"toml" | "json" | "json5" | "yaml" | "yml" => {
+						config_files.push(path);
+					}
+					_ => {}
+				}
+			}
+		}
+	}
+
+	if config_files.is_empty() {
+		return Err(eyre::eyre!(
+			"No recognizable config file found in directory: {}",
+			dir.display()
+		));
+	}
+
+	config_files.sort();
+
+	Ok(config_files[0].clone())
+}
+
+pub async fn parse_config(cli: Cli, env_state: EnvState) -> eyre::Result<Config> {
+	if cli.init {
+		warn!("Generating an example configuration to config.toml......");
+
+		let example = Config::full_example();
+		let example = toml::to_string_pretty(&example).unwrap();
+
+		let default_path = std::path::Path::new("config.toml");
+		if tokio::fs::try_exists(default_path).await? {
+			return Err(eyre::eyre!(
+				"config.toml already exists in the current directory, aborting to avoid overwriting."
+			));
+		}
+
+		tokio::fs::write(default_path, example).await?;
+		return Err(Control("Done").into());
+	}
+
+	// Determine config path: either from --config or --dir
+	let cfg_path = if let Some(config) = cli.config {
+		config
+	} else if let Some(dir) = cli.dir {
+		find_config_in_dir(&dir).await?
+	} else {
+		return Err(eyre::eyre!(
+			"Config file is required. Use -c/--config to specify the path, -d/--dir to specify a directory, or -h for help."
+		));
+	};
+
+	if !cfg_path.exists() {
+		return Err(eyre::eyre!("Config file not found: {}", cfg_path.display()));
+	}
+
+	let figmet = Figment::from(Serialized::defaults(Config::default()));
+	let format;
+
+	// Priority: TUIC_FORCE_TOML > TUIC_CONFIG_FORMAT > file extension > content
+	// inference (in Docker)
+	if env_state.tuic_force_toml {
+		format = ConfigFormat::Toml;
+	} else if let Some(ref env_format) = env_state.tuic_config_format {
+		// TUIC_CONFIG_FORMAT has higher priority than file extension
+		match env_format.to_lowercase().as_str() {
+			"json" | "json5" => {
+				format = ConfigFormat::Json;
+			}
+			"yaml" | "yml" => {
+				format = ConfigFormat::Yaml;
+			}
+			"toml" => {
+				format = ConfigFormat::Toml;
+			}
+			_ => format = ConfigFormat::Unknown,
+		}
+	} else if env_state.in_docker {
+		// In Docker without explicit format, prefer content inference over file
+		// extension
+		format = ConfigFormat::Unknown;
+	} else {
+		// Fall back to file extension
+		match cfg_path
+			.extension()
+			.and_then(|v| v.to_str())
+			.unwrap_or_default()
+			.to_lowercase()
+			.as_str()
+		{
+			"json" | "json5" => {
+				format = ConfigFormat::Json;
+			}
+			"yaml" | "yml" => {
+				format = ConfigFormat::Yaml;
+			}
+			"toml" => {
+				format = ConfigFormat::Toml;
+			}
+			_ => format = ConfigFormat::Unknown,
+		}
+	}
+	let figmet = match format {
+		ConfigFormat::Json => figmet.merge(Json5::file(&cfg_path)),
+		ConfigFormat::Toml => figmet.merge(Toml::file(&cfg_path)),
+		ConfigFormat::Yaml => figmet.merge(Yaml::file(&cfg_path)),
+		ConfigFormat::Unknown => {
+			let content = tokio::fs::read_to_string(&cfg_path).await?;
+			let inferred_format = infer_config_format(&content);
+
+			match inferred_format {
+				ConfigFormat::Json => figmet.merge(Json5::file(&cfg_path)),
+				ConfigFormat::Toml => figmet.merge(Toml::file(&cfg_path)),
+				ConfigFormat::Yaml => figmet.merge(Yaml::file(&cfg_path)),
+				ConfigFormat::Unknown => {
+					return Err(Control(
+						"Cannot infer config format from file extension or content, please set TUIC_CONFIG_FORMAT or \
+						 TUIC_FORCE_TOML",
+					))?;
+				}
+			}
+		}
+	};
+
+	let mut config: Config = figmet.extract()?;
+
+	config.migrate();
+
+	if config.data_dir.to_str() == Some("") {
+		config.data_dir = std::env::current_dir()?
+	} else if config.data_dir.is_relative() {
+		config.data_dir = std::env::current_dir()?.join(config.data_dir);
+		tokio::fs::create_dir_all(&config.data_dir).await?;
+	} else {
+		tokio::fs::create_dir_all(&config.data_dir).await?;
+	};
+
+	let base_dir = config.data_dir.clone();
+	config.tls.certificate = if config.tls.auto_ssl && config.tls.certificate.to_str() == Some("") {
+		config.data_dir.join(format!("{}.cer.pem", config.tls.hostname))
+	} else if config.tls.certificate.is_relative() {
+		config.data_dir.join(&config.tls.certificate)
+	} else {
+		config.tls.certificate.clone()
+	};
+
+	config.tls.private_key = if config.tls.auto_ssl && config.tls.private_key.to_str() == Some("") {
+		config.data_dir.join(format!("{}.key.pem", config.tls.hostname))
+	} else if config.tls.private_key.is_relative() {
+		base_dir.join(&config.tls.private_key)
+	} else {
+		config.tls.private_key.clone()
+	};
+
+	Ok(config)
+}
+
+#[cfg(test)]
+mod tests {
+	use std::{
+		env, fs,
+		net::{Ipv6Addr, SocketAddr, SocketAddrV6},
+	};
+
+	use tempfile::tempdir;
+
+	use super::*;
+	use crate::legacy::{AclPortSpec, AclProtocol};
+
+	async fn test_parse_config(config_content: &str, extension: &str) -> eyre::Result<Config> {
+		test_parse_config_with_env(config_content, extension, EnvState::default()).await
+	}
+
+	async fn test_parse_config_with_env(config_content: &str, extension: &str, env_state: EnvState) -> eyre::Result<Config> {
+		let temp_dir = tempdir().unwrap();
+		let config_path = temp_dir.path().join(format!("config{}", extension));
+
+		fs::write(&config_path, config_content).unwrap();
+
+		// Temporarily set command line arguments for clap to parse
+		let os_args = vec![
+			"test_binary".to_owned(),
+			"--config".to_owned(),
+			config_path.to_string_lossy().into_owned(),
+		];
+
+		// Parse CLI with test arguments
+		let cli = Cli::try_parse_from(os_args)?;
+
+		// Call parse_config with the CLI and env_state
+		parse_config(cli, env_state).await
+	}
+	#[tokio::test]
+	async fn test_valid_toml_config() -> eyre::Result<()> {
+		let config = include_str!("../tests/config/valid_toml_config.toml");
+
+		let result = test_parse_config(config, ".toml").await.unwrap();
+
+		assert_eq!(result.log_level, LogLevel::Warn);
+		assert_eq!(result.server, "127.0.0.1:8080".parse::<SocketAddr>().unwrap());
+		assert!(!result.udp_relay_ipv6);
+		assert!(result.zero_rtt_handshake);
+
+		assert!(result.tls.self_sign);
+		assert!(result.tls.auto_ssl);
+		assert_eq!(result.tls.hostname, "testhost");
+		assert_eq!(result.tls.acme_email, "admin@example.com");
+		assert_eq!(result.backend.quinn.initial_mtu, 1400);
+		assert_eq!(result.backend.quinn.min_mtu, 1300);
+		assert_eq!(result.backend.quinn.send_window, 10000000);
+		assert_eq!(result.backend.quinn.congestion_control.controller, CongestionController::Bbr);
+		assert_eq!(result.backend.quinn.congestion_control.initial_window, 2000000);
+
+		let uuid1 = Uuid::parse_str("123e4567-e89b-12d3-a456-426614174000").unwrap();
+		let uuid2 = Uuid::parse_str("123e4567-e89b-12d3-a456-426614174001").unwrap();
+		assert_eq!(result.users.get(&uuid1), Some(&"password1".to_string()));
+		assert_eq!(result.users.get(&uuid2), Some(&"password2".to_string()));
+
+		let _ = tokio::fs::remove_dir_all("__test__custom_data").await;
+		Ok(())
+	}
+
+	#[tokio::test]
+	async fn test_json_config() {
+		let config = include_str!("../tests/config/json_config.json");
+
+		let result = test_parse_config(config, ".json").await.unwrap();
+
+		assert_eq!(result.log_level, LogLevel::Error);
+		assert_eq!(
+			result.server,
+			SocketAddr::V6(SocketAddrV6::new(Ipv6Addr::LOCALHOST, 8443, 0, 0))
+		);
+
+		let uuid = Uuid::parse_str("123e4567-e89b-12d3-a456-426614174002").unwrap();
+		assert_eq!(result.users.get(&uuid), Some(&"old_password".to_string()));
+
+		assert!(!result.tls.self_sign);
+		assert!(result.data_dir.ends_with("__test__legacy_data"));
+		let _ = tokio::fs::remove_dir_all("__test__legacy_data").await;
+	}
+
+	#[tokio::test]
+	async fn test_path_handling() {
+		let config = include_str!("../tests/config/path_handling.toml");
+
+		let result = test_parse_config(config, ".toml").await.unwrap();
+
+		let current_dir = env::current_dir().unwrap();
+
+		assert_eq!(result.data_dir, current_dir.join("__test__relative_path"));
+
+		assert_eq!(
+			result.tls.certificate,
+			current_dir.join("__test__relative_path").join("certs/server.crt")
+		);
+		assert_eq!(
+			result.tls.private_key,
+			current_dir.join("__test__relative_path").join("certs/server.key")
+		);
+
+		let _ = tokio::fs::remove_dir_all("__test__relative_path").await;
+	}
+
+	#[tokio::test]
+	async fn test_auto_ssl_path_generation() {
+		let config = include_str!("../tests/config/auto_ssl_path_generation.toml");
+
+		let result = test_parse_config(config, ".toml").await.unwrap();
+
+		let expected_cert = env::current_dir()
+			.unwrap()
+			.join("__test__ssl_data")
+			.join("example.com.cer.pem");
+
+		let expected_key = env::current_dir()
+			.unwrap()
+			.join("__test__ssl_data")
+			.join("example.com.key.pem");
+
+		assert_eq!(result.tls.certificate, expected_cert);
+		assert_eq!(result.tls.private_key, expected_key);
+
+		let _ = tokio::fs::remove_dir_all("__test__ssl_data").await;
+	}
+
+	#[tokio::test]
+	async fn test_error_handling() {
+		let config = "invalid toml content";
+		let result = test_parse_config(config, ".toml").await;
+		assert!(result.is_err());
+
+		let config = "{ invalid json }";
+		let result = test_parse_config(config, ".json").await;
+		assert!(result.is_err());
+
+		// Test non-existent configuration files - should fail when trying to parse
+		let result = Cli::try_parse_from(vec!["test_binary", "--config", "non_existent.toml"]);
+		// This will succeed at parsing CLI level, but fail when actually loading the
+		// file
+		if let Ok(cli) = result {
+			assert!(cli.config.is_some());
+			assert!(!cli.config.unwrap().exists());
+		}
+
+		// Test missing configuration file parameters - should fail at CLI parsing level
+		let result = Cli::try_parse_from(vec!["test_binary"]);
+		// This should succeed because --config is optional in CLI definition
+		assert!(result.is_ok());
+		let cli = result.unwrap();
+		assert!(cli.config.is_none());
+	}
+
+	#[tokio::test]
+	async fn test_outbound_no_configuration() {
+		// Test that when no outbound configuration is provided, default is used
+		let config = include_str!("../tests/config/outbound_no_configuration.toml");
+
+		let result = test_parse_config(config, ".toml").await.unwrap();
+
+		// Should have default outbound configuration
+		assert_eq!(result.outbound.default.kind, "direct");
+		assert_eq!(result.outbound.named.len(), 0);
+	}
+
+	#[tokio::test]
+	async fn test_outbound_valid_with_default() {
+		// Test that when named outbound rules exist with a proper default, validation
+		// passes
+		let config = include_str!("../tests/config/outbound_valid_with_default.toml");
+
+		let result = test_parse_config(config, ".toml").await.unwrap();
+
+		// Should have default and named outbound configurations
+		assert_eq!(result.outbound.default.kind, "direct");
+		assert_eq!(result.outbound.named.len(), 2);
+
+		let prefer_v4 = result.outbound.named.get("prefer_v4").unwrap();
+		assert_eq!(prefer_v4.kind, "direct");
+		assert_eq!(prefer_v4.ip_mode, Some(StackPrefer::V4first));
+		assert_eq!(prefer_v4.bind_ipv4, Some("2.4.6.8".parse().unwrap()));
+		assert_eq!(prefer_v4.bind_device, Some("eth233".to_string()));
+
+		let socks5 = result.outbound.named.get("through_socks5").unwrap();
+		assert_eq!(socks5.kind, "socks5");
+		assert_eq!(socks5.addr, Some("127.0.0.1:1080".to_string()));
+		assert_eq!(socks5.username, Some("optional".to_string()));
+		assert_eq!(socks5.password, Some("optional".to_string()));
+	}
+
+	#[tokio::test]
+	async fn test_outbound_with_legacy_ip_mode_aliases() {
+		// Test backward compatibility with old ip_mode values like "prefer_v4",
+		// "only_v4" etc.
+		let config = include_str!("../tests/config/outbound_with_legacy_ip_mode_aliases.toml");
+
+		let result = test_parse_config(config, ".toml").await.unwrap();
+
+		// Verify default uses prefer_v4 (which maps to V4first)
+		assert_eq!(result.outbound.default.ip_mode, Some(StackPrefer::V4first));
+
+		// Verify named rules with legacy aliases
+		let prefer_v6 = result.outbound.named.get("prefer_v6_rule").unwrap();
+		assert_eq!(prefer_v6.ip_mode, Some(StackPrefer::V6first));
+
+		let only_v4 = result.outbound.named.get("only_v4_rule").unwrap();
+		assert_eq!(only_v4.ip_mode, Some(StackPrefer::V4only));
+
+		let only_v6 = result.outbound.named.get("only_v6_rule").unwrap();
+		assert_eq!(only_v6.ip_mode, Some(StackPrefer::V6only));
+	}
+
+	#[tokio::test]
+	async fn test_acl_parsing() {
+		let config = include_str!("../tests/config/acl_parsing.toml");
+
+		let result = test_parse_config(config, ".toml").await.unwrap();
+
+		assert_eq!(result.acl.len(), 10);
+
+		// Test first rule: "allow localhost udp/53"
+		let rule1 = &result.acl[0];
+		assert_eq!(rule1.outbound, "allow");
+		assert_eq!(rule1.addr, AclAddress::Localhost);
+		assert!(rule1.ports.is_some());
+		let ports1 = rule1.ports.as_ref().unwrap();
+		assert_eq!(ports1.entries.len(), 1);
+		assert_eq!(ports1.entries[0].protocol, Some(AclProtocol::Udp));
+		assert_eq!(ports1.entries[0].port_spec, AclPortSpec::Single(53));
+		assert!(rule1.hijack.is_none());
+
+		// Test complex ports rule: "allow localhost udp/53,tcp/80,tcp/443,udp/443"
+		let rule2 = &result.acl[1];
+		assert_eq!(rule2.outbound, "allow");
+		assert_eq!(rule2.addr, AclAddress::Localhost);
+		let ports2 = rule2.ports.as_ref().unwrap();
+		assert_eq!(ports2.entries.len(), 4);
+
+		// Test CIDR rule: "reject 10.6.0.0/16"
+		let rule4 = &result.acl[3];
+		assert_eq!(rule4.outbound, "reject");
+		assert_eq!(rule4.addr, AclAddress::Cidr("10.6.0.0/16".to_string()));
+
+		// Test wildcard domain: "allow *.google.com"
+		let rule6 = &result.acl[5];
+		assert_eq!(rule6.outbound, "allow");
+		assert_eq!(rule6.addr, AclAddress::WildcardDomain("*.google.com".to_string()));
+
+		// Test hijack rule: "default 8.8.4.4 udp/53 1.1.1.1"
+		let rule10 = &result.acl[9];
+		assert_eq!(rule10.outbound, "default");
+		assert_eq!(rule10.addr, AclAddress::Ip("8.8.4.4".to_string()));
+		assert!(rule10.ports.is_some());
+		assert_eq!(rule10.hijack, Some("1.1.1.1".to_string()));
+	}
+
+	#[tokio::test]
+	async fn test_acl_parsing_edge_cases() {
+		use serde::de::value::StrDeserializer;
+
+		// Test individual parsing functions using serde Deserialize
+		let addr: AclAddress =
+			serde::Deserialize::deserialize(StrDeserializer::<serde::de::value::Error>::new("localhost")).unwrap();
+		assert_eq!(addr, AclAddress::Localhost);
+
+		let addr: AclAddress =
+			serde::Deserialize::deserialize(StrDeserializer::<serde::de::value::Error>::new("*.example.com")).unwrap();
+		assert_eq!(addr, AclAddress::WildcardDomain("*.example.com".to_string()));
+
+		let addr: AclAddress =
+			serde::Deserialize::deserialize(StrDeserializer::<serde::de::value::Error>::new("192.168.1.0/24")).unwrap();
+		assert_eq!(addr, AclAddress::Cidr("192.168.1.0/24".to_string()));
+
+		let addr: AclAddress =
+			serde::Deserialize::deserialize(StrDeserializer::<serde::de::value::Error>::new("127.0.0.1")).unwrap();
+		assert_eq!(addr, AclAddress::Ip("127.0.0.1".to_string()));
+
+		let addr: AclAddress =
+			serde::Deserialize::deserialize(StrDeserializer::<serde::de::value::Error>::new("example.com")).unwrap();
+		assert_eq!(addr, AclAddress::Domain("example.com".to_string()));
+
+		// Test port parsing
+		let ports: AclPorts =
+			serde::Deserialize::deserialize(StrDeserializer::<serde::de::value::Error>::new("80,443,1000-2000,udp/53"))
+				.unwrap();
+		assert_eq!(ports.entries.len(), 4);
+		assert_eq!(ports.entries[0].port_spec, AclPortSpec::Single(80));
+		assert_eq!(ports.entries[2].port_spec, AclPortSpec::Range(1000, 2000));
+		assert_eq!(ports.entries[3].protocol, Some(AclProtocol::Udp));
+
+		// Test rule parsing
+		let rule = crate::legacy::parse_acl_rule("allow google.com 80,443").unwrap();
+		assert_eq!(rule.outbound, "allow");
+		assert_eq!(rule.addr, AclAddress::Domain("google.com".to_string()));
+		assert!(rule.ports.is_some());
+		assert!(rule.hijack.is_none());
+	}
+
+	#[tokio::test]
+	async fn test_default_values() {
+		// Test minimal configuration with defaults
+		let config = include_str!("../tests/config/default_values.toml");
+
+		let result = test_parse_config(config, ".toml").await.unwrap();
+
+		// Check default values
+		assert_eq!(result.log_level, LogLevel::Info);
+		assert_eq!(result.server, "[::]:8443".parse::<SocketAddr>().unwrap());
+		assert!(result.udp_relay_ipv6);
+		assert!(!result.zero_rtt_handshake);
+		assert!(result.dual_stack);
+		assert_eq!(result.auth_timeout, Duration::from_secs(3));
+		assert_eq!(result.task_negotiation_timeout, Duration::from_secs(3));
+		assert_eq!(result.gc_interval, Duration::from_secs(10));
+		assert_eq!(result.gc_lifetime, Duration::from_secs(30));
+		assert_eq!(result.max_external_packet_size, 1500);
+		assert_eq!(result.stream_timeout, Duration::from_secs(60));
+	}
+	#[tokio::test]
+	async fn test_invalid_uuid() {
+		let config = include_str!("../tests/config/invalid_uuid.toml");
+
+		let result = test_parse_config(config, ".toml").await;
+		assert!(result.is_err());
+	}
+
+	#[tokio::test]
+	async fn test_invalid_socket_addr() {
+		let config = include_str!("../tests/config/invalid_socket_addr.toml");
+
+		let result = test_parse_config(config, ".toml").await;
+		assert!(result.is_err());
+	}
+
+	#[tokio::test]
+	async fn test_duration_parsing() {
+		let config = include_str!("../tests/config/duration_parsing.toml");
+
+		let result = test_parse_config(config, ".toml").await.unwrap();
+
+		assert_eq!(result.auth_timeout, Duration::from_secs(5));
+		assert_eq!(result.task_negotiation_timeout, Duration::from_secs(10));
+		assert_eq!(result.gc_interval, Duration::from_secs(30));
+		assert_eq!(result.gc_lifetime, Duration::from_secs(60));
+		assert_eq!(result.stream_timeout, Duration::from_secs(120));
+	}
+
+	#[tokio::test]
+	async fn test_empty_acl() {
+		let config = include_str!("../tests/config/empty_acl.toml");
+
+		let result = test_parse_config(config, ".toml").await.unwrap();
+		assert_eq!(result.acl.len(), 0);
+	}
+
+	#[tokio::test]
+	async fn test_acl_comments_and_whitespace() {
+		let config = include_str!("../tests/config/acl_comments_and_whitespace.toml");
+
+		let result = test_parse_config(config, ".toml").await.unwrap();
+		// Should have 3 rules
+		assert_eq!(result.acl.len(), 3);
+	}
+
+	#[tokio::test]
+	async fn test_congestion_control_variants() {
+		let config_bbr = include_str!("../tests/config/congestion_control_bbr.toml");
+
+		let result = test_parse_config(config_bbr, ".toml").await.unwrap();
+		assert_eq!(result.backend.quinn.congestion_control.controller, CongestionController::Bbr);
+
+		// note: lowercase 'newreno' is the valid variant
+		let config_new_reno = include_str!("../tests/config/congestion_control_newreno.toml");
+
+		let result = test_parse_config(config_new_reno, ".toml").await.unwrap();
+		assert_eq!(
+			result.backend.quinn.congestion_control.controller,
+			CongestionController::NewReno
+		);
+	}
+
+	#[tokio::test]
+	async fn test_backend_mode_quiche_and_subsections() {
+		// New `[backend]` layout: mode selects the implementation, and each
+		// backend has its own tuning subsection.
+		let config = r#"
+server = "127.0.0.1:8080"
+
+[backend]
+mode = "quiche"
+
+[backend.quinn]
+initial_mtu = 1400
+
+[backend.quiche]
+max_concurrent_bi_streams = 50
+zero_rtt = true
+max_idle_time = "45s"
+"#;
+		let result = test_parse_config(config, ".toml").await.unwrap();
+		assert_eq!(result.backend.mode, BackendMode::Quiche);
+		assert_eq!(result.backend.quinn.initial_mtu, 1400);
+		assert_eq!(result.backend.quiche.max_concurrent_bi_streams, 50);
+		assert!(result.backend.quiche.zero_rtt);
+		assert_eq!(result.backend.quiche.max_idle_time, Duration::from_secs(45));
+	}
+
+	#[tokio::test]
+	async fn test_backend_mode_defaults_to_quinn() {
+		let result = test_parse_config("server = \"127.0.0.1:8080\"\n", ".toml").await.unwrap();
+		assert_eq!(result.backend.mode, BackendMode::Quinn);
+	}
+
+	#[tokio::test]
+	async fn test_legacy_quic_section_migrates_to_backend_quinn() {
+		// A deprecated top-level `[quic]` section must still load, migrating into
+		// `backend.quinn`.
+		let config = r#"
+server = "127.0.0.1:8080"
+
+[quic]
+initial_mtu = 1456
+send_window = 12345678
+"#;
+		let result = test_parse_config(config, ".toml").await.unwrap();
+		assert_eq!(result.backend.mode, BackendMode::Quinn);
+		assert_eq!(result.backend.quinn.initial_mtu, 1456);
+		assert_eq!(result.backend.quinn.send_window, 12345678);
+	}
+
+	#[tokio::test]
+	async fn test_backward_compatibility_standard_json() {
+		// Test backward compatibility with standard JSON format
+		let json_config = include_str!("../tests/config/backward_compatibility_standard_json.json");
+
+		let result = test_parse_config(json_config, ".json").await;
+		assert!(result.is_ok(), "Standard JSON should be parseable by JSON5");
+	}
+	#[tokio::test]
+	async fn test_legacy_field_migration_json() {
+		// Test legacy field migration with JSON format
+		let config = include_str!("../tests/config/legacy_field_migration_json.json");
+
+		let result = test_parse_config(config, ".json").await.unwrap();
+
+		// Verify migration worked
+		assert!(result.tls.self_sign);
+		assert!(result.tls.certificate.ends_with("cert.pem"));
+		assert!(result.tls.private_key.ends_with("key.pem"));
+		assert_eq!(result.tls.hostname, "example.com");
+		assert_eq!(result.backend.quinn.congestion_control.controller, CongestionController::Bbr);
+		assert_eq!(result.backend.quinn.max_idle_time, Duration::from_secs(60));
+		assert_eq!(result.backend.quinn.initial_mtu, 1500);
+	}
+
+	#[tokio::test]
+	async fn test_infer_format_toml_without_extension() {
+		// Test TOML config without file extension
+		let config = include_str!("../tests/config/infer_format_toml_without_extension");
+
+		let result = test_parse_config(config, "").await.unwrap();
+		assert_eq!(result.log_level, LogLevel::Info);
+		assert_eq!(result.server, "127.0.0.1:8080".parse::<SocketAddr>().unwrap());
+	}
+
+	#[tokio::test]
+	async fn test_infer_format_json_without_extension() {
+		// Test JSON config without file extension
+		let config = include_str!("../tests/config/infer_format_json_without_extension");
+
+		let result = test_parse_config(config, "").await.unwrap();
+		assert_eq!(result.log_level, LogLevel::Debug);
+		assert_eq!(result.server, "0.0.0.0:8443".parse::<SocketAddr>().unwrap());
+	}
+
+	#[tokio::test]
+	async fn test_yaml_config_format() {
+		// Test YAML config format with .yaml extension
+		// Note: test_parse_config helper trims whitespace which breaks YAML
+		// indentation, so we keep indentation minimal and avoid deeply nested
+		// structures
+		let config = include_str!("../tests/config/yaml_config_format.yaml");
+
+		let result = test_parse_config(config, ".yaml").await.unwrap();
+		assert_eq!(result.log_level, LogLevel::Warn);
+		assert_eq!(result.server, "127.0.0.1:9000".parse::<SocketAddr>().unwrap());
+		assert_eq!(result.tls.hostname, "yaml.test.com");
+	}
+
+	#[tokio::test]
+	async fn test_json5_with_comments() {
+		// Test JSON5 format with comments
+		let config = include_str!("../tests/config/json5_with_comments.json5");
+
+		let result = test_parse_config(config, ".json5").await.unwrap();
+		assert_eq!(result.log_level, LogLevel::Info);
+		assert_eq!(result.server, "127.0.0.1:8080".parse::<SocketAddr>().unwrap());
+		assert_eq!(result.tls.hostname, "test.json5.com");
+	}
+
+	#[tokio::test]
+	async fn test_json5_with_trailing_commas() {
+		// Test JSON5 format with trailing commas
+		let config = include_str!("../tests/config/json5_with_trailing_commas.json5");
+
+		let result = test_parse_config(config, ".json5").await.unwrap();
+		assert_eq!(result.log_level, LogLevel::Debug);
+		assert_eq!(
+			result.server,
+			SocketAddr::V6(SocketAddrV6::new(Ipv6Addr::LOCALHOST, 8443, 0, 0))
+		);
+		assert_eq!(result.users.len(), 2);
+	}
+
+	#[tokio::test]
+	async fn test_json5_with_unquoted_keys() {
+		// Test JSON5 format with unquoted keys
+		let config = include_str!("../tests/config/json5_with_unquoted_keys.json5");
+
+		let result = test_parse_config(config, ".json5").await.unwrap();
+		assert_eq!(result.log_level, LogLevel::Warn);
+		assert_eq!(result.server, "0.0.0.0:8443".parse::<SocketAddr>().unwrap());
+		assert_eq!(result.tls.hostname, "unquoted.test.com");
+	}
+
+	#[tokio::test]
+	async fn test_json5_comprehensive_features() {
+		// Test JSON5 with multiple features combined
+		let config = include_str!("../tests/config/json5_comprehensive_features.json5");
+
+		let result = test_parse_config(config, ".json5").await.unwrap();
+
+		assert_eq!(result.log_level, LogLevel::Info);
+		assert_eq!(result.server, "127.0.0.1:9443".parse::<SocketAddr>().unwrap());
+		assert!(!result.udp_relay_ipv6);
+		assert!(result.zero_rtt_handshake);
+
+		assert_eq!(result.users.len(), 2);
+
+		assert!(result.tls.self_sign);
+		assert!(result.tls.auto_ssl);
+		assert_eq!(result.tls.hostname, "json5.example.com");
+		assert_eq!(result.backend.quinn.initial_mtu, 1400);
+		assert_eq!(result.backend.quinn.min_mtu, 1300);
+		assert_eq!(result.backend.quinn.send_window, 8000000);
+		assert_eq!(result.backend.quinn.congestion_control.controller, CongestionController::Bbr);
+		assert_eq!(result.backend.quinn.congestion_control.initial_window, 1500000);
+	}
+
+	#[tokio::test]
+	async fn test_json5_with_acl_rules() {
+		// Test JSON5 format with ACL rules using multiline string
+		let config = include_str!("../tests/config/json5_with_acl_rules.json5");
+
+		let result = test_parse_config(config, ".json5").await.unwrap();
+
+		assert_eq!(result.acl.len(), 4);
+
+		// Verify first ACL rule
+		assert_eq!(result.acl[0].outbound, "allow");
+		assert_eq!(result.acl[0].addr, AclAddress::Localhost);
+
+		// Verify CIDR rule
+		assert_eq!(result.acl[2].outbound, "reject");
+		assert_eq!(result.acl[2].addr, AclAddress::Cidr("10.0.0.0/8".to_string()));
+
+		// Verify wildcard domain
+		assert_eq!(result.acl[3].outbound, "allow");
+		assert_eq!(result.acl[3].addr, AclAddress::WildcardDomain("*.example.com".to_string()));
+	}
+
+	#[tokio::test]
+	async fn test_json5_backward_compatibility() {
+		// Test that JSON5 parser can handle standard JSON
+		let config = include_str!("../tests/config/json5_backward_compatibility.json5");
+
+		let result = test_parse_config(config, ".json5").await.unwrap();
+		assert_eq!(result.log_level, LogLevel::Error);
+		assert_eq!(result.server, "192.168.1.1:8443".parse::<SocketAddr>().unwrap());
+		assert!(!result.tls.self_sign);
+	}
+	#[tokio::test]
+	async fn test_dir_parameter_finds_config() {
+		// Test that --dir finds the first config file in a directory
+		let temp_dir = tempdir().unwrap();
+		let dir_path = temp_dir.path();
+
+		// Create multiple config files
+		let config_content = r#"
+			log_level = "info"
+			server = "127.0.0.1:8080"
+			[users]
+		"#;
+
+		fs::write(dir_path.join("config.toml"), config_content).unwrap();
+		fs::write(dir_path.join("other.json"), "{}").unwrap();
+
+		let os_args = vec![
+			"test_binary".to_owned(),
+			"--dir".to_owned(),
+			dir_path.to_string_lossy().into_owned(),
+		];
+
+		let cli = Cli::try_parse_from(os_args).unwrap();
+		let result = parse_config(cli, EnvState::default()).await;
+
+		assert!(result.is_ok());
+		let config = result.unwrap();
+		assert_eq!(config.log_level, LogLevel::Info);
+		assert_eq!(config.server, "127.0.0.1:8080".parse::<SocketAddr>().unwrap());
+	}
+
+	#[tokio::test]
+	async fn test_dir_parameter_alphabetical_order() {
+		// Test that --dir picks the first file alphabetically
+		let temp_dir = tempdir().unwrap();
+		let dir_path = temp_dir.path();
+
+		// Create files that would sort alphabetically
+		let config_a = r#"log_level = "debug""#;
+		let config_z = r#"log_level = "error""#;
+
+		fs::write(dir_path.join("z_config.toml"), config_z).unwrap();
+		fs::write(dir_path.join("a_config.toml"), config_a).unwrap();
+
+		let os_args = vec![
+			"test_binary".to_owned(),
+			"--dir".to_owned(),
+			dir_path.to_string_lossy().into_owned(),
+		];
+
+		let cli = Cli::try_parse_from(os_args).unwrap();
+		let result = parse_config(cli, EnvState::default()).await.unwrap();
+
+		// Should pick a_config.toml which has debug level
+		assert_eq!(result.log_level, LogLevel::Debug);
+	}
+
+	#[tokio::test]
+	async fn test_dir_parameter_no_config_found() {
+		// Test that --dir fails when no config files exist
+		let temp_dir = tempdir().unwrap();
+		let dir_path = temp_dir.path();
+
+		// Create a non-config file
+		fs::write(dir_path.join("readme.txt"), "not a config").unwrap();
+
+		let os_args = vec![
+			"test_binary".to_owned(),
+			"--dir".to_owned(),
+			dir_path.to_string_lossy().into_owned(),
+		];
+
+		let cli = Cli::try_parse_from(os_args).unwrap();
+		let result = parse_config(cli, EnvState::default()).await;
+
+		assert!(result.is_err());
+		if let Err(err) = result {
+			assert!(err.to_string().contains("No recognizable config file found"));
+		}
+	}
+
+	#[tokio::test]
+	async fn test_dir_parameter_nonexistent_directory() {
+		// Test that --dir fails when directory doesn't exist
+		let os_args = vec![
+			"test_binary".to_owned(),
+			"--dir".to_owned(),
+			"/nonexistent/directory/path".to_owned(),
+		];
+
+		let cli = Cli::try_parse_from(os_args).unwrap();
+		let result = parse_config(cli, EnvState::default()).await;
+
+		assert!(result.is_err());
+		if let Err(err) = result {
+			assert!(err.to_string().contains("Directory not found"));
+		}
+	}
+
+	#[tokio::test]
+	async fn test_config_parameter_takes_precedence() {
+		// Test that --config takes precedence over --dir
+		let temp_dir = tempdir().unwrap();
+		let dir_path = temp_dir.path();
+
+		let config_in_dir = r#"log_level = "error""#;
+		let config_explicit = r#"log_level = "warn""#;
+
+		fs::write(dir_path.join("dir_config.toml"), config_in_dir).unwrap();
+		let explicit_path = dir_path.join("explicit.toml");
+		fs::write(&explicit_path, config_explicit).unwrap();
+
+		let os_args = vec![
+			"test_binary".to_owned(),
+			"--config".to_owned(),
+			explicit_path.to_string_lossy().into_owned(),
+			"--dir".to_owned(),
+			dir_path.to_string_lossy().into_owned(),
+		];
+
+		let cli = Cli::try_parse_from(os_args).unwrap();
+		let result = parse_config(cli, EnvState::default()).await.unwrap();
+
+		// Should use explicit config, not dir
+		assert_eq!(result.log_level, LogLevel::Warn);
+	}
+
+	#[tokio::test]
+	async fn test_dir_parameter_supports_all_formats() {
+		// Test that --dir recognizes all supported config formats
+		let temp_dir = tempdir().unwrap();
+		let dir_path = temp_dir.path();
+
+		let json_dir = dir_path.join("json_test");
+		fs::create_dir(&json_dir).unwrap();
+		fs::write(json_dir.join("config.json"), r#"{"log_level": "debug"}"#).unwrap();
+
+		let os_args = vec![
+			"test_binary".to_owned(),
+			"--dir".to_owned(),
+			json_dir.to_string_lossy().into_owned(),
+		];
+		let cli = Cli::try_parse_from(os_args).unwrap();
+		let result = parse_config(cli, EnvState::default()).await.unwrap();
+		assert_eq!(result.log_level, LogLevel::Debug);
+
+		let yaml_dir = dir_path.join("yaml_test");
+		fs::create_dir(&yaml_dir).unwrap();
+		fs::write(yaml_dir.join("config.yaml"), "log_level: warn").unwrap();
+
+		let os_args = vec![
+			"test_binary".to_owned(),
+			"--dir".to_owned(),
+			yaml_dir.to_string_lossy().into_owned(),
+		];
+		let cli = Cli::try_parse_from(os_args).unwrap();
+		let result = parse_config(cli, EnvState::default()).await.unwrap();
+		assert_eq!(result.log_level, LogLevel::Warn);
+	}
+
+	#[tokio::test]
+	async fn test_env_state_force_toml() {
+		// Test TUIC_FORCE_TOML forces TOML parsing even with .json extension
+		let config_content = include_str!("../tests/config/env_force_toml.toml");
+
+		let env_state = EnvState {
+			tuic_force_toml: true,
+			tuic_config_format: None,
+			in_docker: false,
+		};
+
+		// Use .json extension but content is TOML
+		let result = test_parse_config_with_env(config_content, ".json", env_state).await.unwrap();
+		assert_eq!(result.log_level, LogLevel::Info);
+		assert_eq!(result.server, "127.0.0.1:8443".parse::<SocketAddr>().unwrap());
+	}
+
+	#[tokio::test]
+	async fn test_env_state_config_format_yaml() {
+		// Test TUIC_CONFIG_FORMAT=yaml forces YAML parsing
+		let config_content = include_str!("../tests/config/env_format_yaml.yaml");
+
+		let env_state = EnvState {
+			tuic_force_toml: false,
+			tuic_config_format: Some("yaml".to_string()),
+			in_docker: false,
+		};
+
+		// Use .toml extension but content is YAML
+		let result = test_parse_config_with_env(config_content, ".toml", env_state).await.unwrap();
+		assert_eq!(result.log_level, LogLevel::Debug);
+		assert_eq!(
+			result.server,
+			SocketAddr::V6(SocketAddrV6::new(Ipv6Addr::LOCALHOST, 8443, 0, 0))
+		);
+	}
+
+	#[tokio::test]
+	async fn test_env_state_config_format_json() {
+		// Test TUIC_CONFIG_FORMAT=json forces JSON parsing
+		let config_content = include_str!("../tests/config/env_format_json.json");
+
+		let env_state = EnvState {
+			tuic_force_toml: false,
+			tuic_config_format: Some("json".to_string()),
+			in_docker: false,
+		};
+
+		// Use .toml extension but content is JSON
+		let result = test_parse_config_with_env(config_content, ".toml", env_state).await.unwrap();
+		assert_eq!(result.log_level, LogLevel::Warn);
+		assert_eq!(result.server, "127.0.0.1:9999".parse::<SocketAddr>().unwrap());
+	}
+
+	#[tokio::test]
+	async fn test_env_state_in_docker_inference() {
+		// Test IN_DOCKER=true triggers content inference for files without extension
+		let config_content = include_str!("../tests/config/env_docker_inference.config");
+
+		let env_state = EnvState {
+			tuic_force_toml: false,
+			tuic_config_format: None,
+			in_docker: true,
+		};
+
+		// Use unknown extension to trigger inference
+		let result = test_parse_config_with_env(config_content, ".config", env_state)
+			.await
+			.unwrap();
+		assert_eq!(result.log_level, LogLevel::Trace);
+		assert_eq!(result.server, "127.0.0.1:7777".parse::<SocketAddr>().unwrap());
+	}
+
+	#[tokio::test]
+	async fn test_env_state_priority_force_toml_over_config_format() {
+		// Test that TUIC_FORCE_TOML has higher priority than TUIC_CONFIG_FORMAT
+		let config_content = include_str!("../tests/config/env_force_toml.toml");
+
+		let env_state = EnvState {
+			tuic_force_toml: true,
+			tuic_config_format: Some("json".to_string()), // This should be ignored
+			in_docker: false,
+		};
+
+		let result = test_parse_config_with_env(config_content, ".yaml", env_state).await.unwrap();
+		assert_eq!(result.log_level, LogLevel::Info);
+	}
+
+	#[tokio::test]
+	async fn test_env_state_priority_config_format_over_extension() {
+		// Test that TUIC_CONFIG_FORMAT has higher priority than file extension
+		let config_content = include_str!("../tests/config/env_format_yaml.yaml");
+
+		let env_state = EnvState {
+			tuic_force_toml: false,
+			tuic_config_format: Some("yaml".to_string()),
+			in_docker: false,
+		};
+
+		// File extension says .json but env says yaml
+		let result = test_parse_config_with_env(config_content, ".json", env_state).await.unwrap();
+		assert_eq!(result.log_level, LogLevel::Debug);
+	}
+
+	#[tokio::test]
+	async fn test_env_state_priority_config_format_over_docker() {
+		// Test that TUIC_CONFIG_FORMAT has higher priority than IN_DOCKER
+		let config_content = include_str!("../tests/config/env_format_json.json");
+
+		let env_state = EnvState {
+			tuic_force_toml: false,
+			tuic_config_format: Some("json".to_string()),
+			in_docker: true, // This should be ignored when config_format is set
+		};
+
+		let result = test_parse_config_with_env(config_content, ".unknown", env_state)
+			.await
+			.unwrap();
+		assert_eq!(result.log_level, LogLevel::Warn);
+	}
+
+	#[tokio::test]
+	async fn test_env_state_from_system() {
+		// Test EnvState::from_system() reads environment variables correctly
+		// Note: This test doesn't actually set env vars, just tests the structure
+		let env_state = EnvState::from_system();
+
+		// `from_system` must not panic. There is no value we can usefully
+		// assert about `tuic_config_format` here without setting up env
+		// vars first, so just keep `env_state` alive to confirm it
+		// constructs.
+		let _ = env_state;
+	}
+
+	#[tokio::test]
+	async fn test_env_state_case_insensitive_format() {
+		// Test that format names are case-insensitive
+		let config_content = include_str!("../tests/config/env_format_yaml.yaml");
+
+		let env_state = EnvState {
+			tuic_force_toml: false,
+			tuic_config_format: Some("YAML".to_string()), // Uppercase
+			in_docker: false,
+		};
+
+		let result = test_parse_config_with_env(config_content, ".toml", env_state).await.unwrap();
+		assert_eq!(result.log_level, LogLevel::Debug);
+	}
+
+	#[tokio::test]
+	async fn test_env_state_invalid_format() {
+		// Test that invalid format in TUIC_CONFIG_FORMAT falls back to Unknown
+		let config_content = include_str!("../tests/config/env_force_toml.toml");
+
+		let env_state = EnvState {
+			tuic_force_toml: false,
+			tuic_config_format: Some("invalid_format".to_string()),
+			in_docker: false,
+		};
+
+		// Should try to infer from content
+		let result = test_parse_config_with_env(config_content, ".txt", env_state).await;
+
+		// Should succeed because inference will detect TOML
+		assert!(result.is_ok());
+	}
+
+	#[tokio::test]
+	async fn test_rules_parsing() {
+		let config = include_str!("../tests/config/rules_parsing.toml");
+
+		let result = test_parse_config(config, ".toml").await.unwrap();
+
+		assert_eq!(result.rules.len(), 8);
+
+		assert_eq!(result.rules[0].to_string(), "DOMAIN,ad.example.com,REJECT");
+		assert_eq!(result.rules[0].target, "REJECT");
+
+		assert_eq!(result.rules[1].to_string(), "DOMAIN-SUFFIX,google.com,proxy");
+
+		assert_eq!(result.rules[2].target, "reject");
+
+		assert_eq!(result.rules[3].target, "direct");
+		assert!(result.rules[3].no_resolve());
+
+		assert_eq!(result.rules[4].to_string(), "IP-CIDR6,fc00::/7,direct");
+
+		assert_eq!(result.rules[5].to_string(), "DST-PORT,443,proxy");
+
+		assert_eq!(result.rules[6].to_string(), "NETWORK,udp,direct");
+
+		assert_eq!(result.rules[7].to_string(), "MATCH,proxy");
+	}
+
+	#[tokio::test]
+	async fn test_rules_empty() {
+		let config = include_str!("../tests/config/rules_empty.toml");
+
+		let result = test_parse_config(config, ".toml").await.unwrap();
+		assert_eq!(result.rules.len(), 0);
+	}
+
+	#[tokio::test]
+	async fn test_rules_default_when_omitted() {
+		// When rules field is not specified, it should default to empty
+		let config = include_str!("../tests/config/default_values.toml");
+
+		let result = test_parse_config(config, ".toml").await.unwrap();
+		assert_eq!(result.rules.len(), 0);
+	}
+
+	#[tokio::test]
+	async fn test_rules_coexist_with_acl() {
+		let config = include_str!("../tests/config/rules_with_acl.toml");
+
+		let result = test_parse_config(config, ".toml").await.unwrap();
+
+		// Legacy ACL rules
+		assert_eq!(result.acl.len(), 2);
+		assert_eq!(result.acl[0].outbound, "reject");
+		assert_eq!(result.acl[0].addr, AclAddress::Private);
+		assert_eq!(result.acl[1].outbound, "allow");
+		assert_eq!(result.acl[1].addr, AclAddress::Localhost);
+
+		// New Metacubex rules
+		assert_eq!(result.rules.len(), 2);
+		assert_eq!(result.rules[0].to_string(), "DOMAIN-SUFFIX,ads.example.com,reject");
+		assert_eq!(result.rules[1].to_string(), "MATCH,proxy");
+	}
+
+	#[tokio::test]
+	async fn test_rules_serialize_roundtrip() {
+		let config = include_str!("../tests/config/rules_parsing.toml");
+
+		let result = test_parse_config(config, ".toml").await.unwrap();
+
+		// Serialize to TOML string and verify rules appear as strings
+		let serialized = toml::to_string_pretty(&result).unwrap();
+		assert!(
+			serialized.contains("DOMAIN,ad.example.com,REJECT"),
+			"serialized:\n{serialized}"
+		);
+		assert!(serialized.contains("MATCH,proxy"), "serialized:\n{serialized}");
+		assert!(
+			serialized.contains("IP-CIDR,10.0.0.0/8,direct,no-resolve"),
+			"serialized:\n{serialized}"
+		);
+
+		// Verify the serialized form is a string array
+		assert!(
+			serialized.contains(r#""DOMAIN,ad.example.com,REJECT""#),
+			"rules should be serialized as quoted strings"
+		);
+	}
+
+	#[tokio::test]
+	async fn test_rules_invalid_rule_string() {
+		let temp_dir = tempdir().unwrap();
+		let config_path = temp_dir.path().join("config.toml");
+
+		let bad_config = r#"
+[users]
+"123e4567-e89b-12d3-a456-426614174000" = "password"
+
+[tls]
+self_sign = true
+
+rules = ["INVALID_TYPE,value,target"]
+"#;
+
+		fs::write(&config_path, bad_config).unwrap();
+
+		let cli = Cli::try_parse_from(vec!["test_binary", "--config", &config_path.to_string_lossy()]).unwrap();
+
+		let result = parse_config(cli, EnvState::default()).await;
+		assert!(result.is_err());
+	}
+
+	// infer_config_format regression tests
+
+	/// YAML values containing `=` must not be misclassified as TOML.
+	#[test]
+	fn yaml_with_equals_in_value_is_yaml() {
+		let yaml = "secret: aGVsbG8=\nfoo: bar\n";
+		assert_eq!(infer_config_format(yaml), ConfigFormat::Yaml);
+	}
+
+	#[test]
+	fn toml_section_still_detected() {
+		// `infer_config_format` short-circuits `starts_with('[')` to JSON.
+		// Verify TOML is still detected when first non-comment line is `key = value`.
+		let toml = "# config\nlog_level = \"info\"\n[server]\nport = 9443\n";
+		assert_eq!(infer_config_format(toml), ConfigFormat::Toml);
+	}
+
+	#[test]
+	fn toml_bare_assignment_still_detected() {
+		// `key = "value"` without a section header is still valid TOML.
+		let toml = "log_level = \"info\"\n";
+		assert_eq!(infer_config_format(toml), ConfigFormat::Toml);
+	}
+
+	#[test]
+	fn yaml_with_indented_block_not_misread_as_toml() {
+		// Indented list under a key — pure YAML, no top-level `=`.
+		let yaml = "rules:\n  - foo=bar\n  - baz\n";
+		assert_eq!(infer_config_format(yaml), ConfigFormat::Yaml);
+	}
+}
