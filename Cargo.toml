@@ -1,11 +1,11 @@
 [workspace]
-members = ["crates/tuic-server", "crates/tuic-client", "crates/tuic-tests"]
-exclude = ["forks", "tuic-core.old", "tuic-server.old", "tuic-client.old", "tuic-tests.old"]
+members = ["crates/*"]
+exclude = ["crates/wind"]
 resolver = "2"
 
 [workspace.package]
 authors = ["Itsusinn <sun@ihsin.dev>"]
-version = "0.2.0"
+version = "2.0.0-dev1"
 rust-version = "1.85.0"
 edition = "2024"
 readme = "README.md"
