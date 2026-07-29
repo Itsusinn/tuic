@@ -1,0 +1,16 @@
+rules = [
+    "DOMAIN,ad.example.com,REJECT",
+    "DOMAIN-SUFFIX,google.com,proxy",
+    "DOMAIN-KEYWORD,track,reject",
+    "IP-CIDR,10.0.0.0/8,direct,no-resolve",
+    "IP-CIDR6,fc00::/7,direct",
+    "DST-PORT,443,proxy",
+    "NETWORK,udp,direct",
+    "MATCH,proxy",
+]
+
+[users]
+"123e4567-e89b-12d3-a456-426614174000" = "password"
+
+[tls]
+self_sign = true
