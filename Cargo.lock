@@ -4968,7 +4968,6 @@ checksum = "e421abadd41a4225275504ea4d6566923418b7f05506fbc9c0fe86ba7396114b"
 name = "tuic-client"
 version = "2.0.0-dev1"
 dependencies = [
- "anyhow",
  "async-trait",
  "aws-lc-rs",
  "bytes",
@@ -5059,7 +5058,6 @@ dependencies = [
  "sha2",
  "socket2 0.6.5",
  "tempfile",
- "thiserror 2.0.19",
  "tikv-jemallocator",
  "time",
  "tokio",

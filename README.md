@@ -1,106 +1,219 @@
 # TUIC
 
-Delicately-TUICed 0-RTT proxy protocol
+基于 QUIC 的低延迟代理协议实现，提供独立的服务端与客户端。
 
-A fork of original TUIC repo https://github.com/tuic-protocol/tuic
+本仓库 fork 自 [tuic-protocol/tuic](https://github.com/tuic-protocol/tuic)，在保持 TUIC 简洁、低握手开销特性的同时，增加了更完整的部署、路由、安全与可观测能力。
 
-Compared to origin, this fork's new features:
+> 当前版本为 `2.0.0-dev1`，配置格式和功能仍可能调整。升级前请阅读 Release Notes，并备份现有配置。
 
-**Infrastructure & CI/CD:**
-- In-tree [Docker image builds](https://github.com/Itsusinn/tuic/pkgs/container/tuic-server) with multi-platform support (linux/amd64, linux/arm64)
-- Reusable CI/CD workflows with extensive cross-compilation support via [cross-rs](https://github.com/cross-rs/cross)
-- Support for multiple platforms: Linux (GNU/musl), Windows (MSVC), macOS, FreeBSD, and more
+## 特性
 
-**TLS & Security:**
+- TCP 与 UDP 代理，支持完全多路复用
+- 0-RTT 连接、认证及 TCP/UDP 转发
+- `native` 与 `quic` 两种 UDP 中继模式
+- 本地 SOCKS5 代理、TCP/UDP 端口转发及断线自动重连
+- BBR、BBRv3、CUBIC、New Reno 等拥塞控制算法
+- ACL 与 Metacubex 风格路由规则
+- 直连和 SOCKS5 出站，可指定 IP 栈、源地址或网络接口
+- 自动 ACME 证书、自签名证书与证书热重载
+- HTTP/3 伪装、GeoIP/GeoSite 规则与流量统计 API
+- Quinn 后端，以及实验性的 tokio-quiche 后端
+- Linux、Windows、macOS、FreeBSD 等平台构建
+- `linux/amd64`、`linux/arm64` 多架构容器镜像
 
-- Automatic SSL/TLS certificate provisioning via ACME (Let's Encrypt) for domain or **IP**
-- Self-signed certificate support
-- Certificate auto hot-reload for zero-downtime updates
-- `skip_cert_verify` option for client connections
+TUIC 协议的完整定义见[中文规范](crates/wind/specs/tuic.zh_CN.md)或[英文规范](crates/wind/specs/tuic.md)。
 
-**Performance & Stability:**
-- JEMalloc allocator integration for better memory management
-- AWS-LC-RS crypto provider for improved performance
-- More active `max_concurrent_streams` strategy
-- Rust edition 2024
-- BBR3 congestion control algorithm support
+## 快速开始
 
-**Server Features:**
-- ACL (Access Control List) support with configurable outbound rules
-- SOCKS5 outbound proxy support
-- RESTful API with traffic statistics
-- Network interface binding support
-- Default localhost access protection
-- Private/LAN address filtering for enhanced security
+### 1. 获取程序
 
-**Client Features:**
-- TCP/UDP port forwarding support
-- Local socket rebinding for better reliability
+可从项目的 [Releases](https://github.com/Itsusinn/tuic/releases) 下载适合当前平台的 `tuic-server` 和 `tuic-client`，也可以按照后文说明从源码构建。
 
-## Introduction
+### 2. 创建服务端配置
 
-TUIC is a proxy protocol focusing on minimize the additional handshake latency caused by relaying as much as possible, as well as keeping the protocol itself being simple and easy to implement
+生成 UUID，并为它设置一个高强度密码。下面的配置使用自签名证书，适合首次测试：
 
-TUIC is originally designed to be used on top of the [QUIC](https://en.wikipedia.org/wiki/QUIC) protocol, but you can use it with any other protocol, e.g. TCP, in theory
+```toml
+# server.toml
+server = "[::]:8443"
+log_level = "info"
 
-When paired with QUIC, TUIC can achieve:
+[users]
+"00000000-0000-0000-0000-000000000000" = "请替换为高强度密码"
 
-- 0-RTT TCP proxying
-- 0-RTT UDP proxying with NAT type [Full Cone](https://www.rfc-editor.org/rfc/rfc3489#section-5) 
-- 0-RTT authentication
-- Two UDP proxying modes:
-    - `native`: Having characteristics of native UDP mechanism
-    - `quic`: Transferring UDP packets losslessly using QUIC streams
-- Fully multiplexed
-- All the advantages of QUIC, including but not limited to:
-    - Bidirectional user-space congestion control
-    - Optional 0-RTT connection handshake
-    - Connection migration
-
-Fully-detailed TUIC protocol specification can be found in [SPEC.md](https://github.com/proxy-rs/wind/blob/main/crates/wind-tuic/SPEC.md)
-
-## Overview
-
-There are 4 crates provided in this repository:
-
-- **[tuic](https://github.com/Itsusinn/tuic/tree/dev/tuic)** - Library. The protocol itself, protocol & model abstraction, synchronous / asynchronous marshalling
-- **[tuic-quinn](https://github.com/Itsusinn/tuic/tree/dev/tuic-quinn)** - Library. A thin layer on top of [quinn](https://github.com/quinn-rs/quinn) to provide functions of TUIC
-- **[tuic-server](https://github.com/Itsusinn/tuic/tree/dev/tuic-server)** - Binary. Minimalistic TUIC server implementation as a reference
-- **[tuic-client](https://github.com/Itsusinn/tuic/tree/dev/tuic-client)** - Binary. Minimalistic TUIC client implementation as a reference
-
-
-
-## Contribute TUIC
-
-[Search TODO in code base](https://github.com/search?q=repo%3AItsusinn%2Ftuic%20todo&type=code) or [Assist with Open Issues](https://github.com/Itsusinn/tuic/issues?q=label%3A%22help+wanted%22+is%3Aissue+is%3Aopen)
-
-### Contributing Guidelines
-
-Contributors should fork from the `main` branch and submit pull requests to the `main` branch. Please note that the `dev` branch may be force-pushed from time to time, so avoid basing your work on it.
-
-### Heap profiling / leak detection
-
-Both `tuic-server` and `tuic-client` ship an optional [dhat](https://crates.io/crates/dhat) heap profiler behind the `dhat-heap` feature, useful for chasing resource/memory leaks (e.g. UDP sessions that are never cleaned up).
-
-```bash
-# Build & run the server with profiling enabled
-cargo run -p tuic-server --features dhat-heap -- -c config.toml
+[tls]
+self_sign = true
+hostname = "你的服务器域名"
 ```
 
-Exercise the binary, then stop it with **Ctrl-C** (a graceful shutdown is required — a hard kill skips the profiler). On exit a `dhat-heap.json` file is written to the working directory; open it in the [DHAT viewer](https://nnethercote.github.io/dh_view/dh_view.html) and inspect the **"At t-end"** (at-exit) numbers — blocks still alive when the process shut down are your leaks, and each is annotated with the allocation backtrace.
+启动服务端：
 
-Note: `dhat-heap` installs its own global allocator, so it is mutually exclusive with `jemallocator` (dhat takes precedence if both are enabled). Leave it off for release/production builds — it adds per-allocation overhead.
+```console
+tuic-server -c server.toml
+```
 
-## Contributors
+服务端还可以生成一份包含全部选项的示例配置：
 
-Thanks to all the contributors who have helped improve TUIC!
+```console
+tuic-server --init
+```
 
-<a href="https://github.com/Itsusinn/tuic/graphs/contributors">
-  <img src="https://contrib.rocks/image?repo=Itsusinn/tuic" />
-</a>
+该命令会在当前目录创建 `config.toml`，若文件已经存在则不会覆盖。
 
-## License
+### 3. 创建客户端配置
 
-Code in this repository is licensed under [GNU General Public License v3.0](https://github.com/Itsusinn/tuic/blob/dev/LICENSE)
+```toml
+# client.toml
+log_level = "info"
 
-However, the concept of the TUIC protocol is license-free. You can implement, modify, and redistribute the protocol without any restrictions, even for commercial use
+[relay]
+server = "你的服务器域名:8443"
+uuid = "00000000-0000-0000-0000-000000000000"
+password = "请替换为高强度密码"
+udp_relay_mode = "native"
+congestion_control = "bbr"
+
+# 仅在服务端使用自签名证书进行测试时启用。
+# 生产环境请改用受信任证书，或通过 certificates 指定证书文件。
+skip_cert_verify = true
+
+[local]
+server = "127.0.0.1:1080"
+```
+
+启动客户端：
+
+```console
+tuic-client -c client.toml
+```
+
+随后将应用的 SOCKS5 代理设置为 `127.0.0.1:1080`。服务端监听的是 UDP 端口，请确认防火墙和云安全组已放行 `8443/udp`。
+
+## 生产环境 TLS
+
+建议使用受信任的证书，并关闭客户端的 `skip_cert_verify`。
+
+使用已有证书：
+
+```toml
+[tls]
+certificate = "/etc/tuic/fullchain.pem"
+private_key = "/etc/tuic/privatekey.pem"
+hostname = "tuic.example.com"
+```
+
+或通过 ACME 自动申请证书：
+
+```toml
+[tls]
+auto_ssl = true
+hostname = "tuic.example.com"
+acme_email = "admin@example.com"
+```
+
+域名应正确解析到服务器，申请证书所需的端口和网络访问也必须可用。请妥善保护私钥、用户密码及管理 API 密钥。
+
+## Docker
+
+服务端镜像发布于 GitHub Container Registry：
+
+```console
+docker pull ghcr.io/itsusinn/tuic-server:latest
+
+docker run -d \
+  --name tuic-server \
+  --restart unless-stopped \
+  -p 8443:8443/udp \
+  -v "$PWD/server.toml:/etc/tuic/config.toml:ro" \
+  ghcr.io/itsusinn/tuic-server:latest
+```
+
+容器默认从 `/etc/tuic` 中查找配置文件。若需持久化自动签发的证书或其他运行数据，请在配置中设置 `data_dir`，并将对应目录挂载到宿主机。
+
+Docker Compose 与 Podman Quadlet 的完整部署说明见 [CONTAINER.md](CONTAINER.md)。
+
+## 配置
+
+客户端和服务端均支持 TOML、YAML、JSON 与 JSON5，并通常根据文件扩展名识别格式。
+
+常用命令：
+
+```console
+tuic-server --help
+tuic-client --help
+
+tuic-server -c /path/to/config.toml
+tuic-server -d /path/to/config-directory
+tuic-client -c /path/to/config.toml
+```
+
+如扩展名无法表达实际格式，可以设置 `TUIC_CONFIG_FORMAT`，可选值为 `toml`、`yaml`、`json` 或 `json5`。兼容旧部署的 `TUIC_FORCE_TOML` 也受支持，并具有更高优先级。
+
+更多可用配置可以参考：
+
+- [客户端完整 TOML 示例](crates/tuic-client/tests/config/toml_full_config.toml)
+- [服务端基础 TOML 示例](crates/tuic-server/tests/config/valid_toml_config.toml)
+- [服务端出站配置示例](crates/tuic-server/tests/config/outbound_valid_with_default.toml)
+- [ACL IR 规范](crates/wind/specs/acl-ir.zh_CN.md)
+
+## 从源码构建
+
+需要 Rust `1.85.0` 或更高版本、Git，以及目标平台所需的本地构建工具。仓库包含 Git submodule，克隆时请一并初始化：
+
+```console
+git clone --recurse-submodules https://github.com/Itsusinn/tuic.git
+cd tuic
+cargo build --release --package tuic-server --package tuic-client
+```
+
+如果仓库已经克隆：
+
+```console
+git submodule update --init --recursive
+```
+
+生成的程序位于 `target/release/`。默认使用 AWS-LC-RS；如需使用 ring：
+
+```console
+cargo build --release --no-default-features --features ring --package tuic-server
+cargo build --release --no-default-features --features ring --package tuic-client
+```
+
+实验性的 quiche 服务端后端需要显式启用 `quiche` feature，且目前仅支持 64 位目标。
+
+## 测试与开发
+
+```console
+cargo fmt --all --check
+cargo clippy --workspace --all-targets
+cargo test --workspace
+```
+
+工作区包含以下主要 crate：
+
+- `tuic-server`：服务端程序、TLS、路由、出站与管理 API
+- `tuic-client`：客户端程序、本地 SOCKS5 与端口转发
+- `tuic-tests`：协议与端到端集成测试
+- `wind`：通过 Git submodule 引入的网络代理框架与 TUIC 协议实现
+
+欢迎提交 Issue 和 Pull Request。请从 `main` 分支派生改动并向 `main` 提交；`next` 等开发分支可能发生历史重写。使用 AI 辅助的贡献还须遵循 [LLM.md](LLM.md) 中的披露要求。
+
+## 安全提示
+
+- 不要在公开仓库、日志或截图中泄露 UUID、密码、私钥和 API 密钥。
+- `skip_cert_verify = true` 会跳过服务端身份校验，只应临时用于受控测试。
+- 默认的回环与私有地址保护有助于降低 SSRF 风险；仅在明确了解影响时关闭。
+- 若管理 API 暴露到非本机地址，请设置 Bearer Token，并在外层增加访问控制。
+- 0-RTT 数据可能被重放；不要通过早期数据执行不可重复的敏感操作。
+
+如发现安全问题，请避免直接公开利用细节，优先通过仓库维护者提供的私密渠道报告。
+
+## 致谢
+
+感谢原始 [TUIC 项目](https://github.com/tuic-protocol/tuic)、[Wind](https://github.com/rust-proxy/wind) 及所有[贡献者](https://github.com/Itsusinn/tuic/graphs/contributors)。
+
+## 许可证
+
+本仓库代码依据 [GNU General Public License v3.0 or later](LICENSE) 发布。
+
+TUIC 协议概念本身不受该代码许可证限制；你可以独立实现、修改和分发该协议，包括商业用途。
