@@ -86,7 +86,6 @@ dashmap = "6"
 async-trait = "0.1"
 
 # Error handling
-thiserror = { version = "2", default-features = false }
 eyre = { version = "0.6" }
 
 tikv-jemallocator = { version = "0.7", optional = true }

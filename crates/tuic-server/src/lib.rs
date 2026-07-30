@@ -4,7 +4,6 @@
 //! [`wind_core::Plugin`] and can be used with [`wind_core::App`].
 
 pub mod config;
-pub mod error;
 pub mod legacy;
 pub mod log;
 pub mod plugin;

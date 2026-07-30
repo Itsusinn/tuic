@@ -58,7 +58,6 @@ aws-lc-rs = { version = "1", default-features = false, optional = true, features
 
 # Error-handling
 thiserror = { version = "2", default-features = false }
-anyhow = "1"
 eyre = { version = "0.6" }
 
 # Logging
