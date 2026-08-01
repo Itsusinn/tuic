@@ -7,15 +7,23 @@
 //! * [`load_cert_from_files`] – TLS certificate loading.
 //! * [`make_outbound_action`] – factory for named outbound handlers.
 
-use std::{sync::Arc, time::Duration};
+use std::{
+	net::{Ipv4Addr, Ipv6Addr},
+	sync::Arc,
+	time::Duration,
+};
 
 use tracing::Instrument;
 use wind_acl::AclEngine;
 use wind_base::{
 	direct::{DirectOutbound, DirectOutboundOpts},
+	load_balance::{LoadBalanceOpts, LoadBalanceOutbound, LoadBalanceStrategy},
 	resolve::resolve_target,
 };
-use wind_core::{OutboundAction, RouteAction, Router, rule::Rule, types::TargetAddr, utils::is_private_ip};
+use wind_core::{
+	OutboundAction, RouteAction, Router, rule::Rule, types::TargetAddr,
+	utils::is_private_ip,
+};
 use wind_geodata::GeoData;
 use wind_socks::action::{Socks5Action, Socks5ActionOpts};
 
@@ -42,6 +50,11 @@ impl wind_core::AbstractInbound for ServerInbound {
 }
 
 /// Build an [`OutboundAction`] for a single configured outbound rule.
+///
+/// When `bind_ipv4` + `bind_ipv6` together contain **more than one** address
+/// (and `kind == "direct"`), the addresses are wrapped in a
+/// [`LoadBalanceOutbound`] with round-robin strategy so connections are
+/// distributed across the available source IPs.
 pub fn make_outbound_action(
 	rule: &OutboundRule,
 	resolver: Arc<dyn wind_core::Resolver>,
@@ -56,40 +69,103 @@ pub fn make_outbound_action(
 			stream_timeout,
 			tcp_keepalive: Some(wind_core::tcp::TcpKeepalive::default()),
 		})),
-		"direct" => Arc::new(DirectOutbound::new(
-			DirectOutboundOpts {
-				bind_ipv4: rule.bind_ipv4.first().copied(),
-				bind_ipv6: rule.bind_ipv6.first().copied(),
-				bind_device: rule.bind_device.clone(),
-				stream_timeout,
-				tcp_keepalive: Some(wind_core::tcp::TcpKeepalive::default()),
-				ip_mode: rule.ip_mode,
-				routing_mark: rule.routing_mark,
-				tfo: rule.tfo.unwrap_or(false),
-				mptcp: false,
-			},
-			resolver,
-		)),
+		"direct" => build_direct_or_lb(rule, resolver, stream_timeout),
 		other => {
 			tracing::warn!(
 				outbound_type = %other,
 				"unknown outbound type; falling back to DIRECT"
 			);
-			Arc::new(DirectOutbound::new(
-				DirectOutboundOpts {
-					bind_ipv4: rule.bind_ipv4.first().copied(),
-					bind_ipv6: rule.bind_ipv6.first().copied(),
-					bind_device: rule.bind_device.clone(),
-					stream_timeout,
-					tcp_keepalive: Some(wind_core::tcp::TcpKeepalive::default()),
-					ip_mode: rule.ip_mode,
-					routing_mark: rule.routing_mark,
-					tfo: rule.tfo.unwrap_or(false),
-					mptcp: false,
-				},
-				resolver,
-			))
+			build_direct_or_lb(rule, resolver, stream_timeout)
 		}
+	}
+}
+
+/// Build either a single [`DirectOutbound`] or a [`LoadBalanceOutbound`]
+/// wrapping the cartesian product of `bind_ipv4 × bind_ipv6`.
+///
+/// When both families have entries, each pair `(v4, v6)` becomes one
+/// `DirectOutbound` so that every outbound can bind correctly regardless of
+/// the target's address family.  When only one family has entries (or none),
+/// the behaviour degrades to a flat list.
+fn build_direct_or_lb(
+	rule: &OutboundRule,
+	resolver: Arc<dyn wind_core::Resolver>,
+	stream_timeout: Duration,
+) -> Arc<dyn OutboundAction> {
+	// Build the domain for each address family.  An empty family
+	// contributes a single [None] so the cartesian product still includes
+	// the other family's addresses.
+	let v4_opts: Vec<Option<Ipv4Addr>> = if rule.bind_ipv4.is_empty() {
+		vec![None]
+	} else {
+		rule.bind_ipv4.iter().copied().map(Some).collect()
+	};
+	let v6_opts: Vec<Option<Ipv6Addr>> = if rule.bind_ipv6.is_empty() {
+		vec![None]
+	} else {
+		rule.bind_ipv6.iter().copied().map(Some).collect()
+	};
+
+	let total = v4_opts.len() * v6_opts.len();
+
+	if total <= 1 {
+		// Zero or one combination — single DirectOutbound (existing behaviour).
+		return Arc::new(DirectOutbound::new(
+			make_direct_opts(
+				rule,
+				stream_timeout,
+				v4_opts.first().copied().flatten(),
+				v6_opts.first().copied().flatten(),
+			),
+			resolver,
+		));
+	}
+
+	// Cartesian product: each (v4, v6) pair → one DirectOutbound.
+	let proxies: Vec<Arc<dyn OutboundAction>> = v4_opts
+		.iter()
+		.flat_map(|v4| v6_opts.iter().map(move |v6| (*v4, *v6)))
+		.map(|(v4, v6)| {
+			Arc::new(DirectOutbound::new(
+				make_direct_opts(rule, stream_timeout, v4, v6),
+				resolver.clone(),
+			)) as Arc<dyn OutboundAction>
+		})
+		.collect();
+
+	let lb_opts = LoadBalanceOpts {
+		strategy: LoadBalanceStrategy::RoundRobin,
+		url: "https://cp.cloudflare.com/".into(),
+		interval: Duration::from_secs(30),
+		lazy: true,
+	};
+
+	tracing::info!(
+		proxy_count = proxies.len(),
+		"creating load-balance outbound for multiple bind addresses"
+	);
+
+	Arc::new(LoadBalanceOutbound::new(lb_opts, proxies))
+}
+
+/// Construct [`DirectOutboundOpts`] from the shared rule fields + resolved
+/// bind addresses.
+fn make_direct_opts(
+	rule: &OutboundRule,
+	stream_timeout: Duration,
+	bind_ipv4: Option<Ipv4Addr>,
+	bind_ipv6: Option<Ipv6Addr>,
+) -> DirectOutboundOpts {
+	DirectOutboundOpts {
+		bind_ipv4,
+		bind_ipv6,
+		bind_device: rule.bind_device.clone(),
+		stream_timeout,
+		tcp_keepalive: Some(wind_core::tcp::TcpKeepalive::default()),
+		ip_mode: rule.ip_mode,
+		routing_mark: rule.routing_mark,
+		tfo: rule.tfo.unwrap_or(false),
+		mptcp: false,
 	}
 }
 
@@ -265,6 +341,106 @@ mod tests {
 			tfo: None,
 		};
 		let _action = make_outbound_action(&rule, default_resolver(), Duration::from_secs(0));
+	}
+
+	#[test]
+	fn test_make_outbound_action_direct_single_ip_no_lb() {
+		// Single bind address → still a DirectOutbound (no LoadBalance wrapping).
+		let rule = OutboundRule {
+			kind: "direct".to_string(),
+			ip_mode: None,
+			addr: None,
+			username: None,
+			password: None,
+			allow_udp: None,
+			bind_ipv4: vec!["10.0.0.1".parse().unwrap()],
+			bind_ipv6: Vec::new(),
+			bind_device: None,
+			routing_mark: None,
+			tfo: None,
+		};
+		let _action = make_outbound_action(&rule, default_resolver(), Duration::from_secs(30));
+	}
+
+	#[test]
+	fn test_make_outbound_action_direct_multi_ipv4_creates_lb() {
+		// Multiple IPv4 addresses → LoadBalanceOutbound with 3 children.
+		let rule = OutboundRule {
+			kind: "direct".to_string(),
+			ip_mode: None,
+			addr: None,
+			username: None,
+			password: None,
+			allow_udp: None,
+			bind_ipv4: vec![
+				"10.0.0.1".parse().unwrap(),
+				"10.0.0.2".parse().unwrap(),
+				"10.0.0.3".parse().unwrap(),
+			],
+			bind_ipv6: Vec::new(),
+			bind_device: None,
+			routing_mark: None,
+			tfo: None,
+		};
+		let _action = make_outbound_action(&rule, default_resolver(), Duration::from_secs(30));
+	}
+
+	#[test]
+	fn test_make_outbound_action_direct_mixed_ipv4_ipv6_creates_lb() {
+		// Mixed IPv4 + IPv6 (2×1 cartesian product) → 2 children.
+		let rule = OutboundRule {
+			kind: "direct".to_string(),
+			ip_mode: None,
+			addr: None,
+			username: None,
+			password: None,
+			allow_udp: None,
+			bind_ipv4: vec!["10.0.0.1".parse().unwrap(), "10.0.0.2".parse().unwrap()],
+			bind_ipv6: vec!["fd00::1".parse().unwrap()],
+			bind_device: None,
+			routing_mark: None,
+			tfo: None,
+		};
+		let _action = make_outbound_action(&rule, default_resolver(), Duration::from_secs(30));
+	}
+
+	#[test]
+	fn test_make_outbound_action_direct_mixed_2x2_creates_lb() {
+		// Mixed IPv4 + IPv6 (2×2 cartesian product) → 4 children,
+		// each with both bind_ipv4 and bind_ipv6 set.
+		let rule = OutboundRule {
+			kind: "direct".to_string(),
+			ip_mode: None,
+			addr: None,
+			username: None,
+			password: None,
+			allow_udp: None,
+			bind_ipv4: vec!["10.0.0.1".parse().unwrap(), "10.0.0.2".parse().unwrap()],
+			bind_ipv6: vec!["fd00::1".parse().unwrap(), "fd00::2".parse().unwrap()],
+			bind_device: None,
+			routing_mark: None,
+			tfo: None,
+		};
+		let _action = make_outbound_action(&rule, default_resolver(), Duration::from_secs(30));
+	}
+
+	#[test]
+	fn test_make_outbound_action_direct_multi_ipv6_creates_lb() {
+		// Multiple IPv6 addresses → LoadBalanceOutbound with 2 children.
+		let rule = OutboundRule {
+			kind: "direct".to_string(),
+			ip_mode: None,
+			addr: None,
+			username: None,
+			password: None,
+			allow_udp: None,
+			bind_ipv4: Vec::new(),
+			bind_ipv6: vec!["fd00::1".parse().unwrap(), "fd00::2".parse().unwrap()],
+			bind_device: None,
+			routing_mark: None,
+			tfo: None,
+		};
+		let _action = make_outbound_action(&rule, default_resolver(), Duration::from_secs(30));
 	}
 
 	#[tokio::test]
