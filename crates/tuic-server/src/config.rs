@@ -473,6 +473,18 @@ pub struct OutboundRule {
 	#[serde(default)]
 	pub bind_device: Option<String>,
 
+	/// Enable TCP Fast Open (only used when kind == "direct").
+	/// TFO reduces one RTT for repeated connections by allowing data in
+	/// the SYN packet (requires kernel support).
+	#[serde(default)]
+	pub tfo: Option<bool>,
+
+	/// Linux `SO_MARK` for policy routing (only used when kind == "direct").
+	/// Sets the fwmark on every socket so the kernel can steer traffic
+	/// through a specific routing table.
+	#[serde(default)]
+	pub routing_mark: Option<u32>,
+
 	/// SOCKS5 address (only used when kind == "socks5").
 	#[serde(default)]
 	pub addr: Option<String>,
