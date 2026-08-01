@@ -63,6 +63,10 @@ pub fn make_outbound_action(
 				bind_device: rule.bind_device.clone(),
 				stream_timeout,
 				tcp_keepalive: Some(wind_core::tcp::TcpKeepalive::default()),
+				ip_mode: rule.ip_mode,
+				routing_mark: rule.routing_mark,
+				tfo: rule.tfo.unwrap_or(false),
+				mptcp: false,
 			},
 			resolver,
 		)),
@@ -78,6 +82,10 @@ pub fn make_outbound_action(
 					bind_device: rule.bind_device.clone(),
 					stream_timeout,
 					tcp_keepalive: Some(wind_core::tcp::TcpKeepalive::default()),
+					ip_mode: rule.ip_mode,
+					routing_mark: rule.routing_mark,
+					tfo: rule.tfo.unwrap_or(false),
+					mptcp: false,
 				},
 				resolver,
 			))
@@ -199,6 +207,8 @@ mod tests {
 			bind_ipv4: Vec::new(),
 			bind_ipv6: Vec::new(),
 			bind_device: None,
+			routing_mark: None,
+			tfo: None,
 		};
 		let _action = make_outbound_action(&rule, default_resolver(), Duration::from_secs(30));
 	}
@@ -215,6 +225,8 @@ mod tests {
 			bind_ipv4: Vec::new(),
 			bind_ipv6: Vec::new(),
 			bind_device: None,
+			routing_mark: None,
+			tfo: None,
 		};
 		let _action = make_outbound_action(&rule, default_resolver(), Duration::from_secs(30));
 	}
@@ -231,6 +243,8 @@ mod tests {
 			bind_ipv4: Vec::new(),
 			bind_ipv6: Vec::new(),
 			bind_device: None,
+			routing_mark: None,
+			tfo: None,
 		};
 		let _action = make_outbound_action(&rule, default_resolver(), Duration::from_secs(30));
 	}
@@ -247,6 +261,8 @@ mod tests {
 			bind_ipv4: Vec::new(),
 			bind_ipv6: Vec::new(),
 			bind_device: None,
+			routing_mark: None,
+			tfo: None,
 		};
 		let _action = make_outbound_action(&rule, default_resolver(), Duration::from_secs(0));
 	}

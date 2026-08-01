@@ -5450,6 +5450,7 @@ dependencies = [
  "async-trait",
  "bytes",
  "eyre",
+ "libc",
  "socket2 0.6.5",
  "tokio",
  "tokio-util",
