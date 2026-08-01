@@ -272,6 +272,16 @@ pub struct Config {
 	#[serde(default, rename = "quic")]
 	#[deprecated]
 	pub __quic: Option<QuinnConfig>,
+	/// Deprecated top-level `[camouflage]` section (v1.8.11) — migrated into
+	/// `masquerade` on parse.
+	#[serde(default, rename = "camouflage")]
+	#[deprecated]
+	pub __camouflage: Option<LegacyCamouflageConfig>,
+	/// Deprecated top-level `restful_server` scalar (pre-1.8.11) — migrated
+	/// into `restful.addr` (and enables the RESTful API) on parse.
+	#[serde(default, rename = "restful_server")]
+	#[deprecated]
+	pub __restful_server: Option<SocketAddr>,
 }
 
 /// QUIC backend selection plus per-backend transport tuning.
@@ -335,6 +345,28 @@ pub struct MasqueradeConfig {
 	/// Upstream site to reverse-proxy to, e.g. `https://example.com`.
 	#[educe(Default(expression = "https://example.com"))]
 	pub upstream: String,
+}
+
+/// The `[camouflage]` section shape as shipped in v1.8.11, kept only for
+/// backward-compatible parsing. It is consumed by [`Config::migrate`] and
+/// folded into [`MasqueradeConfig`]; fields without a modern counterpart
+/// (`reverse_proxy_hostname` / `request_timeout` / `skip_backend_tls_verify`)
+/// are accepted and then discarded.
+#[derive(Deserialize, Serialize, Educe, Clone, Debug)]
+#[educe(Default)]
+#[serde(default, deny_unknown_fields)]
+pub struct LegacyCamouflageConfig {
+	#[educe(Default = false)]
+	pub enabled: bool,
+	#[educe(Default(expression = "".to_string()))]
+	pub reverse_proxy_url: String,
+	#[educe(Default = None)]
+	pub reverse_proxy_hostname: Option<String>,
+	#[serde(with = "humantime_serde")]
+	#[educe(Default(expression = Duration::from_secs(10)))]
+	pub request_timeout: Duration,
+	#[educe(Default = false)]
+	pub skip_backend_tls_verify: bool,
 }
 
 /// Transport tuning for the quinn backend (`wind-tuic`).
@@ -425,14 +457,16 @@ pub struct OutboundRule {
 	pub ip_mode: Option<StackPrefer>,
 
 	/// Optional IPv4 address to bind to for direct connections (only used when
-	/// kind == "direct").
-	#[serde(default)]
-	pub bind_ipv4: Option<Ipv4Addr>,
+	/// kind == "direct"). Accepts a single address or an array of addresses
+	/// (v1.8.11 compatibility); the first entry is used.
+	#[serde(default, deserialize_with = "deserialize_single_or_vec")]
+	pub bind_ipv4: Vec<Ipv4Addr>,
 
 	/// Optional IPv6 address to bind to for direct connections (only used when
-	/// kind == "direct").
-	#[serde(default)]
-	pub bind_ipv6: Option<Ipv6Addr>,
+	/// kind == "direct"). Accepts a single address or an array of addresses
+	/// (v1.8.11 compatibility); the first entry is used.
+	#[serde(default, deserialize_with = "deserialize_single_or_vec")]
+	pub bind_ipv6: Vec<Ipv6Addr>,
 
 	/// Optional device/interface name to bind to (only used when kind ==
 	/// "direct").
@@ -554,6 +588,26 @@ where
 	deserializer.deserialize_any(RulesVisitor)
 }
 
+/// Accepts either a single value or an array of values, returning a `Vec`
+/// (v1.8.11 compatibility for `bind_ipv4` / `bind_ipv6`).
+fn deserialize_single_or_vec<'de, D, T>(deserializer: D) -> Result<Vec<T>, D::Error>
+where
+	D: Deserializer<'de>,
+	T: Deserialize<'de>,
+{
+	#[derive(Deserialize)]
+	#[serde(untagged)]
+	enum SingleOrVec<T> {
+		Single(T),
+		Vec(Vec<T>),
+	}
+
+	match SingleOrVec::deserialize(deserializer)? {
+		SingleOrVec::Single(value) => Ok(vec![value]),
+		SingleOrVec::Vec(values) => Ok(values),
+	}
+}
+
 fn generate_random_alphanumeric_string(min: usize, max: usize) -> String {
 	let mut rng = rng();
 	let len = rng.random_range(min..=max);
@@ -624,6 +678,29 @@ impl Config {
 			}
 			if let Some(pmtu) = self.__pmtu {
 				self.backend.quinn.pmtu = pmtu;
+			}
+		}
+
+		// Migrate the v1.8.11 `[camouflage]` section into `[masquerade]`.
+		// `reverse_proxy_hostname` / `request_timeout` / `skip_backend_tls_verify`
+		// have no modern counterpart and are discarded.
+		#[allow(deprecated)]
+		{
+			if let Some(cam) = self.__camouflage.take() {
+				self.masquerade.enabled = cam.enabled;
+				if !cam.reverse_proxy_url.is_empty() {
+					self.masquerade.upstream = cam.reverse_proxy_url;
+				}
+			}
+		}
+
+		// Migrate the pre-1.8.11 `restful_server` scalar into `[restful]`,
+		// restoring the historical "restful configured => API enabled" semantics.
+		#[allow(deprecated)]
+		{
+			if let Some(addr) = self.__restful_server.take() {
+				self.restful.enabled = true;
+				self.restful.addr = addr;
 			}
 		}
 	}
@@ -1146,7 +1223,7 @@ mod tests {
 		let prefer_v4 = result.outbound.named.get("prefer_v4").unwrap();
 		assert_eq!(prefer_v4.kind, "direct");
 		assert_eq!(prefer_v4.ip_mode, Some(StackPrefer::V4first));
-		assert_eq!(prefer_v4.bind_ipv4, Some("2.4.6.8".parse().unwrap()));
+		assert_eq!(prefer_v4.bind_ipv4, vec!["2.4.6.8".parse::<std::net::Ipv4Addr>().unwrap()]);
 		assert_eq!(prefer_v4.bind_device, Some("eth233".to_string()));
 
 		let socks5 = result.outbound.named.get("through_socks5").unwrap();
@@ -1983,6 +2060,114 @@ rules = ["INVALID_TYPE,value,target"]
 
 		let result = parse_config(cli, EnvState::default()).await;
 		assert!(result.is_err());
+	}
+
+	#[tokio::test]
+	async fn test_v1811_camouflage_migrates_to_masquerade() {
+		// v1.8.11 `[camouflage]` section must parse and fold into `masquerade`.
+		let cfg = r#"
+log_level = "info"
+server = "127.0.0.1:8443"
+
+[tls]
+self_sign = true
+
+[camouflage]
+enabled = true
+reverse_proxy_url = "https://upstream.example.com"
+reverse_proxy_hostname = "example.com"
+request_timeout = "15s"
+skip_backend_tls_verify = true
+
+[users]
+"123e4567-e89b-12d3-a456-426614174000" = "password1"
+"#;
+		let parsed = test_parse_config(cfg, ".toml").await.unwrap();
+		assert!(parsed.masquerade.enabled, "camouflage.enabled should migrate to masquerade.enabled");
+		assert_eq!(
+			parsed.masquerade.upstream, "https://upstream.example.com",
+			"camouflage.reverse_proxy_url should migrate to masquerade.upstream"
+		);
+	}
+
+	#[tokio::test]
+	async fn test_v1811_camouflage_default_upstream_keeps_modern_default() {
+		// camouflage without reverse_proxy_url must not clobber the modern default.
+		let cfg = r#"
+server = "127.0.0.1:8443"
+
+[tls]
+self_sign = true
+
+[camouflage]
+enabled = true
+
+[users]
+"123e4567-e89b-12d3-a456-426614174000" = "password1"
+"#;
+		let parsed = test_parse_config(cfg, ".toml").await.unwrap();
+		assert!(parsed.masquerade.enabled);
+		assert_eq!(parsed.masquerade.upstream, "https://example.com");
+	}
+
+	#[tokio::test]
+	async fn test_legacy_restful_server_migrates_and_enables_api() {
+		let cfg = r#"
+server = "127.0.0.1:8443"
+restful_server = "127.0.0.1:9000"
+
+[tls]
+self_sign = true
+
+[users]
+"123e4567-e89b-12d3-a456-426614174000" = "password1"
+"#;
+		let parsed = test_parse_config(cfg, ".toml").await.unwrap();
+		assert!(parsed.restful.enabled, "legacy restful_server must enable the RESTful API");
+		assert_eq!(parsed.restful.addr.to_string(), "127.0.0.1:9000");
+	}
+
+	#[tokio::test]
+	async fn test_bind_ipv4_accepts_single_and_array() {
+		// v1.8.11 accepted both a scalar and an array for bind_ipv4/bind_ipv6.
+		let cfg = r#"
+server = "127.0.0.1:8443"
+
+[tls]
+self_sign = true
+
+[outbound]
+[outbound.default]
+type = "direct"
+bind_ipv4 = "1.2.3.4"
+bind_ipv6 = ["2001:db8::1", "2001:db8::2"]
+
+[users]
+"123e4567-e89b-12d3-a456-426614174000" = "password1"
+"#;
+		let parsed = test_parse_config(cfg, ".toml").await.unwrap();
+		assert_eq!(parsed.outbound.default.bind_ipv4, vec!["1.2.3.4".parse::<std::net::Ipv4Addr>().unwrap()]);
+		assert_eq!(
+			parsed.outbound.default.bind_ipv6,
+			vec![
+				"2001:db8::1".parse::<std::net::Ipv6Addr>().unwrap(),
+				"2001:db8::2".parse::<std::net::Ipv6Addr>().unwrap(),
+			]
+		);
+
+		// Absent field defaults to an empty vec (no bind address).
+		let cfg_empty = r#"
+server = "127.0.0.1:8443"
+
+[tls]
+self_sign = true
+
+[users]
+"123e4567-e89b-12d3-a456-426614174000" = "password1"
+"#;
+		let parsed_empty = test_parse_config(cfg_empty, ".toml").await.unwrap();
+		assert!(parsed_empty.outbound.default.bind_ipv4.is_empty());
+		assert!(parsed_empty.outbound.default.bind_ipv6.is_empty());
 	}
 
 	// infer_config_format regression tests

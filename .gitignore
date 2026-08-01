@@ -9,3 +9,5 @@ client.json
 client.json5
 lcov.info
 config.toml
+.reasonix
+reasonix.toml
