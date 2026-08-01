@@ -35,7 +35,7 @@ impl TuicClientPlugin {
 }
 
 impl Plugin for TuicClientPlugin {
-	async fn build(self, app: App) -> App {
+	async fn build(self, app: App) -> eyre::Result<App> {
 		let ctx = app.context().clone();
 		let relay = self.cfg.relay;
 		let lazy = relay.lazy;
@@ -101,6 +101,6 @@ impl Plugin for TuicClientPlugin {
 			});
 		}
 
-		app
+		Ok(app)
 	}
 }
