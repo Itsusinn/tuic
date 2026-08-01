@@ -58,8 +58,8 @@ pub fn make_outbound_action(
 		})),
 		"direct" => Arc::new(DirectOutbound::new(
 			DirectOutboundOpts {
-				bind_ipv4: rule.bind_ipv4,
-				bind_ipv6: rule.bind_ipv6,
+				bind_ipv4: rule.bind_ipv4.first().copied(),
+				bind_ipv6: rule.bind_ipv6.first().copied(),
 				bind_device: rule.bind_device.clone(),
 				stream_timeout,
 				tcp_keepalive: Some(wind_core::tcp::TcpKeepalive::default()),
@@ -73,8 +73,8 @@ pub fn make_outbound_action(
 			);
 			Arc::new(DirectOutbound::new(
 				DirectOutboundOpts {
-					bind_ipv4: rule.bind_ipv4,
-					bind_ipv6: rule.bind_ipv6,
+					bind_ipv4: rule.bind_ipv4.first().copied(),
+					bind_ipv6: rule.bind_ipv6.first().copied(),
 					bind_device: rule.bind_device.clone(),
 					stream_timeout,
 					tcp_keepalive: Some(wind_core::tcp::TcpKeepalive::default()),
@@ -196,8 +196,8 @@ mod tests {
 			username: Some("user".to_string()),
 			password: Some("pass".to_string()),
 			allow_udp: Some(true),
-			bind_ipv4: None,
-			bind_ipv6: None,
+			bind_ipv4: Vec::new(),
+			bind_ipv6: Vec::new(),
 			bind_device: None,
 		};
 		let _action = make_outbound_action(&rule, default_resolver(), Duration::from_secs(30));
@@ -212,8 +212,8 @@ mod tests {
 			username: None,
 			password: None,
 			allow_udp: None,
-			bind_ipv4: None,
-			bind_ipv6: None,
+			bind_ipv4: Vec::new(),
+			bind_ipv6: Vec::new(),
 			bind_device: None,
 		};
 		let _action = make_outbound_action(&rule, default_resolver(), Duration::from_secs(30));
@@ -228,8 +228,8 @@ mod tests {
 			username: None,
 			password: None,
 			allow_udp: None,
-			bind_ipv4: None,
-			bind_ipv6: None,
+			bind_ipv4: Vec::new(),
+			bind_ipv6: Vec::new(),
 			bind_device: None,
 		};
 		let _action = make_outbound_action(&rule, default_resolver(), Duration::from_secs(30));
@@ -244,8 +244,8 @@ mod tests {
 			username: Some("admin".to_string()),
 			password: Some("secret".to_string()),
 			allow_udp: Some(false),
-			bind_ipv4: None,
-			bind_ipv6: None,
+			bind_ipv4: Vec::new(),
+			bind_ipv6: Vec::new(),
 			bind_device: None,
 		};
 		let _action = make_outbound_action(&rule, default_resolver(), Duration::from_secs(0));
