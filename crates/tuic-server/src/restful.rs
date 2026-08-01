@@ -135,14 +135,13 @@ pub struct RestfulState {
 
 /// Object-safe interface for kicking connections, wrapping both
 /// [`ActiveConnections`] and [`ConnectionTracker`].
-#[async_trait]
 pub trait KickConnections: Send + Sync + 'static {
 	fn kick_user(&self, user: &UserId) -> usize;
 	fn count_for(&self, user: &UserId) -> usize;
 	fn len(&self) -> usize;
 	fn is_empty(&self) -> bool;
 }
-#[async_trait]
+
 impl KickConnections for ActiveConnections {
 	fn kick_user(&self, user: &UserId) -> usize {
 		self.kick_user(user)
@@ -164,7 +163,7 @@ impl KickConnections for ActiveConnections {
 /// No-op implementation that always returns zero. Used as a fallback when
 /// `ActiveConnections` is not available (e.g. per-user limit disabled).
 pub struct NoopConnections;
-#[async_trait]
+
 impl KickConnections for NoopConnections {
 	fn kick_user(&self, _user: &UserId) -> usize {
 		0
@@ -183,7 +182,7 @@ impl KickConnections for NoopConnections {
 	}
 }
 
-#[async_trait]
+
 impl KickConnections for ConnectionTracker {
 	fn kick_user(&self, user: &UserId) -> usize {
 		self.kick_user(user)
