@@ -6,6 +6,7 @@
 
 use std::sync::Arc;
 
+use wind_acme;
 use wind_core::{ActiveConnections, App, AppContext, InboundHooks, Plugin, StaticTuicAuth, StatsCollector, utils::StackPrefer};
 use wind_tuic::quinn::inbound::{TuicInbound, TuicInboundOpts};
 
@@ -102,14 +103,60 @@ impl Plugin for TuicServerPlugin {
 				let cert_path = cfg.tls.certificate.clone();
 				let key_path = cfg.tls.private_key.clone();
 				let alpn = cfg.tls.alpn.clone();
+				let auto_ssl = cfg.tls.auto_ssl;
+				let acme_staging = cfg.tls.acme_staging;
+				let acme_email = cfg.tls.acme_email.clone();
 				let masquerade_enabled = cfg.masquerade.enabled;
 				let masquerade_upstream = cfg.masquerade.upstream.clone();
 
-				app = app.add_inbound_with(move |hooks: InboundHooks, ctx: Arc<AppContext>| {
-					let (certs, key) = if tls_self_sign {
-						generate_self_signed(&hostname).expect("self-signed cert generation")
+				// ACME: obtain cert resolver outside the non-async closure so we can
+				// call the async `start_acme`.  The resolver is passed into the
+				// closure via `cert_resolver`; the `certificate`/`private_key` fields
+				// are set to placeholders — `create_server_config` uses the resolver
+				// when it is `Some`, bypassing the file-based cert path entirely.
+				let cert_resolver: Option<std::sync::Arc<dyn rustls::server::ResolvesServerCert>> =
+					if auto_ssl && !tls_self_sign {
+						match wind_acme::start_acme(
+							app.context().token.child_token(),
+							&hostname,
+							&acme_email,
+							&cfg.data_dir,
+							!acme_staging,
+						)
+						.await
+						{
+							Ok(resolver) => {
+								tracing::info!("[acme] certificate resolver ready for {hostname}");
+								Some(resolver)
+							}
+							Err(e) => {
+								tracing::error!("[acme] failed to start ACME for {hostname}: {e:#}");
+								return app;
+							}
+						}
 					} else {
-						load_cert_from_files(&cert_path, &key_path).expect("loading TLS cert/key from files")
+						None
+					};
+
+				app = app.add_inbound_with(move |hooks: InboundHooks, ctx: Arc<AppContext>| {
+					let (certs, key) = if cert_resolver.is_some() {
+						// ACME handles cert provisioning; placeholder values that are
+						// never read (create_server_config gates on cert_resolver).
+						(
+							vec![],
+							rustls::pki_types::PrivateKeyDer::Pkcs8(rustls::pki_types::PrivatePkcs8KeyDer::from(vec![])),
+						)
+					} else if tls_self_sign {
+						generate_self_signed(&hostname)
+							.unwrap_or_else(|e| panic!("self-signed cert generation for {hostname}: {e}"))
+					} else {
+						load_cert_from_files(&cert_path, &key_path).unwrap_or_else(|e| {
+							panic!(
+								"loading TLS cert/key from {} / {}: {e}",
+								cert_path.display(),
+								key_path.display()
+							)
+						})
 					};
 					let opts = TuicInboundOpts {
 						hooks,
@@ -117,7 +164,7 @@ impl Plugin for TuicServerPlugin {
 						listen_addr: server,
 						certificate: certs,
 						private_key: key,
-						cert_resolver: None,
+						cert_resolver: cert_resolver.clone(),
 						alpn,
 						users: Default::default(),
 						auth_timeout,
@@ -155,6 +202,9 @@ impl Plugin for TuicServerPlugin {
 					let hostname = cfg.tls.hostname.clone();
 					let cert_path = cfg.tls.certificate.clone();
 					let key_path = cfg.tls.private_key.clone();
+					let auto_ssl = cfg.tls.auto_ssl;
+					let acme_staging = cfg.tls.acme_staging;
+					let acme_email = cfg.tls.acme_email.clone();
 					let masquerade_enabled = cfg.masquerade.enabled;
 					let masquerade_upstream = cfg.masquerade.upstream.clone();
 					let users = cfg.users.clone();
@@ -176,24 +226,64 @@ impl Plugin for TuicServerPlugin {
 						..Default::default()
 					};
 
+					// ACME: provision cert to disk via HTTP-01 so the file-based
+					// quiche backend can consume it.
+					if auto_ssl && !tls_self_sign {
+						match wind_acme::http01::ensure_acme_cert(
+							&hostname,
+							if acme_email.is_empty() { None } else { Some(&acme_email) },
+							&cert_path,
+							&key_path,
+							acme_staging,
+						)
+						.await
+						{
+							Ok(()) => {
+								tracing::info!("[acme] certificate provisioned for {hostname}");
+							}
+							Err(e) => {
+								tracing::error!("[acme] failed to provision certificate for {hostname}: {e:#}");
+								return app;
+							}
+						}
+					}
+
 					let quiche_dir = std::env::temp_dir().join("tuic-server-quiche");
-					std::fs::create_dir_all(&quiche_dir).expect("create quiche temp cert dir");
+					std::fs::create_dir_all(&quiche_dir)
+						.unwrap_or_else(|e| panic!("create quiche temp cert dir {}: {e}", quiche_dir.display()));
 					let quiche_cert_path = quiche_dir.join("cert.pem");
 					let quiche_key_path = quiche_dir.join("key.pem");
 
 					if tls_self_sign {
-						let generated =
-							rcgen::generate_simple_self_signed(vec![hostname]).expect("quiche self-signed cert generation");
-						std::fs::write(&quiche_cert_path, generated.cert.pem()).expect("write quiche cert.pem");
-						std::fs::write(&quiche_key_path, generated.signing_key.serialize_pem()).expect("write quiche key.pem");
+						let generated = rcgen::generate_simple_self_signed(vec![hostname.clone()])
+							.unwrap_or_else(|e| panic!("quiche self-signed cert generation for {hostname}: {e}"));
+						std::fs::write(&quiche_cert_path, generated.cert.pem())
+							.unwrap_or_else(|e| panic!("write quiche cert.pem to {}: {e}", quiche_cert_path.display()));
+						std::fs::write(&quiche_key_path, generated.signing_key.serialize_pem())
+							.unwrap_or_else(|e| panic!("write quiche key.pem to {}: {e}", quiche_key_path.display()));
 					} else {
-						std::fs::copy(&cert_path, &quiche_cert_path).expect("copy quiche cert");
-						std::fs::copy(&key_path, &quiche_key_path).expect("copy quiche key");
+						std::fs::copy(&cert_path, &quiche_cert_path).unwrap_or_else(|e| {
+							panic!(
+								"copy quiche cert from {} to {}: {e}",
+								cert_path.display(),
+								quiche_cert_path.display()
+							)
+						});
+						std::fs::copy(&key_path, &quiche_key_path).unwrap_or_else(|e| {
+							panic!(
+								"copy quiche key from {} to {}: {e}",
+								key_path.display(),
+								quiche_key_path.display()
+							)
+						});
 					}
 
-					let cert_pem = std::fs::read(&quiche_cert_path).expect("read quiche cert.pem");
-					let key_pem = std::fs::read(&quiche_key_path).expect("read quiche key.pem");
-					let cert_store = CertStore::from_pem(&cert_pem, &key_pem).expect("create quiche cert store");
+					let cert_pem = std::fs::read(&quiche_cert_path)
+						.unwrap_or_else(|e| panic!("read quiche cert.pem {}: {e}", quiche_cert_path.display()));
+					let key_pem = std::fs::read(&quiche_key_path)
+						.unwrap_or_else(|e| panic!("read quiche key.pem {}: {e}", quiche_key_path.display()));
+					let cert_store =
+						CertStore::from_pem(&cert_pem, &key_pem).unwrap_or_else(|e| panic!("create quiche cert store: {e}"));
 
 					let quiche_cert_path_s = quiche_cert_path.to_string_lossy().into_owned();
 					let quiche_key_path_s = quiche_key_path.to_string_lossy().into_owned();

@@ -31,7 +31,7 @@ wind-base = { path = "../wind/crates/wind-base" }
 wind-dns = { path = "../wind/crates/wind-dns" }
 wind-socks = { path = "../wind/crates/wind-socks" }
 wind-tuic = { path = "../wind/crates/wind-tuic", features = ["server"] }
-wind-acme = { path = "../wind/crates/wind-acme" }
+wind-acme = { path = "../wind/crates/wind-acme", features = ["http01"] }
 wind-acl = { path = "../wind/crates/wind-acl" }
 wind-geodata = { path = "../wind/crates/wind-geodata" }
 
