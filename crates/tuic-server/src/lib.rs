@@ -21,5 +21,5 @@ use wind_core::App;
 /// Constructs a wind [`App`], registers the [`TuicServerPlugin`], and drives
 /// it until Ctrl-C / SIGTERM.
 pub async fn run(cfg: Config) -> eyre::Result<()> {
-	App::new().add_plugin(TuicServerPlugin::new(cfg)).run().await
+	App::new().add_plugin(TuicServerPlugin::new(cfg)).await.run().await
 }
