@@ -1053,6 +1053,17 @@ pub async fn parse_config(cli: Cli, env_state: EnvState) -> eyre::Result<Config>
 		config.tls.private_key.clone()
 	};
 
+	// Validate TLS cert/key files exist when they are required (not self-sign,
+	// not ACME — ACME provisions them at runtime).
+	if !config.tls.self_sign && !config.tls.auto_ssl {
+		if !config.tls.certificate.as_os_str().is_empty() && !tokio::fs::try_exists(&config.tls.certificate).await? {
+			eyre::bail!("TLS certificate file not found: {}", config.tls.certificate.display());
+		}
+		if !config.tls.private_key.as_os_str().is_empty() && !tokio::fs::try_exists(&config.tls.private_key).await? {
+			eyre::bail!("TLS private key file not found: {}", config.tls.private_key.display());
+		}
+	}
+
 	Ok(config)
 }
 
@@ -1125,6 +1136,12 @@ mod tests {
 	async fn test_json_config() {
 		let config = include_str!("../tests/config/json_config.json");
 
+		// Create dummy cert/key files referenced by the test config.
+		let data_dir = std::path::Path::new("__test__legacy_data");
+		let _ = std::fs::create_dir_all(data_dir);
+		let _ = std::fs::write(data_dir.join("old_cert.pem"), b"dummy");
+		let _ = std::fs::write(data_dir.join("old_key.pem"), b"dummy");
+
 		let result = test_parse_config(config, ".json").await.unwrap();
 
 		assert_eq!(result.log_level, LogLevel::Error);
@@ -1144,6 +1161,12 @@ mod tests {
 	#[tokio::test]
 	async fn test_path_handling() {
 		let config = include_str!("../tests/config/path_handling.toml");
+
+		// Create dummy cert/key files referenced by the test config.
+		let certs_dir = std::path::Path::new("__test__relative_path").join("certs");
+		let _ = std::fs::create_dir_all(&certs_dir);
+		let _ = std::fs::write(certs_dir.join("server.crt"), b"dummy");
+		let _ = std::fs::write(certs_dir.join("server.key"), b"dummy");
 
 		let result = test_parse_config(config, ".toml").await.unwrap();
 
@@ -1635,10 +1658,18 @@ send_window = 12345678
 		// Test that JSON5 parser can handle standard JSON
 		let config = include_str!("../tests/config/json5_backward_compatibility.json5");
 
+		// Create dummy cert/key files referenced by the test config (no data_dir,
+		// so paths resolve relative to CWD).
+		let _ = std::fs::write("cert.pem", b"dummy");
+		let _ = std::fs::write("key.pem", b"dummy");
+
 		let result = test_parse_config(config, ".json5").await.unwrap();
 		assert_eq!(result.log_level, LogLevel::Error);
 		assert_eq!(result.server, "192.168.1.1:8443".parse::<SocketAddr>().unwrap());
 		assert!(!result.tls.self_sign);
+
+		let _ = std::fs::remove_file("cert.pem");
+		let _ = std::fs::remove_file("key.pem");
 	}
 	#[tokio::test]
 	async fn test_dir_parameter_finds_config() {

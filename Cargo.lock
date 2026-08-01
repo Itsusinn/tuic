@@ -1896,6 +1896,8 @@ dependencies = [
  "hyper",
  "hyper-util",
  "rustls",
+ "rustls-native-certs",
+ "rustls-platform-verifier",
  "tokio",
  "tokio-rustls",
  "tower-service",
@@ -2105,6 +2107,32 @@ name = "inlinable_string"
 version = "0.1.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c8fae54786f62fb2918dcfae3d568594e50eb9b5c25bf04371af6fe7516452fb"
+
+[[package]]
+name = "instant-acme"
+version = "0.8.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9f05ad37c421b962354c358d347d4a6130151df9407978372d3ad7f0c8f71a64"
+dependencies = [
+ "async-trait",
+ "aws-lc-rs",
+ "base64",
+ "bytes",
+ "http",
+ "http-body",
+ "http-body-util",
+ "httpdate",
+ "hyper",
+ "hyper-rustls",
+ "hyper-util",
+ "rcgen 0.14.8",
+ "rustls",
+ "rustls-pki-types",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.19",
+ "tokio",
+]
 
 [[package]]
 name = "intrusive-collections"
@@ -5435,12 +5463,16 @@ dependencies = [
  "async-trait",
  "axum",
  "eyre",
+ "instant-acme",
+ "rcgen 0.14.8",
  "rustls",
  "rustls-acme",
+ "time",
  "tokio",
  "tokio-stream",
  "tokio-util",
  "tracing",
+ "x509-parser 0.18.1",
 ]
 
 [[package]]
