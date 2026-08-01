@@ -159,6 +159,15 @@ pub struct Relay {
 	#[educe(Default(expression = Duration::from_secs(30)))]
 	#[serde(with = "humantime_serde")]
 	pub reconnect_max_backoff: Duration,
+
+	/// Defer the QUIC connection establishment until the first actual
+	/// traffic arrives.  When `false` (eager), the connection is
+	/// established immediately at startup and the process exits on
+	/// failure.  Defaults to `true` (matching v1.8.11 `startup_mode =
+	/// "lazy"`).
+	#[educe(Default = true)]
+	#[serde(default)]
+	pub lazy: bool,
 }
 
 #[derive(Debug, Deserialize, serde::Serialize, Educe, Clone, PartialEq, Eq)]

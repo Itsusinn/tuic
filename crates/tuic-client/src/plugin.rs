@@ -5,11 +5,11 @@
 
 use std::sync::Arc;
 
-use wind_core::{AbstractOutbound, App, AppContext, InboundHooks, OutboundAction, Plugin, types::TargetAddr, udp::UdpStream};
+use wind_base::LazyOutbound;
+use wind_core::{App, AppContext, InboundHooks, Plugin, dispatcher::OutboundAsAction};
 use wind_socks::inbound::{AuthMode, SocksInbound, SocksInboundOpt};
 
 use crate::{
-	shared::SharedOutbound,
 	tunnel::{TunnelTcpInbound, TunnelUdpInbound},
 	wind_adapter::TuicOutboundAdapter,
 };
@@ -18,28 +18,8 @@ use crate::{
 struct ClientRouter;
 
 impl wind_core::Router for ClientRouter {
-	async fn route(&self, _target: &TargetAddr, _is_tcp: bool) -> eyre::Result<wind_core::RouteAction> {
+	async fn route(&self, _target: &wind_core::types::TargetAddr, _is_tcp: bool) -> eyre::Result<wind_core::RouteAction> {
 		Ok(wind_core::RouteAction::Forward("default".to_string()))
-	}
-}
-
-/// [`OutboundAction`] adapter that lazily resolves a [`SharedOutbound`].
-struct LazyHandler {
-	shared: Arc<SharedOutbound>,
-}
-
-#[async_trait::async_trait]
-impl OutboundAction for LazyHandler {
-	async fn handle_tcp(&self, target: TargetAddr, stream: Box<dyn wind_core::tcp::AbstractTcpStream>) -> eyre::Result<()> {
-		let out = self.shared.get().await?;
-		out.handle_tcp(target, stream, Option::<crate::wind_adapter::TuicOutboundAdapter>::None)
-			.await
-	}
-
-	async fn handle_udp(&self, stream: UdpStream) -> eyre::Result<()> {
-		let out = self.shared.get().await?;
-		out.handle_udp(stream, Option::<crate::wind_adapter::TuicOutboundAdapter>::None)
-			.await
 	}
 }
 
@@ -55,33 +35,31 @@ impl TuicClientPlugin {
 }
 
 impl Plugin for TuicClientPlugin {
-	fn build(self, app: App) -> App {
-		// Shared outbound handle
-		let shared = SharedOutbound::new();
-
-		// Spawn outbound connection setup (async) as a tracked task.
+	async fn build(self, app: App) -> App {
 		let ctx = app.context().clone();
-		let relay = self.cfg.relay.clone();
-		let shared_for_task = shared.clone();
-		let setup_ctx = ctx.clone();
-		ctx.tasks.spawn(async move {
-			match TuicOutboundAdapter::new(setup_ctx, relay).await {
-				Ok(adapter) => shared_for_task.set(adapter),
-				Err(e) => {
-					tracing::error!("Failed to create TUIC outbound: {e}");
-				}
-			}
-		});
+		let relay = self.cfg.relay;
+		let lazy = relay.lazy;
 
-		// Outbound handler
-		let handler = Arc::new(LazyHandler { shared: shared.clone() });
+		let handler: Arc<dyn wind_core::OutboundAction> = if lazy {
+			// Lazy mode: defer QUIC connection until first traffic.
+			let setup_ctx = ctx.clone();
+			Arc::new(LazyOutbound::new(Box::pin(async move {
+				let adapter = TuicOutboundAdapter::new(setup_ctx, relay).await?;
+				Ok(Arc::new(OutboundAsAction { inner: adapter }) as Arc<dyn wind_core::OutboundAction>)
+			})))
+		} else {
+			// Eager mode: establish the QUIC connection immediately.
+			let adapter = TuicOutboundAdapter::new(ctx.clone(), relay)
+				.await
+				.expect("TUIC outbound setup failed in eager mode");
+			Arc::new(OutboundAsAction { inner: adapter })
+		};
+
 		let app = app.add_outbound("default", handler);
-
-		// Router
 		let app = app.set_router(ClientRouter);
 
 		// SOCKS5 inbound
-		let local = self.cfg.local.clone();
+		let local = self.cfg.local;
 		let auth = match (&local.username, &local.password) {
 			(Some(u), Some(p)) => AuthMode::Password {
 				username: String::from_utf8_lossy(u).into_owned(),

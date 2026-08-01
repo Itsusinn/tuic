@@ -27,7 +27,7 @@ impl TuicServerPlugin {
 }
 
 impl Plugin for TuicServerPlugin {
-	fn build(self, app: App) -> App {
+	async fn build(self, app: App) -> App {
 		let mut cfg = self.cfg;
 
 		// DNS resolver
