@@ -29,7 +29,6 @@ use wind_core::{
 	hooks::{ConnInfo, ConnectDecision, ConnectionHooks},
 };
 
-
 /// Per-connection metadata stored by [`ConnectionTracker`].
 struct ConnMeta {
 	user: UserId,
