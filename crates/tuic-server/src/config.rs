@@ -456,15 +456,19 @@ pub struct OutboundRule {
 	#[educe(Default(expression = Some(StackPrefer::V4first)))]
 	pub ip_mode: Option<StackPrefer>,
 
-	/// Optional IPv4 address to bind to for direct connections (only used when
+	/// Optional IPv4 address(es) to bind to for direct connections (only used when
 	/// kind == "direct"). Accepts a single address or an array of addresses
-	/// (v1.8.11 compatibility); the first entry is used.
+	/// (v1.8.11 compatibility). When multiple addresses are specified, a
+	/// round-robin load-balance outbound is created to distribute connections
+	/// across them.
 	#[serde(default, deserialize_with = "deserialize_single_or_vec")]
 	pub bind_ipv4: Vec<Ipv4Addr>,
 
-	/// Optional IPv6 address to bind to for direct connections (only used when
+	/// Optional IPv6 address(es) to bind to for direct connections (only used when
 	/// kind == "direct"). Accepts a single address or an array of addresses
-	/// (v1.8.11 compatibility); the first entry is used.
+	/// (v1.8.11 compatibility). When multiple addresses are specified, a
+	/// round-robin load-balance outbound is created to distribute connections
+	/// across them.
 	#[serde(default, deserialize_with = "deserialize_single_or_vec")]
 	pub bind_ipv6: Vec<Ipv6Addr>,
 
