@@ -20,10 +20,7 @@ use wind_base::{
 	load_balance::{LoadBalanceOpts, LoadBalanceOutbound, LoadBalanceStrategy},
 	resolve::resolve_target,
 };
-use wind_core::{
-	OutboundAction, RouteAction, Router, rule::Rule, types::TargetAddr,
-	utils::is_private_ip,
-};
+use wind_core::{OutboundAction, RouteAction, Router, rule::Rule, types::TargetAddr, utils::is_private_ip};
 use wind_geodata::GeoData;
 use wind_socks::action::{Socks5Action, Socks5ActionOpts};
 
