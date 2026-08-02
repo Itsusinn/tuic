@@ -142,11 +142,11 @@ async fn test_client_proxy_configuration() -> eyre::Result<()> {
 	let test_data = b"Hello through SOCKS5 proxy!";
 	let success = test_tcp_through_socks5(local_socks, echo_addr, test_data, "Proxy Test 1").await;
 
-	if success {
-		info!("[Proxy Config Test] ✓ Successfully connected through SOCKS5 proxy!");
-	} else {
-		info!("[Proxy Config Test] ⚠ Could not verify SOCKS5 proxy connectivity (may be expected)");
-	}
+	assert!(
+		success,
+		"TUIC client SOCKS5 proxy connectivity failed: TUIC client could not relay through the configured SOCKS5 proxy"
+	);
+	info!("[Proxy Config Test] ✓ Successfully connected through SOCKS5 proxy!");
 
 	echo_handle.abort();
 	client_handle.abort();
