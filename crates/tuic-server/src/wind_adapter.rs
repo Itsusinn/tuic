@@ -238,6 +238,21 @@ impl TuicRouter {
 	}
 }
 
+/// Load TLS certificate and private key from PEM files.
+pub fn load_cert_from_files(
+	cert_path: &std::path::Path,
+	key_path: &std::path::Path,
+) -> eyre::Result<(
+	Vec<rustls::pki_types::CertificateDer<'static>>,
+	rustls::pki_types::PrivateKeyDer<'static>,
+)> {
+	let cert_data = std::fs::read(cert_path)?;
+	let key_data = std::fs::read(key_path)?;
+	let certs = rustls_pemfile::certs(&mut cert_data.as_slice()).collect::<Result<Vec<_>, _>>()?;
+	let key = rustls_pemfile::private_key(&mut key_data.as_slice())?.ok_or_else(|| eyre::eyre!("No private key found"))?;
+	Ok((certs, key))
+}
+
 #[cfg(test)]
 mod tests {
 	use std::net::IpAddr;
@@ -485,19 +500,4 @@ mod tests {
 		let result = load_cert_from_files(&cert_path, &key_path);
 		assert!(result.is_err());
 	}
-}
-
-/// Load TLS certificate and private key from PEM files.
-pub fn load_cert_from_files(
-	cert_path: &std::path::Path,
-	key_path: &std::path::Path,
-) -> eyre::Result<(
-	Vec<rustls::pki_types::CertificateDer<'static>>,
-	rustls::pki_types::PrivateKeyDer<'static>,
-)> {
-	let cert_data = std::fs::read(cert_path)?;
-	let key_data = std::fs::read(key_path)?;
-	let certs = rustls_pemfile::certs(&mut cert_data.as_slice()).collect::<Result<Vec<_>, _>>()?;
-	let key = rustls_pemfile::private_key(&mut key_data.as_slice())?.ok_or_else(|| eyre::eyre!("No private key found"))?;
-	Ok((certs, key))
 }
