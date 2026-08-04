@@ -20,7 +20,7 @@ use wind_base::{
 	load_balance::{LoadBalanceOpts, LoadBalanceOutbound, LoadBalanceStrategy},
 	resolve::resolve_target,
 };
-use wind_core::{FlowContext, OutboundAction, RouteAction, Router, rule::Rule, utils::is_private_ip};
+use wind_core::{FlowContext, Outbound, RouteAction, Router, rule::Rule, utils::is_private_ip};
 use wind_geodata::GeoData;
 use wind_socks::action::{Socks5Action, Socks5ActionOpts};
 
@@ -46,7 +46,7 @@ impl wind_core::AbstractInbound for ServerInbound {
 	}
 }
 
-/// Build an [`OutboundAction`] for a single configured outbound rule.
+/// Build an [`Outbound`] for a single configured outbound rule.
 ///
 /// When `bind_ipv4` + `bind_ipv6` together contain **more than one** address
 /// (and `kind == "direct"`), the addresses are wrapped in a
@@ -56,7 +56,7 @@ pub fn make_outbound_action(
 	rule: &OutboundRule,
 	resolver: Arc<dyn wind_core::Resolver>,
 	stream_timeout: Duration,
-) -> Arc<dyn OutboundAction> {
+) -> Arc<dyn Outbound> {
 	match rule.kind.as_str() {
 		"socks5" => Arc::new(Socks5Action::new(Socks5ActionOpts {
 			addr: rule.addr.clone().unwrap_or_default(),
@@ -88,7 +88,7 @@ fn build_direct_or_lb(
 	rule: &OutboundRule,
 	resolver: Arc<dyn wind_core::Resolver>,
 	stream_timeout: Duration,
-) -> Arc<dyn OutboundAction> {
+) -> Arc<dyn Outbound> {
 	// Build the domain for each address family.  An empty family
 	// contributes a single [None] so the cartesian product still includes
 	// the other family's addresses.
@@ -119,14 +119,14 @@ fn build_direct_or_lb(
 	}
 
 	// Cartesian product: each (v4, v6) pair → one DirectOutbound.
-	let proxies: Vec<Arc<dyn OutboundAction>> = v4_opts
+	let proxies: Vec<Arc<dyn Outbound>> = v4_opts
 		.iter()
 		.flat_map(|v4| v6_opts.iter().map(move |v6| (*v4, *v6)))
 		.map(|(v4, v6)| {
 			Arc::new(DirectOutbound::new(
 				make_direct_opts(rule, stream_timeout, v4, v6),
 				resolver.clone(),
-			)) as Arc<dyn OutboundAction>
+			)) as Arc<dyn Outbound>
 		})
 		.collect();
 

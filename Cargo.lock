@@ -5562,6 +5562,7 @@ name = "wind-tuic"
 version = "0.2.0"
 dependencies = [
  "arc-swap",
+ "async-trait",
  "aws-lc-rs",
  "bytes",
  "crossfire",

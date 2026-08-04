@@ -26,7 +26,7 @@ use tokio::{
 	time::timeout,
 };
 use tuic_server::{Config, TuicServerPlugin};
-use wind_core::{AbstractOutbound, App, FlowContext, hooks::Protocol, rule::NetworkType, types::TargetAddr};
+use wind_core::{App, FlowContext, Outbound, hooks::Protocol, rule::NetworkType, types::TargetAddr};
 
 // ---------------------------------------------------------------------------
 // helpers
@@ -288,11 +288,7 @@ async fn drains_while_active_traffic_flows() {
 	let c = client.clone();
 	let _tunnel_handle = tokio::spawn(async move {
 		let _ = c
-			.handle_tcp(
-				test_ctx(&target),
-				remote,
-				Option::<wind_tuic::quinn::outbound::TuicOutbound>::None,
-			)
+			.handle_tcp(test_ctx(&target), Box::new(remote))
 			.await;
 	});
 
