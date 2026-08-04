@@ -20,7 +20,7 @@ use wind_base::{
 	load_balance::{LoadBalanceOpts, LoadBalanceOutbound, LoadBalanceStrategy},
 	resolve::resolve_target,
 };
-use wind_core::{OutboundAction, RouteAction, Router, rule::Rule, types::TargetAddr, utils::is_private_ip};
+use wind_core::{FlowContext, OutboundAction, RouteAction, Router, rule::Rule, utils::is_private_ip};
 use wind_geodata::GeoData;
 use wind_socks::action::{Socks5Action, Socks5ActionOpts};
 
@@ -208,18 +208,18 @@ impl TuicRouter {
 }
 
 impl Router for TuicRouter {
-	async fn route(&self, target: &TargetAddr, is_tcp: bool) -> eyre::Result<RouteAction> {
-		let span = tracing::debug_span!("route", target = %target, proto = if is_tcp { "tcp" } else { "udp" });
-		self.do_route(target, is_tcp).instrument(span).await
+	async fn route(&self, ctx: &FlowContext) -> eyre::Result<RouteAction> {
+		let span = tracing::debug_span!("route", target = %ctx.target, proto = if ctx.is_tcp() { "tcp" } else { "udp" });
+		self.do_route(ctx).instrument(span).await
 	}
 }
 
 impl TuicRouter {
-	async fn do_route(&self, target: &TargetAddr, is_tcp: bool) -> eyre::Result<RouteAction> {
+	async fn do_route(&self, ctx: &FlowContext) -> eyre::Result<RouteAction> {
 		let need_resolve = self.experimental.drop_loopback || self.experimental.drop_private;
 
 		if need_resolve {
-			let resolved = resolve_target(target, self.resolver.as_ref()).await?;
+			let resolved = resolve_target(&ctx.target, self.resolver.as_ref()).await?;
 			if self.experimental.drop_loopback && resolved.ip().is_loopback() {
 				tracing::debug!(resolved = %resolved, "dropping loopback connection");
 				return Ok(RouteAction::Reject(format!("loopback address rejected: {}", resolved)));
@@ -231,7 +231,7 @@ impl TuicRouter {
 		}
 
 		if let Some(acl_engine) = &self.acl_engine {
-			return acl_engine.route(target, is_tcp).await;
+			return acl_engine.route(ctx).await;
 		}
 
 		Ok(RouteAction::Forward("default".to_string()))

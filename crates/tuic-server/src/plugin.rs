@@ -299,6 +299,7 @@ impl Plugin for TuicServerPlugin {
 							}),
 							hooks,
 							active_for_inbound,
+							"tuic".into(),
 						))
 					});
 				}

@@ -7,7 +7,7 @@ use std::{net::SocketAddr, time::Duration};
 
 use tokio_util::sync::CancellationToken;
 use tuic_client::tunnel::{TunnelTcpInbound, TunnelUdpInbound};
-use wind_core::{AbstractInbound, InboundCallback, types::TargetAddr, udp::UdpStream};
+use wind_core::{AbstractInbound, FlowContext, InboundCallback, udp::UdpStream};
 
 fn free_tcp_addr() -> SocketAddr {
 	let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
@@ -30,13 +30,13 @@ struct NoopCallback;
 impl InboundCallback for NoopCallback {
 	async fn handle_tcpstream(
 		&self,
-		_target_addr: TargetAddr,
+		_ctx: FlowContext,
 		_stream: impl wind_core::tcp::AbstractTcpStream + 'static,
 	) -> eyre::Result<()> {
 		Ok(())
 	}
 
-	async fn handle_udpstream(&self, _udp_stream: UdpStream) -> eyre::Result<()> {
+	async fn handle_udpstream(&self, _ctx: FlowContext, _udp_stream: UdpStream) -> eyre::Result<()> {
 		Ok(())
 	}
 }

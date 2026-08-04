@@ -24,7 +24,7 @@ use rustls::{
 	client::danger::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier},
 	pki_types::{CertificateDer, ServerName, UnixTime},
 };
-use wind_core::{AbstractInbound, InboundCallback, tcp::AbstractTcpStream, types::TargetAddr, udp::UdpStream};
+use wind_core::{AbstractInbound, FlowContext, InboundCallback, tcp::AbstractTcpStream, udp::UdpStream};
 use wind_tuic::quiche::TuicheInboundBuilder;
 
 // ---- a no-op inbound callback (TLS handshake is all we need) --------------
@@ -33,11 +33,11 @@ use wind_tuic::quiche::TuicheInboundBuilder;
 struct NoopCallback;
 
 impl InboundCallback for NoopCallback {
-	async fn handle_tcpstream(&self, _addr: TargetAddr, _stream: impl AbstractTcpStream + 'static) -> eyre::Result<()> {
+	async fn handle_tcpstream(&self, _ctx: FlowContext, _stream: impl AbstractTcpStream + 'static) -> eyre::Result<()> {
 		Ok(())
 	}
 
-	async fn handle_udpstream(&self, _udp_stream: UdpStream) -> eyre::Result<()> {
+	async fn handle_udpstream(&self, _ctx: FlowContext, _udp_stream: UdpStream) -> eyre::Result<()> {
 		Ok(())
 	}
 }
