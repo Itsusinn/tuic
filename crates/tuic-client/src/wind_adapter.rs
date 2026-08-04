@@ -6,7 +6,7 @@
 
 use std::{net::SocketAddr, sync::Arc};
 
-use wind_core::{AbstractOutbound, AppContext, tcp::AbstractTcpStream, types::TargetAddr, udp::UdpStream};
+use wind_core::{AbstractOutbound, AppContext, FlowContext, tcp::AbstractTcpStream, udp::UdpStream};
 use wind_tuic::quinn::outbound::{ReconnectConfig, TuicOutbound, TuicOutboundOpts};
 
 use crate::config::Relay;
@@ -81,14 +81,19 @@ impl TuicOutboundAdapter {
 impl AbstractOutbound for TuicOutboundAdapter {
 	async fn handle_tcp(
 		&self,
-		target_addr: TargetAddr,
+		ctx: FlowContext,
 		stream: impl AbstractTcpStream,
 		_via: Option<impl AbstractOutbound + Sized + Send>,
 	) -> eyre::Result<()> {
-		self.outbound.handle_tcp(target_addr, stream, Option::<Self>::None).await
+		self.outbound.handle_tcp(ctx, stream, Option::<Self>::None).await
 	}
 
-	async fn handle_udp(&self, udp_stream: UdpStream, _via: Option<impl AbstractOutbound + Sized + Send>) -> eyre::Result<()> {
-		self.outbound.handle_udp(udp_stream, Option::<Self>::None).await
+	async fn handle_udp(
+		&self,
+		ctx: FlowContext,
+		udp_stream: UdpStream,
+		_via: Option<impl AbstractOutbound + Sized + Send>,
+	) -> eyre::Result<()> {
+		self.outbound.handle_udp(ctx, udp_stream, Option::<Self>::None).await
 	}
 }

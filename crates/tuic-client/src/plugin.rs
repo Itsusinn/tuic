@@ -18,7 +18,7 @@ use crate::{
 struct ClientRouter;
 
 impl wind_core::Router for ClientRouter {
-	async fn route(&self, _target: &wind_core::types::TargetAddr, _is_tcp: bool) -> eyre::Result<wind_core::RouteAction> {
+	async fn route(&self, _ctx: &wind_core::FlowContext) -> eyre::Result<wind_core::RouteAction> {
 		Ok(wind_core::RouteAction::Forward("default".to_string()))
 	}
 }
@@ -76,6 +76,7 @@ impl Plugin for TuicClientPlugin {
 				auth,
 				skip_auth: false,
 				allow_udp: true,
+				inbound_tag: "socks-local".into(),
 				hooks,
 			};
 			SocksInbound::new(opts, ctx.token.clone())

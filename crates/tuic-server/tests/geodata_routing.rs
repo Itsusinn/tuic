@@ -8,11 +8,30 @@ use std::{net::Ipv4Addr, sync::Arc};
 
 use geosite_rs::{Cidr, GeoIp, GeoIpList, GeoSiteList, encode_geoip, encode_geosite};
 use wind_acl::AclEngine;
-use wind_core::{RouteAction, Router, rule::Rule, types::TargetAddr};
+use wind_core::{
+	FlowContext, RouteAction, Router,
+	hooks::Protocol,
+	rule::{NetworkType, Rule},
+	types::TargetAddr,
+};
 use wind_geodata::GeoData;
 
 fn ipv4(addr: &str, port: u16) -> TargetAddr {
 	TargetAddr::IPv4(addr.parse::<Ipv4Addr>().unwrap(), port)
+}
+
+/// Minimal context for a plain TCP connection with no client metadata.
+fn fc(target: &TargetAddr) -> FlowContext {
+	FlowContext {
+		target: target.clone(),
+		network: NetworkType::Tcp,
+		source: None,
+		inbound_tag: "tuic-test".into(),
+		protocol: Protocol::Tuic,
+		user: None,
+		inbound_port: None,
+		inbound_type: None,
+	}
 }
 
 /// Build a geodata cache whose CN block is 1.2.3.0/24 (empty geosite).
@@ -46,14 +65,14 @@ async fn geoip_rule_routes_through_the_server_engine() {
 		.unwrap();
 
 	// 1.2.3.4 is in the CN block → rejected.
-	let cn = engine.route(&ipv4("1.2.3.4", 443), true).await.unwrap();
+	let cn = engine.route(&fc(&ipv4("1.2.3.4", 443))).await.unwrap();
 	assert!(
 		matches!(cn, RouteAction::Reject(_)),
 		"CN IP should be rejected by GEOIP,CN,reject"
 	);
 
 	// 9.9.9.9 is outside CN → falls through to the default outbound.
-	let other = engine.route(&ipv4("9.9.9.9", 443), true).await.unwrap();
+	let other = engine.route(&fc(&ipv4("9.9.9.9", 443))).await.unwrap();
 	assert!(
 		matches!(other, RouteAction::Forward(o) if o == "direct"),
 		"non-CN IP should reach the default outbound"
@@ -70,7 +89,7 @@ async fn geoip_rule_is_noop_without_geodata() {
 		.build()
 		.unwrap();
 
-	let cn = engine.route(&ipv4("1.2.3.4", 443), true).await.unwrap();
+	let cn = engine.route(&fc(&ipv4("1.2.3.4", 443))).await.unwrap();
 	assert!(
 		matches!(cn, RouteAction::Forward(o) if o == "direct"),
 		"without geodata the GEOIP rule must not match"

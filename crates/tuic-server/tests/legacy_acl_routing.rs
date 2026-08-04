@@ -11,10 +11,29 @@
 use std::net::Ipv4Addr;
 
 use tuic_server::legacy::{acl_to_rules, parse_multiline_acl_string};
-use wind_core::{AclRouter, RouteAction, Router, rule::Rule, types::TargetAddr};
+use wind_core::{
+	AclRouter, FlowContext, RouteAction, Router,
+	hooks::Protocol,
+	rule::{NetworkType, Rule},
+	types::TargetAddr,
+};
 
 fn ipv4(addr: &str, port: u16) -> TargetAddr {
 	TargetAddr::IPv4(addr.parse::<Ipv4Addr>().unwrap(), port)
+}
+
+/// Minimal context; the `tcp` flag selects the network type.
+fn fc(target: &TargetAddr, tcp: bool) -> FlowContext {
+	FlowContext {
+		target: target.clone(),
+		network: if tcp { NetworkType::Tcp } else { NetworkType::Udp },
+		source: None,
+		inbound_tag: "tuic-test".into(),
+		protocol: Protocol::Tuic,
+		user: None,
+		inbound_port: None,
+		inbound_type: None,
+	}
 }
 
 fn forwarded(action: &RouteAction) -> Option<&str> {
@@ -32,15 +51,15 @@ async fn legacy_acl_compiles_and_matches() {
 	let router = AclRouter::new(acl_to_rules(&acl), "direct");
 
 	// Private destination → rejected by the first ACL rule.
-	let priv_action = router.route(&ipv4("192.168.1.5", 1234), true).await.unwrap();
+	let priv_action = router.route(&fc(&ipv4("192.168.1.5", 1234), true)).await.unwrap();
 	assert!(matches!(priv_action, RouteAction::Reject(_)));
 
 	// 1.1.1.1:443/tcp → proxy.
-	let proxy_action = router.route(&ipv4("1.1.1.1", 443), true).await.unwrap();
+	let proxy_action = router.route(&fc(&ipv4("1.1.1.1", 443), true)).await.unwrap();
 	assert_eq!(forwarded(&proxy_action), Some("proxy"));
 
 	// 1.1.1.1:443/udp → no ACL match (tcp-only), falls through to default.
-	let udp_action = router.route(&ipv4("1.1.1.1", 443), false).await.unwrap();
+	let udp_action = router.route(&fc(&ipv4("1.1.1.1", 443), false)).await.unwrap();
 	assert_eq!(forwarded(&udp_action), Some("direct"));
 }
 
@@ -55,6 +74,6 @@ async fn legacy_acl_rules_precede_clash_rules() {
 	let rules: Vec<Rule> = acl_to_rules(&acl).into_iter().chain(std::iter::once(clash)).collect();
 	let router = AclRouter::new(rules, "direct");
 
-	let action = router.route(&ipv4("1.1.1.1", 443), true).await.unwrap();
+	let action = router.route(&fc(&ipv4("1.1.1.1", 443), true)).await.unwrap();
 	assert_eq!(forwarded(&action), Some("aclwin"));
 }

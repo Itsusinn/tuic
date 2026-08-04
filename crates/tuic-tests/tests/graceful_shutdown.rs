@@ -26,11 +26,25 @@ use tokio::{
 	time::timeout,
 };
 use tuic_server::{Config, TuicServerPlugin};
-use wind_core::{AbstractOutbound, App, types::TargetAddr};
+use wind_core::{AbstractOutbound, App, FlowContext, hooks::Protocol, rule::NetworkType, types::TargetAddr};
 
 // ---------------------------------------------------------------------------
 // helpers
 // ---------------------------------------------------------------------------
+
+/// Minimal context for driving the client outbound directly.
+fn test_ctx(target: &TargetAddr) -> FlowContext {
+	FlowContext {
+		target: target.clone(),
+		network: NetworkType::Tcp,
+		source: None,
+		inbound_tag: "tuic-test".into(),
+		protocol: Protocol::Tuic,
+		user: None,
+		inbound_port: None,
+		inbound_type: None,
+	}
+}
 
 /// Obtain a free UDP port without holding the socket, so the server can bind
 /// it immediately afterwards.
@@ -274,7 +288,11 @@ async fn drains_while_active_traffic_flows() {
 	let c = client.clone();
 	let _tunnel_handle = tokio::spawn(async move {
 		let _ = c
-			.handle_tcp(target, remote, Option::<wind_tuic::quinn::outbound::TuicOutbound>::None)
+			.handle_tcp(
+				test_ctx(&target),
+				remote,
+				Option::<wind_tuic::quinn::outbound::TuicOutbound>::None,
+			)
 			.await;
 	});
 
