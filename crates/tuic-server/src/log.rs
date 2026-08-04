@@ -165,7 +165,7 @@ mod tests {
 		let mut b = Vec::<u8>::new();
 		let mut tee = TeeWriter { a: &mut a, b: &mut b };
 
-		tee.write(b"data").unwrap();
+		tee.write_all(b"data").unwrap();
 		tee.flush().unwrap();
 		assert!(!a.is_empty());
 		assert!(!b.is_empty());
