@@ -22,7 +22,7 @@ use wind_base::{
 };
 use wind_core::{FlowContext, Outbound, RouteAction, Router, rule::Rule, utils::is_private_ip};
 use wind_geodata::GeoData;
-use wind_socks::action::{Socks5Action, Socks5ActionOpts};
+use wind_socks::action::{SocksOutbound, SocksOutboundOpts};
 
 use crate::{
 	config::{ExperimentalConfig, OutboundRule},
@@ -58,7 +58,7 @@ pub fn make_outbound_action(
 	stream_timeout: Duration,
 ) -> Arc<dyn Outbound> {
 	match rule.kind.as_str() {
-		"socks5" => Arc::new(Socks5Action::new(Socks5ActionOpts {
+		"socks5" => Arc::new(SocksOutbound::new(SocksOutboundOpts {
 			addr: rule.addr.clone().unwrap_or_default(),
 			username: rule.username.clone(),
 			password: rule.password.clone(),
