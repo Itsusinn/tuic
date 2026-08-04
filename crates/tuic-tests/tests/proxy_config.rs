@@ -66,6 +66,13 @@ async fn test_client_proxy_configuration() -> eyre::Result<()> {
 		udp_relay_ipv6: true,
 		zero_rtt_handshake: false,
 		dual_stack: false,
+		// Echo servers run on 127.0.0.1, so loopback must be allowed (the
+		// `drop_loopback`/`drop_private` defaults would reject the relay target
+		// before the ACL is consulted).
+		experimental: ExperimentalConfig {
+			drop_loopback: false,
+			drop_private: false,
+		},
 		max_external_packet_size: 1500,
 		stream_timeout: Duration::from_secs(60),
 		outbound: tuic_server::config::OutboundConfig::default(),
