@@ -3270,7 +3270,7 @@ dependencies = [
 [[package]]
 name = "quinn-congestions"
 version = "0.1.0"
-source = "git+https://github.com/proxy-rs/quinn-congestions.git#801e92f879c0f09918fed5ceb7aa6bbd754bc7e3"
+source = "git+https://github.com/proxy-rs/quinn-congestions.git#ed4e3f17c8639828c91848a80f9acfc3598c5a3e"
 dependencies = [
  "quinn 0.12.0",
  "quinn-proto 0.12.0",
