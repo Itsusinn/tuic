@@ -21,7 +21,7 @@ pub fn init(config: &Config) -> Result<LogGuards> {
 
 	let filter = tracing_subscriber::filter::Targets::new()
 		.with_targets(vec![
-			("tuic_core", LevelFilter::from(config.log_level)),
+			("wind_tuic", LevelFilter::from(config.log_level)),
 			("tuic_server", LevelFilter::from(config.log_level)),
 			("wind_core", LevelFilter::from(config.log_level)),
 			("wind_tuic", LevelFilter::from(config.log_level)),

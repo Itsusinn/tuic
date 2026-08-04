@@ -38,7 +38,7 @@ async fn main() -> eyre::Result<()> {
 	let filter = tracing_subscriber::filter::Targets::new()
 		.with_targets(vec![
 			("tuic_client", level),
-			("tuic_core", level),
+			("wind_tuic", level),
 			("tuic_out", level),
 			("udp", level),
 			("wind_core", level),
