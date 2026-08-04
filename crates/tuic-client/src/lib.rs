@@ -9,7 +9,6 @@ pub mod config;
 pub mod plugin;
 pub mod tunnel;
 pub mod utils;
-pub mod wind_adapter;
 
 pub use config::Config;
 pub use plugin::TuicClientPlugin;

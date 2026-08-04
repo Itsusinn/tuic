@@ -3,15 +3,16 @@
 //! Creates a TUIC outbound connection, SOCKS5 inbound (via wind-socks),
 //! tunnel inbounds, and wires them together through App/Plugin builder.
 
-use std::sync::Arc;
+use std::{net::SocketAddr, sync::Arc};
 
 use wind_base::LazyOutbound;
-use wind_core::{App, AppContext, InboundHooks, Plugin, dispatcher::OutboundAsAction};
+use wind_core::{App, AppContext, InboundHooks, Outbound, Plugin};
 use wind_socks::inbound::{AuthMode, SocksInbound, SocksInboundOpt};
+use wind_tuic::quinn::outbound::{ReconnectConfig, TuicOutbound, TuicOutboundOpts};
 
 use crate::{
+	config::Relay,
 	tunnel::{TunnelTcpInbound, TunnelUdpInbound},
-	wind_adapter::TuicOutboundAdapter,
 };
 
 /// Simple router: everything goes to the TUIC outbound.
@@ -21,6 +22,70 @@ impl wind_core::Router for ClientRouter {
 	async fn route(&self, _ctx: &wind_core::FlowContext) -> eyre::Result<wind_core::RouteAction> {
 		Ok(wind_core::RouteAction::Forward("default".to_string()))
 	}
+}
+
+/// Build a [`TuicOutbound`] from the relay configuration.
+///
+/// Resolves the server address (IP literal or DNS), derives the SNI, and
+/// translates the relay config into [`TuicOutboundOpts`].
+async fn build_tuic_outbound(ctx: Arc<AppContext>, relay: Relay) -> eyre::Result<TuicOutbound> {
+	let server_addr = if let Some(ip) = relay.ip {
+		SocketAddr::new(ip, relay.server.1)
+	} else {
+		let addrs = tokio::net::lookup_host(format!("{}:{}", relay.server.0, relay.server.1)).await?;
+		addrs
+			.into_iter()
+			.next()
+			.ok_or_else(|| eyre::eyre!("Failed to resolve server address"))?
+	};
+
+	let password: Arc<[u8]> = relay.password.clone();
+
+	let sni = match relay.sni.clone() {
+		Some(s) => s,
+		None => {
+			let host = relay.server.0.trim_start_matches('[').trim_end_matches(']');
+			if host.parse::<std::net::IpAddr>().is_ok() {
+				tracing::warn!(
+					"relay server `{}` is an IP literal but no `sni` was configured; TLS verification will likely fail. \
+					 Set `sni = \"<hostname>\"` in the relay config to fix.",
+					relay.server.0,
+				);
+				"invalid.sni.placeholder".to_string()
+			} else {
+				relay.server.0.clone()
+			}
+		}
+	};
+
+	let reconnect = ReconnectConfig {
+		enabled: relay.reconnect,
+		initial_backoff: relay.reconnect_initial_backoff,
+		max_backoff: relay.reconnect_max_backoff,
+	};
+
+	let opts = TuicOutboundOpts {
+		peer_addr: server_addr,
+		sni,
+		auth: (relay.uuid, password),
+		zero_rtt_handshake: relay.zero_rtt_handshake,
+		heartbeat: relay.heartbeat,
+		gc_interval: relay.gc_interval,
+		gc_lifetime: relay.gc_lifetime,
+		skip_cert_verify: relay.skip_cert_verify,
+		alpn: relay
+			.alpn
+			.into_iter()
+			.map(|v| String::from_utf8_lossy(&v).to_string())
+			.collect(),
+		reconnect,
+	};
+
+	let outbound: TuicOutbound = TuicOutbound::new(ctx, opts).await?;
+
+	outbound.start_poll().await?;
+
+	Ok(outbound)
 }
 
 /// Wind framework plugin that wires a TUIC client's full runtime.
@@ -40,19 +105,19 @@ impl Plugin for TuicClientPlugin {
 		let relay = self.cfg.relay;
 		let lazy = relay.lazy;
 
-		let handler: Arc<dyn wind_core::OutboundAction> = if lazy {
+		let handler: Arc<dyn Outbound> = if lazy {
 			// Lazy mode: defer QUIC connection until first traffic.
 			let setup_ctx = ctx.clone();
 			Arc::new(LazyOutbound::new(Box::pin(async move {
-				let adapter = TuicOutboundAdapter::new(setup_ctx, relay).await?;
-				Ok(Arc::new(OutboundAsAction { inner: adapter }) as Arc<dyn wind_core::OutboundAction>)
+				let outbound = build_tuic_outbound(setup_ctx, relay).await?;
+				Ok(Arc::new(outbound) as Arc<dyn Outbound>)
 			})))
 		} else {
 			// Eager mode: establish the QUIC connection immediately.
-			let adapter = TuicOutboundAdapter::new(ctx.clone(), relay)
+			let outbound = build_tuic_outbound(ctx.clone(), relay)
 				.await
 				.expect("TUIC outbound setup failed in eager mode");
-			Arc::new(OutboundAsAction { inner: adapter })
+			Arc::new(outbound)
 		};
 
 		let app = app.add_outbound("default", handler);
