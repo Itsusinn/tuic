@@ -1170,7 +1170,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -1328,9 +1328,9 @@ dependencies = [
 
 [[package]]
 name = "foundations"
-version = "5.8.0"
+version = "5.8.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "490e0a8bc50e56156b4a73c6f634c8ff6d0e5b9caf35711d41e59272d636e018"
+checksum = "e26ce0c3071293f6cb986cdd1e9f09d26d72313b7fc85010cbded344182c26df"
 dependencies = [
  "anyhow",
  "cf-rustracing",
@@ -1368,9 +1368,9 @@ dependencies = [
 
 [[package]]
 name = "foundations-macros"
-version = "5.8.0"
+version = "5.8.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "36818af4b1a941c0f83adbf04b33e075a12ebac872fdda62f809ab74a9e7b189"
+checksum = "260f833086964a5ce5a0a28fa0f7f1101249eef3b3d45619d3437a74b65ad096"
 dependencies = [
  "darling 0.23.0",
  "proc-macro2",
@@ -1932,7 +1932,7 @@ dependencies = [
  "libc",
  "percent-encoding",
  "pin-project-lite",
- "socket2 0.5.10",
+ "socket2 0.6.5",
  "tokio",
  "tower-service",
  "tracing",
@@ -2186,7 +2186,7 @@ checksum = "3640c1c38b8e4e43584d8df18be5fc6b0aa314ce6ebf51b53313d4306cca8e46"
 dependencies = [
  "hermit-abi",
  "libc",
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -2591,7 +2591,7 @@ version = "0.50.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7957b9740744892f114936ab4a57b3f487491bbeafaf8083688b16841a4240e5"
 dependencies = [
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -3241,7 +3241,7 @@ dependencies = [
  "quinn-udp 0.5.15",
  "rustc-hash",
  "rustls",
- "socket2 0.5.10",
+ "socket2 0.6.5",
  "thiserror 2.0.19",
  "tokio",
  "tracing",
@@ -3260,7 +3260,7 @@ dependencies = [
  "quinn-udp 0.6.1",
  "rustc-hash",
  "rustls",
- "socket2 0.5.10",
+ "socket2 0.6.5",
  "thiserror 2.0.19",
  "tokio",
  "tracing",
@@ -3270,7 +3270,7 @@ dependencies = [
 [[package]]
 name = "quinn-congestions"
 version = "0.1.0"
-source = "git+https://github.com/proxy-rs/quinn-congestions.git#ed4e3f17c8639828c91848a80f9acfc3598c5a3e"
+source = "git+https://github.com/proxy-rs/quinn-congestions.git#83052f7da6f59d70792f9abb7b62b171cdc0d443"
 dependencies = [
  "quinn 0.12.0",
  "quinn-proto 0.12.0",
@@ -3333,9 +3333,9 @@ dependencies = [
  "cfg_aliases",
  "libc",
  "once_cell",
- "socket2 0.5.10",
+ "socket2 0.6.5",
  "tracing",
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -3345,9 +3345,9 @@ source = "git+https://github.com/Tipuch/quinn.git?branch=bbrv3#762128e9e8017e8ff
 dependencies = [
  "cfg_aliases",
  "libc",
- "socket2 0.5.10",
+ "socket2 0.6.5",
  "tracing",
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -3524,9 +3524,9 @@ dependencies = [
 
 [[package]]
 name = "regex-automata"
-version = "0.4.16"
+version = "0.4.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8fcfdb36bda0c880c5931cdc7a2bcdc8ba4556847b9d912bca70bc94708711ad"
+checksum = "ad8553b9b26413251cbf30e620595c7a41b3887f03da04579c0e6b0d6a06b4b2"
 dependencies = [
  "aho-corasick",
  "memchr",
@@ -3695,7 +3695,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys 0.12.1",
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -3791,7 +3791,7 @@ dependencies = [
  "security-framework",
  "security-framework-sys",
  "webpki-root-certs",
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -4412,7 +4412,7 @@ dependencies = [
  "getrandom 0.4.3",
  "once_cell",
  "rustix 1.1.4",
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -4421,7 +4421,7 @@ version = "1.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d8c27177b12a6399ffc08b98f76f7c9a1f4fe9fc967c784c5a071fa8d93cf7e1"
 dependencies = [
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -5402,7 +5402,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
