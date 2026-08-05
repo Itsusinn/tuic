@@ -138,6 +138,34 @@ pub fn tuic_client_config(
 	}
 }
 
+/// Poll the client's SOCKS5 proxy listener until it accepts TCP connections,
+/// so callers know the client process is up before driving traffic through it.
+/// This proves the listener is bound, not that the QUIC tunnel to the server
+/// is fully established — the relay tests below do that validation.
+///
+/// Without this, a server/client that fails to start (port already in use,
+/// bad config, certificate issue) just leaves a silently-dead pair and the
+/// relay tests below can fail — or worse, pass without exercising anything.
+async fn wait_for_socks5_ready(socks_port: u16, backend: &str) {
+	let addr: SocketAddr = format!("127.0.0.1:{socks_port}").parse().unwrap();
+	let deadline = tokio::time::Instant::now() + Duration::from_secs(15);
+	loop {
+		match tokio::net::TcpStream::connect(addr).await {
+			Ok(_) => {
+				info!("[{backend} test] SOCKS5 proxy is ready at {addr}");
+				return;
+			}
+			Err(_) if tokio::time::Instant::now() < deadline => {
+				tokio::time::sleep(Duration::from_millis(200)).await;
+			}
+			Err(e) => panic!(
+				"[{backend} test] SOCKS5 proxy at {addr} never became ready (last error: {e}); \
+				 the tuic-server or tuic-client task may have failed to start"
+			),
+		}
+	}
+}
+
 /// Start a quiche-backed `tuic-server` plus a `tuic-client`, waiting for the
 /// client's SOCKS5 proxy to come up. Returns the SOCKS5 address.
 ///
@@ -171,6 +199,10 @@ pub async fn start_quiche_pair(server_port: u16, socks_port: u16, zero_rtt: bool
 		}
 	});
 	tokio::time::sleep(Duration::from_secs(2)).await;
+
+	// Fail fast if the pair never came up instead of letting the relay tests
+	// below run against a dead server/client.
+	wait_for_socks5_ready(socks_port, "quiche").await;
 
 	format!("127.0.0.1:{socks_port}")
 }
@@ -209,6 +241,10 @@ pub async fn start_quinn_pair(server_port: u16, socks_port: u16, zero_rtt: bool)
 		}
 	});
 	tokio::time::sleep(Duration::from_secs(2)).await;
+
+	// Fail fast if the pair never came up instead of letting the relay tests
+	// below run against a dead server/client.
+	wait_for_socks5_ready(socks_port, "quinn").await;
 
 	format!("127.0.0.1:{socks_port}")
 }

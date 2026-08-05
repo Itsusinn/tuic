@@ -174,17 +174,16 @@ async fn test_ipv6_server_client_integration() -> eyre::Result<()> {
 
 	use tokio::net::TcpStream;
 	info!("[IPv6 Test] Testing SOCKS5 proxy connectivity on IPv6...");
-	match TcpStream::connect("[::1]:1081").await {
-		Ok(stream) => {
-			info!("[IPv6 Test] ✓ Successfully connected to SOCKS5 proxy at [::1]:1081");
-			info!("[IPv6 Test] Local: {:?}, Peer: {:?}", stream.local_addr(), stream.peer_addr());
-			drop(stream);
-		}
-		Err(e) => {
-			error!("[IPv6 Test] ✗ Failed to connect to SOCKS5 proxy: {}", e);
-			error!("[IPv6 Test] This suggests the TUIC client may not have started properly on IPv6");
-		}
-	}
+	// The proxy must be up: fail fast here instead of letting the IPv6 relay
+	// tests below time out opaquely.
+	let stream = TcpStream::connect("[::1]:1081")
+		.await
+		.unwrap_or_else(|e| {
+			panic!("[IPv6 Test] ✗ Failed to connect to SOCKS5 proxy: {e} — TUIC client may not have started on IPv6")
+		});
+	info!("[IPv6 Test] ✓ Successfully connected to SOCKS5 proxy at [::1]:1081");
+	info!("[IPv6 Test] Local: {:?}, Peer: {:?}", stream.local_addr(), stream.peer_addr());
+	drop(stream);
 
 	let tcp_test = async {
 		info!("[IPv6 TCP Test] Starting TCP relay test on IPv6...");

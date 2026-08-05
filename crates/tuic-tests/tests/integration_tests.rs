@@ -331,24 +331,23 @@ async fn test_server_client_integration() -> eyre::Result<()> {
 	tokio::time::sleep(Duration::from_secs(2)).await;
 	info!("[Integration Test] SOCKS5 proxy should be ready now\n");
 
-	// Quick connectivity check - try to connect to SOCKS5 proxy
+	// Quick connectivity check - try to connect to SOCKS5 proxy. The proxy must
+	// be up: fail fast here instead of letting the TCP/UDP relay tests below
+	// time out opaquely.
 	use tokio::net::TcpStream;
 	info!("[Integration Test] Testing SOCKS5 proxy connectivity...");
-	match TcpStream::connect("127.0.0.1:1080").await {
-		Ok(stream) => {
-			info!("[Integration Test] ✓ Successfully connected to SOCKS5 proxy at 127.0.0.1:1080");
-			info!(
-				"[Integration Test] Local: {:?}, Peer: {:?}",
-				stream.local_addr(),
-				stream.peer_addr()
-			);
-			drop(stream);
-		}
-		Err(e) => {
-			error!("[Integration Test] ✗ Failed to connect to SOCKS5 proxy: {}", e);
-			error!("[Integration Test] This suggests the TUIC client may not have started properly");
-		}
-	}
+	let stream = TcpStream::connect("127.0.0.1:1080")
+		.await
+		.unwrap_or_else(|e| {
+			panic!("[Integration Test] ✗ Failed to connect to SOCKS5 proxy: {e} — TUIC client may not have started")
+		});
+	info!("[Integration Test] ✓ Successfully connected to SOCKS5 proxy at 127.0.0.1:1080");
+	info!(
+		"[Integration Test] Local: {:?}, Peer: {:?}",
+		stream.local_addr(),
+		stream.peer_addr()
+	);
+	drop(stream);
 
 	let tcp_test = async {
 		info!("[TCP Test] Starting TCP relay test...");
@@ -436,7 +435,8 @@ async fn test_server_client_integration() -> eyre::Result<()> {
 			let addr = server_addr;
 			let handle = tokio::spawn(async move {
 				info!("[Concurrent Test] Connection {}: connecting...", i);
-				match Socks5Stream::connect(
+				let test_data = format!("Connection {}", i);
+				let result: bool = match Socks5Stream::connect(
 					"127.0.0.1:1080".parse::<std::net::SocketAddr>().unwrap(),
 					addr.ip().to_string(),
 					addr.port(),
@@ -446,47 +446,76 @@ async fn test_server_client_integration() -> eyre::Result<()> {
 				{
 					Ok(mut stream) => {
 						info!("[Concurrent Test] Connection {}: connected", i);
-						let test_data = format!("Connection {}", i);
 
 						if let Err(e) = stream.write_all(test_data.as_bytes()).await {
 							error!("[Concurrent Test] Connection {}: failed to send: {}", i, e);
+							false
 						} else {
 							info!("[Concurrent Test] Connection {}: sent {} bytes", i, test_data.len());
 
-							let mut buf = vec![0u8; 1024];
-							match timeout(Duration::from_secs(1), stream.read(&mut buf)).await {
-								Ok(Ok(n)) => {
-									info!("[Concurrent Test] Connection {}: received {} bytes", i, n);
+							let mut buf = vec![0u8; test_data.len()];
+							match timeout(Duration::from_secs(1), stream.read_exact(&mut buf)).await {
+								Ok(Ok(_)) => {
+									if buf == test_data.as_bytes() {
+										info!(
+											"[Concurrent Test] Connection {}: ✓ received matching echo ({} bytes)",
+											i,
+											buf.len()
+										);
+										true
+									} else {
+										error!(
+											"[Concurrent Test] Connection {}: ✗ echo mismatch: expected {:?}, got {:?}",
+											i,
+											test_data.as_bytes(),
+											&buf
+										);
+										false
+									}
 								}
 								Ok(Err(e)) => {
 									error!("[Concurrent Test] Connection {}: failed to receive: {}", i, e);
+									false
 								}
 								Err(_) => {
 									error!("[Concurrent Test] Connection {}: timeout", i);
+									false
 								}
 							}
 						}
 					}
 					Err(e) => {
 						error!("[Concurrent Test] Connection {}: failed to connect: {}", i, e);
+						false
 					}
-				}
+				};
+				result
 			});
 			handles.push(handle);
 		}
 
+		let mut ok = 0;
 		for (i, handle) in handles.into_iter().enumerate() {
-			if let Err(e) = handle.await {
-				error!("[Concurrent Test] Connection {} task failed: {}", i, e);
+			match handle.await {
+				Ok(true) => ok += 1,
+				Ok(false) => error!("[Concurrent Test] Connection {} did not complete a full read", i),
+				Err(e) => error!("[Concurrent Test] Connection {} task panicked: {}", i, e),
 			}
 		}
 
-		info!("[Concurrent Test] ✓ All concurrent connections completed");
+		info!("[Concurrent Test] {ok}/3 concurrent connections completed a read");
 		server_task.abort();
 		info!("[Concurrent Test] Concurrent test completed\n");
+		ok
 	};
 
-	let _ = timeout(Duration::from_secs(5), concurrent_test).await;
+	let concurrent_ok = timeout(Duration::from_secs(5), concurrent_test)
+		.await
+		.expect("Concurrent relay test timed out");
+	assert_eq!(
+		concurrent_ok, 3,
+		"all 3 concurrent connections must round-trip their echo through SOCKS5/TUIC (got {concurrent_ok}/3)"
+	);
 
 	client_handle.abort();
 	server_handle.abort();

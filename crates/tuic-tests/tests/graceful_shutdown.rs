@@ -15,7 +15,7 @@ use std::{
 	net::{Ipv4Addr, SocketAddr},
 	sync::{
 		Arc,
-		atomic::{AtomicBool, Ordering},
+		atomic::{AtomicBool, AtomicUsize, Ordering},
 	},
 	time::Duration,
 };
@@ -25,7 +25,7 @@ use tokio::{
 	net::TcpListener,
 	time::timeout,
 };
-use tuic_server::{Config, TuicServerPlugin};
+use tuic_server::{Config, TuicServerPlugin, config::ExperimentalConfig};
 use wind_core::{App, FlowContext, Outbound, hooks::Protocol, rule::NetworkType, types::TargetAddr};
 
 // ---------------------------------------------------------------------------
@@ -159,7 +159,12 @@ async fn active_connection_drains_on_cancel() {
 		gc_lifetime: Duration::from_secs(30),
 		reconnect: Default::default(),
 	};
-	let _client = wind_tuic::quinn::outbound::TuicOutbound::new(client_ctx, client_opts).await;
+	// `new` performs the QUIC/TLS handshake: success means the server accepted
+	// the connection, so a failed handshake must fail this test rather than
+	// silently drain a server with no active connection.
+	let _client = wind_tuic::quinn::outbound::TuicOutbound::new(client_ctx, client_opts)
+		.await
+		.expect("TUIC client must connect to the server before cancellation");
 	// Give the server a moment to register the connection handler.
 	tokio::time::sleep(Duration::from_millis(200)).await;
 
@@ -196,6 +201,15 @@ fn build_server_config_with_user(addr: SocketAddr, uuid: uuid::Uuid, password: &
 			..Default::default()
 		},
 		data_dir: std::env::temp_dir().join("tuic-graceful-shutdown-traffic"),
+		// The traffic test relays to a loopback echo server, so the loopback
+		// guards must be off or the relay target is rejected before it ever
+		// reaches the outbound (this used to make the test pass with zero
+		// traffic actually flowing).
+		experimental: ExperimentalConfig {
+			drop_loopback: false,
+			drop_private: false,
+			..Default::default()
+		},
 		..Default::default()
 	}
 }
@@ -294,6 +308,11 @@ async fn drains_while_active_traffic_flows() {
 	//    a loop to keep the connection busy.
 	let traffic_done = Arc::new(AtomicBool::new(false));
 	let td = traffic_done.clone();
+	// Count successful ping→echo round-trips so the test can prove traffic
+	// actually flowed through the tunnel before cancellation (previously the
+	// loop could `break` immediately and the test still passed).
+	let round_trips = Arc::new(AtomicUsize::new(0));
+	let rt = round_trips.clone();
 	let traffic_handle = tokio::spawn(async move {
 		let (mut reader, mut writer) = tokio::io::split(local);
 		let ping = b"hello-from-tuic-keepalive";
@@ -306,8 +325,11 @@ async fn drains_while_active_traffic_flows() {
 				break;
 			}
 			match reader.read_exact(&mut buf).await {
-				Ok(_) if buf == ping => {} // echo OK
-				_ => break,                // connection broken (expected after cancel)
+				Ok(_) if buf == ping => {
+					// echo OK
+					rt.fetch_add(1, Ordering::SeqCst);
+				}
+				_ => break, // connection broken (expected after cancel)
 			}
 		}
 	});
@@ -315,11 +337,20 @@ async fn drains_while_active_traffic_flows() {
 	// Let the traffic loop run for a few round-trips.
 	tokio::time::sleep(Duration::from_millis(500)).await;
 
-	// 6. Cancel — traffic is still flowing.
+	// 6. Prove traffic actually flowed through the tunnel: several successful
+	//    ping→echo round-trips must have completed before we cancel (previously
+	//    zero round-trips still passed the test).
+	let completed = round_trips.load(Ordering::SeqCst);
+	assert!(
+		completed >= 3,
+		"expected at least 3 successful ping→echo round-trips through the tunnel before cancel, got {completed}"
+	);
+
+	// 7. Cancel — traffic is still flowing.
 	ctx.token.cancel();
 	traffic_done.store(true, Ordering::SeqCst);
 
-	// 7. App::run must exit within 10s.
+	// 8. App::run must exit within 10s.
 	let result = timeout(Duration::from_secs(10), app_handle)
 		.await
 		.expect("App::run did not exit within 10s while traffic was active")
