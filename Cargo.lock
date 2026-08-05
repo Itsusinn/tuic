@@ -5425,9 +5425,9 @@ dependencies = [
  "pest_derive",
  "serde",
  "tracing",
- "wind-base",
  "wind-core",
  "wind-geodata",
+ "wind-rule",
 ]
 
 [[package]]
@@ -5475,18 +5475,17 @@ dependencies = [
  "dashmap",
  "eyre",
  "futures",
- "ipnet",
  "pin-project",
  "pin-project-lite",
  "quinn 0.12.0",
  "rand 0.10.2",
- "regex",
  "serde",
  "socket2 0.6.5",
  "tokio",
  "tokio-util",
  "tracing",
  "uuid",
+ "wind-rule",
 ]
 
 [[package]]
@@ -5539,6 +5538,14 @@ dependencies = [
  "tokio-util",
  "tracing",
  "wind-core",
+]
+
+[[package]]
+name = "wind-rule"
+version = "0.2.0"
+dependencies = [
+ "ipnet",
+ "regex",
 ]
 
 [[package]]
