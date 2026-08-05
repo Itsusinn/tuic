@@ -287,9 +287,7 @@ async fn drains_while_active_traffic_flows() {
 
 	let c = client.clone();
 	let _tunnel_handle = tokio::spawn(async move {
-		let _ = c
-			.handle_tcp(test_ctx(&target), Box::new(remote))
-			.await;
+		let _ = c.handle_tcp(test_ctx(&target), Box::new(remote)).await;
 	});
 
 	// 5. Pump traffic through the tunnel: send a ping, expect the echo back. Run in

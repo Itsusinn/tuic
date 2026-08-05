@@ -16,11 +16,15 @@ use crate::{
 };
 
 /// Simple router: everything goes to the TUIC outbound.
-struct ClientRouter;
+pub struct ClientRouter;
 
 impl wind_core::Router for ClientRouter {
-	async fn route(&self, _ctx: &wind_core::FlowContext) -> eyre::Result<wind_core::RouteAction> {
-		Ok(wind_core::RouteAction::Forward("default".to_string()))
+	#[allow(clippy::manual_async_fn)]
+	fn route(
+		&self,
+		_ctx: &wind_core::FlowContext,
+	) -> impl std::future::Future<Output = eyre::Result<wind_core::RouteAction>> + Send {
+		async { Ok(wind_core::RouteAction::Forward("default".to_string())) }
 	}
 }
 
@@ -47,8 +51,8 @@ async fn build_tuic_outbound(ctx: Arc<AppContext>, relay: Relay) -> eyre::Result
 			let host = relay.server.0.trim_start_matches('[').trim_end_matches(']');
 			if host.parse::<std::net::IpAddr>().is_ok() {
 				tracing::warn!(
-					"relay server `{}` is an IP literal but no `sni` was configured; TLS verification will likely fail. \
-					 Set `sni = \"<hostname>\"` in the relay config to fix.",
+					"relay server `{}` is an IP literal but no `sni` was configured; TLS verification will likely fail. Set \
+					 `sni = \"<hostname>\"` in the relay config to fix.",
 					relay.server.0,
 				);
 				"invalid.sni.placeholder".to_string()
@@ -99,8 +103,8 @@ impl TuicClientPlugin {
 	}
 }
 
-impl Plugin for TuicClientPlugin {
-	async fn build(self, app: App) -> eyre::Result<App> {
+impl Plugin<ClientRouter> for TuicClientPlugin {
+	async fn build(self, app: App<ClientRouter>) -> eyre::Result<App<ClientRouter>> {
 		let ctx = app.context().clone();
 		let relay = self.cfg.relay;
 		let lazy = relay.lazy;
