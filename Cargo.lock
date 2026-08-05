@@ -5097,6 +5097,7 @@ dependencies = [
  "rcgen 0.14.8",
  "reqwest",
  "rustls",
+ "serde_json",
  "serial_test",
  "tokio",
  "tokio-util",

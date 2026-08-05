@@ -39,6 +39,7 @@ serial_test = "3"
 tokio = { version = "1", features = ["full"] }
 aws-lc-rs = { version = "1", default-features = false, optional = true, features = ["prebuilt-nasm"] }
 uuid = "1"
+serde_json = { version = "1", default-features = false, features = ["std"] }
 tokio-util = { version = "0.7", features = ["codec"] }
 
 # HTTP/3 client for the masquerade e2e test (gated behind `h3-masquerade-test`).
