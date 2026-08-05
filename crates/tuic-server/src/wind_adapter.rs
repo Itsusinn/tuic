@@ -13,6 +13,7 @@ use std::{
 	time::Duration,
 };
 
+use async_trait::async_trait;
 use tracing::Instrument;
 use wind_acl::AclEngine;
 use wind_base::{
@@ -20,7 +21,7 @@ use wind_base::{
 	load_balance::{LoadBalanceOpts, LoadBalanceOutbound, LoadBalanceStrategy},
 	resolve::resolve_target,
 };
-use wind_core::{FlowContext, Outbound, RouteAction, Router, rule::Rule, utils::is_private_ip};
+use wind_core::{AbstractInbound, Dispatcher, FlowContext, Outbound, RouteAction, Router, rule::Rule, utils::is_private_ip};
 use wind_geodata::GeoData;
 use wind_socks::action::{SocksOutbound, SocksOutboundOpts};
 
@@ -36,8 +37,9 @@ pub enum ServerInbound {
 	Tuiche(wind_tuic::quiche::TuicheInbound),
 }
 
-impl wind_core::AbstractInbound for ServerInbound {
-	async fn listen(&self, cb: &impl wind_core::InboundCallback) -> eyre::Result<()> {
+#[async_trait]
+impl<R: Router> AbstractInbound<R> for ServerInbound {
+	async fn listen(&self, cb: &Dispatcher<R>) -> eyre::Result<()> {
 		match self {
 			ServerInbound::Tuic(inbound) => inbound.listen(cb).await,
 			#[cfg(feature = "quiche")]
@@ -208,9 +210,9 @@ impl TuicRouter {
 }
 
 impl Router for TuicRouter {
-	async fn route(&self, ctx: &FlowContext) -> eyre::Result<RouteAction> {
+	fn route(&self, ctx: &FlowContext) -> impl std::future::Future<Output = eyre::Result<RouteAction>> + Send {
 		let span = tracing::debug_span!("route", target = %ctx.target, proto = if ctx.is_tcp() { "tcp" } else { "udp" });
-		self.do_route(ctx).instrument(span).await
+		async move { self.do_route(ctx).instrument(span).await }
 	}
 }
 

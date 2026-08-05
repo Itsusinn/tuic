@@ -3,11 +3,11 @@
 //! Each tunnel inbound (TCP/UDP) runs until its `cancel` token fires, then
 //! the accept/recv loop exits and spawned tasks drain.
 
-use std::{net::SocketAddr, time::Duration};
+use std::{net::SocketAddr, sync::Arc, time::Duration};
 
 use tokio_util::sync::CancellationToken;
 use tuic_client::tunnel::{TunnelTcpInbound, TunnelUdpInbound};
-use wind_core::{AbstractInbound, FlowContext, InboundCallback, udp::UdpStream};
+use wind_core::{AbstractInbound, Dispatcher, FlowContext, Outbound, RouteAction, Router, udp::UdpStream};
 
 fn free_tcp_addr() -> SocketAddr {
 	let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
@@ -23,22 +23,38 @@ fn free_udp_addr() -> SocketAddr {
 	a
 }
 
-/// No-op callback for testing inbound lifecycle.
-#[derive(Clone)]
-struct NoopCallback;
+/// Router that forwards everything to the `"default"` outbound handler.
+struct ForwardRouter;
 
-impl InboundCallback for NoopCallback {
-	async fn handle_tcpstream(
+impl Router for ForwardRouter {
+	#[allow(clippy::manual_async_fn)]
+	fn route(&self, _ctx: &FlowContext) -> impl std::future::Future<Output = eyre::Result<RouteAction>> + Send {
+		async { Ok(RouteAction::Forward("default".to_string())) }
+	}
+}
+
+/// No-op outbound handler for testing inbound lifecycle.
+struct NoopOutbound;
+
+#[async_trait::async_trait]
+impl Outbound for NoopOutbound {
+	async fn handle_tcp(
 		&self,
 		_ctx: FlowContext,
-		_stream: impl wind_core::tcp::AbstractTcpStream + 'static,
+		_stream: Box<dyn wind_core::tcp::AbstractTcpStream + 'static>,
 	) -> eyre::Result<()> {
 		Ok(())
 	}
 
-	async fn handle_udpstream(&self, _ctx: FlowContext, _udp_stream: UdpStream) -> eyre::Result<()> {
+	async fn handle_udp(&self, _ctx: FlowContext, _udp_stream: UdpStream) -> eyre::Result<()> {
 		Ok(())
 	}
+}
+
+fn dispatcher() -> Dispatcher<ForwardRouter> {
+	let mut d = Dispatcher::new(ForwardRouter);
+	d.add_handler("default", Arc::new(NoopOutbound));
+	d
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -46,7 +62,8 @@ async fn tcp_tunnel_drains_on_cancel() {
 	let cancel = CancellationToken::new();
 	let inbound = TunnelTcpInbound::new(free_tcp_addr(), ("127.0.0.1".to_string(), 9), cancel.clone());
 
-	let join = tokio::spawn(async move { inbound.listen(&NoopCallback).await });
+	let d = dispatcher();
+	let join = tokio::spawn(async move { inbound.listen(&d).await });
 
 	tokio::time::sleep(Duration::from_millis(100)).await;
 	cancel.cancel();
@@ -69,7 +86,8 @@ async fn udp_tunnel_drains_on_cancel() {
 	)
 	.expect("create udp tunnel");
 
-	let join = tokio::spawn(async move { inbound.listen(&NoopCallback).await });
+	let d = dispatcher();
+	let join = tokio::spawn(async move { inbound.listen(&d).await });
 
 	tokio::time::sleep(Duration::from_millis(100)).await;
 	cancel.cancel();

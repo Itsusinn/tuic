@@ -18,27 +18,40 @@
 
 use std::{net::SocketAddr, sync::Arc, time::Duration};
 
+use async_trait::async_trait;
 use quinn::Endpoint;
 use rustls::{
 	DigitallySignedStruct, SignatureScheme,
 	client::danger::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier},
 	pki_types::{CertificateDer, ServerName, UnixTime},
 };
-use wind_core::{AbstractInbound, FlowContext, InboundCallback, tcp::AbstractTcpStream, udp::UdpStream};
+use wind_core::{
+	AbstractInbound, Dispatcher, FlowContext, Outbound, RouteAction, Router, tcp::AbstractTcpStream, udp::UdpStream,
+};
 use wind_tuic::quiche::TuicheInboundBuilder;
 
-// ---- a no-op inbound callback (TLS handshake is all we need) --------------
+// ---- a no-op outbound handler (TLS handshake is all we need) --------------
 
-#[derive(Clone)]
-struct NoopCallback;
+struct NoopOutbound;
 
-impl InboundCallback for NoopCallback {
-	async fn handle_tcpstream(&self, _ctx: FlowContext, _stream: impl AbstractTcpStream + 'static) -> eyre::Result<()> {
+#[async_trait::async_trait]
+impl Outbound for NoopOutbound {
+	async fn handle_tcp(&self, _ctx: FlowContext, _stream: Box<dyn AbstractTcpStream + 'static>) -> eyre::Result<()> {
 		Ok(())
 	}
 
-	async fn handle_udpstream(&self, _ctx: FlowContext, _udp_stream: UdpStream) -> eyre::Result<()> {
+	async fn handle_udp(&self, _ctx: FlowContext, _udp_stream: UdpStream) -> eyre::Result<()> {
 		Ok(())
+	}
+}
+
+/// Router that forwards everything to the `"default"` outbound handler.
+struct ForwardRouter;
+
+impl Router for ForwardRouter {
+	#[allow(clippy::manual_async_fn)]
+	fn route(&self, _ctx: &FlowContext) -> impl std::future::Future<Output = eyre::Result<RouteAction>> + Send {
+		async { Ok(RouteAction::Forward("default".to_string())) }
 	}
 }
 
@@ -136,8 +149,10 @@ async fn quiche_certificate_hot_reload() -> eyre::Result<()> {
 		.await?;
 	let store = inbound.cert_store();
 
+	let mut dispatcher = Dispatcher::new(ForwardRouter);
+	dispatcher.add_handler("default", Arc::new(NoopOutbound));
 	tokio::spawn(async move {
-		let _ = inbound.listen(&NoopCallback).await;
+		let _ = inbound.listen(&dispatcher).await;
 	});
 	tokio::time::sleep(Duration::from_secs(1)).await;
 

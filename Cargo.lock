@@ -5085,6 +5085,7 @@ dependencies = [
 name = "tuic-tests"
 version = "2.0.0-dev3"
 dependencies = [
+ "async-trait",
  "aws-lc-rs",
  "bytes",
  "eyre",
@@ -5415,6 +5416,7 @@ checksum = "712e227841d057c1ee1cd2fb22fa7e5a5461ae8e48fa2ca79ec42cfc1931183f"
 name = "wind-acl"
 version = "0.2.0"
 dependencies = [
+ "async-trait",
  "derive_more",
  "eyre",
  "ip_network",

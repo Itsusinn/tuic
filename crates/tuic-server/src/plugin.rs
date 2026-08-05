@@ -14,7 +14,7 @@ use wind_tuic::quinn::inbound::{TuicInbound, TuicInboundOpts};
 use crate::{
 	Config,
 	restful::{self, ConnectionTracker},
-	wind_adapter::{self, ServerInbound, load_cert_from_files},
+	wind_adapter::{self, ServerInbound, TuicRouter, load_cert_from_files},
 };
 
 /// Wind framework plugin that wires a TUIC server's full runtime.
@@ -28,8 +28,8 @@ impl TuicServerPlugin {
 	}
 }
 
-impl Plugin for TuicServerPlugin {
-	async fn build(self, app: App) -> eyre::Result<App> {
+impl Plugin<TuicRouter> for TuicServerPlugin {
+	async fn build(self, app: App<TuicRouter>) -> eyre::Result<App<TuicRouter>> {
 		let mut cfg = self.cfg;
 
 		// DNS resolver
