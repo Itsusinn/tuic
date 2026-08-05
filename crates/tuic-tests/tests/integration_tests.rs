@@ -336,11 +336,9 @@ async fn test_server_client_integration() -> eyre::Result<()> {
 	// time out opaquely.
 	use tokio::net::TcpStream;
 	info!("[Integration Test] Testing SOCKS5 proxy connectivity...");
-	let stream = TcpStream::connect("127.0.0.1:1080")
-		.await
-		.unwrap_or_else(|e| {
-			panic!("[Integration Test] ✗ Failed to connect to SOCKS5 proxy: {e} — TUIC client may not have started")
-		});
+	let stream = TcpStream::connect("127.0.0.1:1080").await.unwrap_or_else(|e| {
+		panic!("[Integration Test] ✗ Failed to connect to SOCKS5 proxy: {e} — TUIC client may not have started")
+	});
 	info!("[Integration Test] ✓ Successfully connected to SOCKS5 proxy at 127.0.0.1:1080");
 	info!(
 		"[Integration Test] Local: {:?}, Peer: {:?}",

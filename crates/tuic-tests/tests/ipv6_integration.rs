@@ -176,11 +176,9 @@ async fn test_ipv6_server_client_integration() -> eyre::Result<()> {
 	info!("[IPv6 Test] Testing SOCKS5 proxy connectivity on IPv6...");
 	// The proxy must be up: fail fast here instead of letting the IPv6 relay
 	// tests below time out opaquely.
-	let stream = TcpStream::connect("[::1]:1081")
-		.await
-		.unwrap_or_else(|e| {
-			panic!("[IPv6 Test] ✗ Failed to connect to SOCKS5 proxy: {e} — TUIC client may not have started on IPv6")
-		});
+	let stream = TcpStream::connect("[::1]:1081").await.unwrap_or_else(|e| {
+		panic!("[IPv6 Test] ✗ Failed to connect to SOCKS5 proxy: {e} — TUIC client may not have started on IPv6")
+	});
 	info!("[IPv6 Test] ✓ Successfully connected to SOCKS5 proxy at [::1]:1081");
 	info!("[IPv6 Test] Local: {:?}, Peer: {:?}", stream.local_addr(), stream.peer_addr());
 	drop(stream);

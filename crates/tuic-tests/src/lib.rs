@@ -159,8 +159,8 @@ async fn wait_for_socks5_ready(socks_port: u16, backend: &str) {
 				tokio::time::sleep(Duration::from_millis(200)).await;
 			}
 			Err(e) => panic!(
-				"[{backend} test] SOCKS5 proxy at {addr} never became ready (last error: {e}); \
-				 the tuic-server or tuic-client task may have failed to start"
+				"[{backend} test] SOCKS5 proxy at {addr} never became ready (last error: {e}); the tuic-server or tuic-client \
+				 task may have failed to start"
 			),
 		}
 	}
