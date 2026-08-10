@@ -22,6 +22,7 @@ h3-masquerade-test = ["wind-tuic/masquerade", "dep:reqwest", "dep:http"]
 
 [dependencies]
 wind-core = { path = "../wind/crates/wind-core" }
+wind-quic = { path = "../wind/crates/wind-quic", default-features = false, features = ["quinn"] }
 tuic-client = { path = "../tuic-client", default-features = false }
 tuic-server = { path = "../tuic-server", default-features = false }
 wind-tuic = { path = "../wind/crates/wind-tuic", default-features = false, features = ["server", "client", "quinn"] }

@@ -1,17 +1,17 @@
-//! 0-RTT integration test for the quinn (`wind-tuic`) backend — the default
-//! backend, which until now had no 0-RTT coverage (only the quiche backend
-//! did).
+//! 0-RTT *config-path* integration test for the quinn (`wind-tuic`) backend —
+//! the default backend, which until now had no 0-RTT coverage (only the quiche
+//! backend did).
 //!
 //! Runs in its own test binary (separate process) because `tuic_client::run`
 //! installs a process-global connection. 0-RTT early data is enabled on the
 //! server via `zero_rtt_handshake`, which wires into the inbound's
 //! `max_early_data_size` and the `into_0rtt()` accept path (see
-//! `wind_tuic::quinn::inbound`). The test verifies the 0-RTT-enabled config
-//! path handshakes and relays TCP and UDP correctly.
+//! `wind_tuic::quinn::inbound`). The test verifies that the 0-RTT-enabled
+//! *configuration* path still handshakes and relays TCP and UDP correctly.
 //!
-//! Like the quiche 0-RTT test, it does not assert that early data was actually
-//! replayed on a *resumed* handshake — that would require a custom resumption
-//! client; the first connection is always 1-RTT.
+//! Note: this only proves the config path works over a fresh 1-RTT connection.
+//! Whether early data is actually *accepted* on a resumed handshake is covered
+//! by `quinn_zero_rtt_resumption.rs`.
 
 use std::{
 	net::{IpAddr, Ipv4Addr, SocketAddr},
@@ -27,7 +27,7 @@ use tuic_tests::{
 #[tokio::test]
 #[serial]
 #[tracing_test::traced_test]
-async fn quinn_zero_rtt_tcp_and_udp_relay() -> eyre::Result<()> {
+async fn quinn_zero_rtt_config_tcp_and_udp_relay() -> eyre::Result<()> {
 	let socks = start_quinn_pair(8466, 1096, true).await;
 
 	// --- TCP relay ---

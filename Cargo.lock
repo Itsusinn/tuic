@@ -5107,6 +5107,7 @@ dependencies = [
  "tuic-server",
  "uuid",
  "wind-core",
+ "wind-quic",
  "wind-tuic",
 ]
 
