@@ -1,14 +1,16 @@
-//! 0-RTT integration test for the tokio-quiche (`wind-tuiche`) backend.
+//! 0-RTT *config-path* integration test for the tokio-quiche (`wind-tuiche`)
+//! backend.
 //!
 //! Runs in its own test binary (separate process) because `tuic_client::run`
 //! installs a process-global connection. 0-RTT early data is enabled on both
 //! the server (`enable_early_data`) and the client (`zero_rtt_handshake`); the
-//! test verifies the 0-RTT-enabled config path handshakes and relays both TCP
-//! and UDP correctly (mirrors `quinn_zero_rtt.rs` for backend parity).
+//! test verifies that the 0-RTT-enabled *configuration* path still handshakes
+//! and relays both TCP and UDP correctly (mirrors `quinn_zero_rtt.rs` for
+//! backend parity).
 //!
-//! It does not assert that early data was actually replayed on a resumed
-//! handshake — that would require a custom resumption client; the first
-//! connection is always 1-RTT.
+//! Note: this only proves the config path works over a fresh 1-RTT connection.
+//! Whether early data is actually *accepted* on a resumed handshake is covered
+//! by `quiche_zero_rtt_resumption.rs`.
 
 // These e2e tests drive real QUIC sockets; only *run* them on 64-bit hosts
 // (cross-emulated 32-bit test execution is unreliable for networking). The
@@ -32,7 +34,7 @@ use tuic_tests::{
 #[tokio::test]
 #[serial]
 #[tracing_test::traced_test]
-async fn quiche_zero_rtt_tcp_and_udp_relay() -> eyre::Result<()> {
+async fn quiche_zero_rtt_config_tcp_and_udp_relay() -> eyre::Result<()> {
 	let socks = start_quiche_pair(8464, 1094, true).await;
 
 	// --- TCP relay ---
