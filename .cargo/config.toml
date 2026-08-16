@@ -1,9 +1,9 @@
 [build]
 #rustc-wrapper = "sccache"
-# Unlocks reqwest's experimental HTTP/3 client, used only by tuic-tests'
-# `h3-masquerade-test` feature. Inert unless reqwest is built with its `http3`
-# feature (which only that opt-in test feature enables), so default builds are
-# unaffected — no extra deps, no http3 code.
+# Unlocks reqwest's experimental HTTP/3 client. `tuic-tests`'s masquerade e2e
+# test (tests/masquerade.rs) pulls reqwest with its `http3` feature as an
+# unconditional dependency, so this flag is required for any default build/test
+# that compiles `tuic-tests`; it is inert for crates that don't turn on http3.
 rustflags = ["--cfg", "reqwest_unstable"]
 
 [env]

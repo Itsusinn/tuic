@@ -7,11 +7,9 @@
 //! handshake, first-byte classification (`0x05` vs not), the `h3::quic`
 //! adapter, the `h3` server, and the reqwest reverse proxy to the upstream.
 //!
-//! Opt-in (pulls reqwest's experimental HTTP/3 stack; the `--cfg
-//! reqwest_unstable` flag it needs is set by the workspace
-//! `.cargo/config.toml`):   cargo test -p tuic-tests --features
-//! h3-masquerade-test
-#![cfg(all(feature = "h3-masquerade-test", reqwest_unstable, target_pointer_width = "64"))]
+//! Runs with the default build; reqwest's experimental HTTP/3 stack needs the
+//! `--cfg reqwest_unstable` flag, which the workspace `.cargo/config.toml` sets.
+#![cfg(all(reqwest_unstable, target_pointer_width = "64"))]
 
 use std::{collections::HashMap, net::SocketAddr, time::Duration};
 
