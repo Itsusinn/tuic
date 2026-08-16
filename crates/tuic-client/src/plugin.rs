@@ -5,6 +5,7 @@
 
 use std::{net::SocketAddr, sync::Arc};
 
+use tokio::sync::watch;
 use wind_base::LazyOutbound;
 use wind_core::{App, AppContext, InboundHooks, Outbound, Plugin};
 use wind_socks::inbound::{AuthMode, SocksInbound, SocksInboundOpt};
@@ -95,11 +96,19 @@ async fn build_tuic_outbound(ctx: Arc<AppContext>, relay: Relay) -> eyre::Result
 /// Wind framework plugin that wires a TUIC client's full runtime.
 pub struct TuicClientPlugin {
 	cfg: crate::Config,
+	bound_addr: Option<watch::Sender<Option<SocketAddr>>>,
 }
 
 impl TuicClientPlugin {
 	pub fn new(cfg: crate::Config) -> Self {
-		Self { cfg }
+		Self { cfg, bound_addr: None }
+	}
+
+	/// Report the actually-bound SOCKS5 address (OS-assigned when
+	/// `local.server` binds to port 0) through this watch channel.
+	pub fn with_bound_addr(mut self, tx: watch::Sender<Option<SocketAddr>>) -> Self {
+		self.bound_addr = Some(tx);
+		self
 	}
 }
 
@@ -137,6 +146,7 @@ impl Plugin<ClientRouter> for TuicClientPlugin {
 			_ => AuthMode::NoAuth,
 		};
 		let listen_addr = local.server;
+		let bound_addr = self.bound_addr;
 
 		let app = app.add_inbound_with(move |hooks: InboundHooks, ctx: Arc<AppContext>| {
 			let opts = SocksInboundOpt {
@@ -147,6 +157,7 @@ impl Plugin<ClientRouter> for TuicClientPlugin {
 				allow_udp: true,
 				inbound_tag: "socks-local".into(),
 				hooks,
+				bound_addr,
 			};
 			SocksInbound::new(opts, ctx.token.clone())
 		});

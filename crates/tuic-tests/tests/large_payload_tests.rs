@@ -9,7 +9,7 @@ use serial_test::serial;
 use tokio::time::timeout;
 use tracing::info;
 use tracing_test::traced_test;
-use tuic_tests::{install_crypto_provider, run_tcp_echo_server, start_quinn_pair, test_tcp_through_socks5};
+use tuic_tests::{run_tcp_echo_server, start_quinn_pair, test_tcp_through_socks5};
 
 fn make_test_data(size: usize) -> Vec<u8> {
 	(0..size).map(|i| (i % 251) as u8).collect()
@@ -19,9 +19,8 @@ fn make_test_data(size: usize) -> Vec<u8> {
 #[serial]
 #[traced_test]
 async fn test_tcp_512b_payload() -> eyre::Result<()> {
-	install_crypto_provider();
-
-	let socks5 = start_quinn_pair(21500, 21501, false).await;
+	let pair = start_quinn_pair(false).await;
+	let socks5 = pair.socks5_addr();
 	let (echo_task, echo_addr) = run_tcp_echo_server("127.0.0.1:0", "8k").await;
 	tokio::time::sleep(Duration::from_millis(200)).await;
 
@@ -38,6 +37,7 @@ async fn test_tcp_512b_payload() -> eyre::Result<()> {
 	echo_task.abort();
 	assert!(ok, "512B TCP echo through TUIC relay must succeed");
 
+	pair.shutdown().await;
 	Ok(())
 }
 
@@ -45,9 +45,8 @@ async fn test_tcp_512b_payload() -> eyre::Result<()> {
 #[serial]
 #[traced_test]
 async fn test_tcp_varied_payloads() -> eyre::Result<()> {
-	install_crypto_provider();
-
-	let socks5 = start_quinn_pair(21510, 21511, false).await;
+	let pair = start_quinn_pair(false).await;
+	let socks5 = pair.socks5_addr();
 
 	let sizes: &[usize] = &[1, 32, 256, 512, 768, 1024];
 	for &size in sizes {
@@ -68,5 +67,6 @@ async fn test_tcp_varied_payloads() -> eyre::Result<()> {
 		assert!(ok, "{size}-byte TCP echo through TUIC relay must succeed");
 	}
 
+	pair.shutdown().await;
 	Ok(())
 }

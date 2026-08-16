@@ -230,17 +230,15 @@ fn test_various_domain_names() {
 #[serial]
 #[tracing_test::traced_test]
 async fn test_server_client_integration() -> eyre::Result<()> {
-	use std::{collections::HashMap, net::SocketAddr, path::PathBuf};
-	#[cfg(feature = "aws-lc-rs")]
-	let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
-	#[cfg(feature = "ring")]
-	let _ = rustls::crypto::ring::default_provider().install_default();
+	use std::{collections::HashMap, path::PathBuf};
+
+	tuic_tests::install_crypto_provider();
 
 	// IMPORTANT: We need to configure ACL to allow localhost connections for
-	// testing
+	// testing. Ports bind to `0` so the OS assigns free ports (no collision).
 	let server_config = tuic_server::Config {
 		log_level: tuic_server::config::LogLevel::Debug,
-		server: "127.0.0.1:8443".parse::<SocketAddr>()?,
+		server: "127.0.0.1:0".parse().unwrap(),
 		users: {
 			let mut users = HashMap::new();
 			users.insert(
@@ -271,25 +269,13 @@ async fn test_server_client_integration() -> eyre::Result<()> {
 		..Default::default()
 	};
 
-	info!("[Integration Test] Starting TUIC server on 127.0.0.1:8443...");
-	let server_handle = tokio::spawn(async move {
-		// Must outlast the whole test body (TCP + UDP + concurrent phases with
-		// their own timeouts); a 10s cap could kill the server mid-test.
-		match timeout(Duration::from_secs(30), tuic_server::run(server_config)).await {
-			Ok(Ok(())) => info!("[Integration Test] Server completed successfully"),
-			Ok(Err(e)) => error!("[Integration Test] Server error: {}", e),
-			Err(_) => info!("[Integration Test] Server timed out (expected at test end)"),
-		}
-	});
-
-	// Wait a bit for server to start
-	info!("[Integration Test] Waiting for server to initialize...");
-	tokio::time::sleep(Duration::from_secs(1)).await;
-	info!("[Integration Test] Server should be ready now");
+	info!("[Integration Test] Starting TUIC server...");
+	let server = tuic_server::run(server_config).await?;
+	info!("[Integration Test] TUIC server listening on {}", server.local_addr);
 
 	let client_config = tuic_client::Config {
 		relay: tuic_client::config::Relay {
-			server: ("127.0.0.1".to_string(), 8443),
+			server: ("127.0.0.1".to_string(), server.local_addr.port()),
 			uuid: Uuid::parse_str("00000000-0000-0000-0000-000000000000")?,
 			password: std::sync::Arc::from(b"test_password".to_vec().into_boxed_slice()),
 			ip: None,
@@ -307,7 +293,7 @@ async fn test_server_client_integration() -> eyre::Result<()> {
 			..Default::default()
 		},
 		local: tuic_client::config::Local {
-			server: "127.0.0.1:1080".parse()?,
+			server: "127.0.0.1:0".parse().unwrap(),
 			username: None,
 			password: None,
 			dual_stack: Some(false),
@@ -318,34 +304,11 @@ async fn test_server_client_integration() -> eyre::Result<()> {
 		log_level: "debug".to_string(),
 	};
 
-	info!("[Integration Test] Starting TUIC client with SOCKS5 server on 127.0.0.1:1080...");
-	let client_handle = tokio::spawn(async move {
-		match timeout(Duration::from_secs(10), tuic_client::run(client_config)).await {
-			Ok(Ok(())) => info!("[Integration Test] Client completed successfully"),
-			Ok(Err(e)) => error!("[Integration Test] Client error: {}", e),
-			Err(_) => error!("[Integration Test] Client timeout"),
-		}
-	});
-
-	info!("[Integration Test] Waiting for client to connect and start SOCKS5 server...");
-	tokio::time::sleep(Duration::from_secs(2)).await;
-	info!("[Integration Test] SOCKS5 proxy should be ready now\n");
-
-	// Quick connectivity check - try to connect to SOCKS5 proxy. The proxy must
-	// be up: fail fast here instead of letting the TCP/UDP relay tests below
-	// time out opaquely.
-	use tokio::net::TcpStream;
-	info!("[Integration Test] Testing SOCKS5 proxy connectivity...");
-	let stream = TcpStream::connect("127.0.0.1:1080").await.unwrap_or_else(|e| {
-		panic!("[Integration Test] ✗ Failed to connect to SOCKS5 proxy: {e} — TUIC client may not have started")
-	});
-	info!("[Integration Test] ✓ Successfully connected to SOCKS5 proxy at 127.0.0.1:1080");
-	info!(
-		"[Integration Test] Local: {:?}, Peer: {:?}",
-		stream.local_addr(),
-		stream.peer_addr()
-	);
-	drop(stream);
+	info!("[Integration Test] Starting TUIC client...");
+	let client = tuic_client::run(client_config).await?;
+	let socks5 = client.socks5_addr.to_string();
+	let socks_addr = client.socks5_addr;
+	info!("[Integration Test] SOCKS5 proxy listening on {socks5}");
 
 	let tcp_test = async {
 		info!("[TCP Test] Starting TCP relay test...");
@@ -355,7 +318,7 @@ async fn test_server_client_integration() -> eyre::Result<()> {
 		tokio::time::sleep(Duration::from_millis(200)).await;
 
 		let test_data = b"Hello, TUIC!";
-		let ok = test_tcp_through_socks5("127.0.0.1:1080", echo_addr, test_data, "TCP Test").await;
+		let ok = test_tcp_through_socks5(&socks5, echo_addr, test_data, "TCP Test").await;
 
 		info!("[TCP Test] Waiting for echo server to finish...");
 		tokio::time::sleep(Duration::from_millis(500)).await;
@@ -383,7 +346,7 @@ async fn test_server_client_integration() -> eyre::Result<()> {
 
 		let test_data = b"Hello, UDP through TUIC!";
 		let client_bind_addr = std::net::SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), 0);
-		let ok = test_udp_through_socks5("127.0.0.1:1080", echo_addr, test_data, "UDP Test", client_bind_addr).await;
+		let ok = test_udp_through_socks5(&socks5, echo_addr, test_data, "UDP Test", client_bind_addr).await;
 
 		echo_task.abort();
 		info!("[UDP Test] UDP test completed\n");
@@ -434,59 +397,53 @@ async fn test_server_client_integration() -> eyre::Result<()> {
 			let handle = tokio::spawn(async move {
 				info!("[Concurrent Test] Connection {}: connecting...", i);
 				let test_data = format!("Connection {}", i);
-				let result: bool = match Socks5Stream::connect(
-					"127.0.0.1:1080".parse::<std::net::SocketAddr>().unwrap(),
-					addr.ip().to_string(),
-					addr.port(),
-					Config::default(),
-				)
-				.await
-				{
-					Ok(mut stream) => {
-						info!("[Concurrent Test] Connection {}: connected", i);
+				let result: bool =
+					match Socks5Stream::connect(socks_addr, addr.ip().to_string(), addr.port(), Config::default()).await {
+						Ok(mut stream) => {
+							info!("[Concurrent Test] Connection {}: connected", i);
 
-						if let Err(e) = stream.write_all(test_data.as_bytes()).await {
-							error!("[Concurrent Test] Connection {}: failed to send: {}", i, e);
-							false
-						} else {
-							info!("[Concurrent Test] Connection {}: sent {} bytes", i, test_data.len());
+							if let Err(e) = stream.write_all(test_data.as_bytes()).await {
+								error!("[Concurrent Test] Connection {}: failed to send: {}", i, e);
+								false
+							} else {
+								info!("[Concurrent Test] Connection {}: sent {} bytes", i, test_data.len());
 
-							let mut buf = vec![0u8; test_data.len()];
-							match timeout(Duration::from_secs(1), stream.read_exact(&mut buf)).await {
-								Ok(Ok(_)) => {
-									if buf == test_data.as_bytes() {
-										info!(
-											"[Concurrent Test] Connection {}: ✓ received matching echo ({} bytes)",
-											i,
-											buf.len()
-										);
-										true
-									} else {
-										error!(
-											"[Concurrent Test] Connection {}: ✗ echo mismatch: expected {:?}, got {:?}",
-											i,
-											test_data.as_bytes(),
-											&buf
-										);
+								let mut buf = vec![0u8; test_data.len()];
+								match timeout(Duration::from_secs(1), stream.read_exact(&mut buf)).await {
+									Ok(Ok(_)) => {
+										if buf == test_data.as_bytes() {
+											info!(
+												"[Concurrent Test] Connection {}: ✓ received matching echo ({} bytes)",
+												i,
+												buf.len()
+											);
+											true
+										} else {
+											error!(
+												"[Concurrent Test] Connection {}: ✗ echo mismatch: expected {:?}, got {:?}",
+												i,
+												test_data.as_bytes(),
+												&buf
+											);
+											false
+										}
+									}
+									Ok(Err(e)) => {
+										error!("[Concurrent Test] Connection {}: failed to receive: {}", i, e);
+										false
+									}
+									Err(_) => {
+										error!("[Concurrent Test] Connection {}: timeout", i);
 										false
 									}
 								}
-								Ok(Err(e)) => {
-									error!("[Concurrent Test] Connection {}: failed to receive: {}", i, e);
-									false
-								}
-								Err(_) => {
-									error!("[Concurrent Test] Connection {}: timeout", i);
-									false
-								}
 							}
 						}
-					}
-					Err(e) => {
-						error!("[Concurrent Test] Connection {}: failed to connect: {}", i, e);
-						false
-					}
-				};
+						Err(e) => {
+							error!("[Concurrent Test] Connection {}: failed to connect: {}", i, e);
+							false
+						}
+					};
 				result
 			});
 			handles.push(handle);
@@ -515,11 +472,8 @@ async fn test_server_client_integration() -> eyre::Result<()> {
 		"all 3 concurrent connections must round-trip their echo through SOCKS5/TUIC (got {concurrent_ok}/3)"
 	);
 
-	client_handle.abort();
-	server_handle.abort();
-
-	// Give tasks time to clean up
-	tokio::time::sleep(Duration::from_millis(100)).await;
+	client.shutdown().await;
+	server.shutdown().await;
 
 	Ok(())
 }

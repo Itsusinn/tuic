@@ -56,9 +56,8 @@ async fn masquerade_reverse_proxies_http3_probes() -> eyre::Result<()> {
 
 	let upstream = start_upstream().await;
 
-	// Fixed port (matches the repo's other e2e tests) so we can form the client
-	// URL before the server reports its address.
-	let server_addr: SocketAddr = "127.0.0.1:8471".parse().unwrap();
+	// Bind to `:0` so the OS assigns a free port atomically.
+	let server_addr: SocketAddr = "127.0.0.1:0".parse().unwrap();
 	let uuid = Uuid::new_v4();
 
 	let cfg = tuic_server::Config {
@@ -89,26 +88,9 @@ async fn masquerade_reverse_proxies_http3_probes() -> eyre::Result<()> {
 		..Default::default()
 	};
 
-	// `run` blocks forever on success; bound it so a hung server can't wedge the
-	// test runner, and treat the safety-timeout as "still serving".
-	let mut server = tokio::spawn(async move {
-		match timeout(Duration::from_secs(20), tuic_server::run(cfg)).await {
-			Ok(res) => res,
-			Err(_) => Ok(()),
-		}
-	});
-
-	// Wait for the server to bind. If it instead exits early (e.g. the fixed port
-	// is already in use), surface that real error now rather than letting the
-	// HTTP/3 request below fail with an opaque 10s timeout.
-	tokio::select! {
-		joined = &mut server => match joined {
-			Ok(Ok(())) => eyre::bail!("tuic-server exited before serving any request"),
-			Ok(Err(e)) => eyre::bail!("tuic-server failed to start: {e:?}"),
-			Err(e) => eyre::bail!("tuic-server task panicked: {e}"),
-		},
-		_ = tokio::time::sleep(Duration::from_secs(1)) => {}
-	}
+	// `run` returns once the inbound has bound and reported its address; a
+	// failure to start surfaces as an error here.
+	let server = tuic_server::run(cfg).await?;
 
 	// reqwest as a real HTTP/3 prober. `danger_accept_invalid_certs` because the
 	// server uses a self-signed cert; `http3_prior_knowledge` forces h3.
@@ -117,7 +99,7 @@ async fn masquerade_reverse_proxies_http3_probes() -> eyre::Result<()> {
 		.http3_prior_knowledge()
 		.build()?;
 
-	let url = format!("https://{server_addr}/some/secret/path?probe=1");
+	let url = format!("https://{}/some/secret/path?probe=1", server.local_addr);
 	let res = timeout(
 		Duration::from_secs(10),
 		client.get(&url).version(http::Version::HTTP_3).send(),
@@ -129,6 +111,8 @@ async fn masquerade_reverse_proxies_http3_probes() -> eyre::Result<()> {
 	assert_eq!(res.status(), 200, "masquerade should return the upstream's 200");
 	let body = res.text().await?;
 	assert_eq!(body, UPSTREAM_BODY, "masquerade must relay the upstream body");
+
+	server.shutdown().await;
 
 	Ok(())
 }

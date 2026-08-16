@@ -35,7 +35,8 @@ use tuic_tests::{
 #[serial]
 #[tracing_test::traced_test]
 async fn quiche_zero_rtt_config_tcp_and_udp_relay() -> eyre::Result<()> {
-	let socks = start_quiche_pair(8464, 1094, true).await;
+	let pair = start_quiche_pair(true).await;
+	let socks = pair.socks5_addr();
 
 	// --- TCP relay ---
 	let (tcp_echo, tcp_addr) = run_tcp_echo_server("127.0.0.1:0", "Quiche 0-RTT TCP").await;
@@ -62,5 +63,6 @@ async fn quiche_zero_rtt_config_tcp_and_udp_relay() -> eyre::Result<()> {
 	udp_echo.abort();
 	assert!(udp_ok, "UDP echo through the 0-RTT quiche backend did not round-trip");
 
+	pair.shutdown().await;
 	Ok(())
 }

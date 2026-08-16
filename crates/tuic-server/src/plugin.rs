@@ -4,9 +4,10 @@
 //! connection tracking, traffic stats, and the TUIC inbound into a single
 //! composable [`App`] via [`wind_core::App`].
 
-use std::sync::Arc;
+use std::{net::SocketAddr, sync::Arc};
 
 use eyre::Context;
+use tokio::sync::watch;
 use wind_acme;
 use wind_core::{ActiveConnections, App, AppContext, InboundHooks, Plugin, StaticTuicAuth, StatsCollector, utils::StackPrefer};
 use wind_tuic::quinn::inbound::{TuicInbound, TuicInboundOpts};
@@ -20,11 +21,31 @@ use crate::{
 /// Wind framework plugin that wires a TUIC server's full runtime.
 pub struct TuicServerPlugin {
 	cfg: Config,
+	bound_addr: Option<watch::Sender<Option<SocketAddr>>>,
+	restful_bound_addr: Option<watch::Sender<Option<SocketAddr>>>,
 }
 
 impl TuicServerPlugin {
 	pub fn new(cfg: Config) -> Self {
-		Self { cfg }
+		Self {
+			cfg,
+			bound_addr: None,
+			restful_bound_addr: None,
+		}
+	}
+
+	/// Report the actually-bound inbound address (OS-assigned when `cfg.server`
+	/// binds to port 0) through this watch channel.
+	pub fn with_bound_addr(mut self, tx: watch::Sender<Option<SocketAddr>>) -> Self {
+		self.bound_addr = Some(tx);
+		self
+	}
+
+	/// Report the actually-bound RESTful API address (OS-assigned when
+	/// `restful.addr` binds to port 0) through this watch channel.
+	pub fn with_restful_bound_addr(mut self, tx: watch::Sender<Option<SocketAddr>>) -> Self {
+		self.restful_bound_addr = Some(tx);
+		self
 	}
 }
 
@@ -99,6 +120,7 @@ impl Plugin<TuicRouter> for TuicServerPlugin {
 		let server = cfg.server;
 		let auth_timeout = cfg.auth_timeout;
 		let zero_rtt = cfg.zero_rtt_handshake;
+		let bound_addr = self.bound_addr;
 
 		// Inbound factory
 		match cfg.backend.mode {
@@ -187,6 +209,7 @@ impl Plugin<TuicRouter> for TuicServerPlugin {
 						masquerade: masquerade_enabled.then_some(wind_tuic::server::MasqueradeConfig {
 							upstream: masquerade_upstream,
 						}),
+						bound_addr: bound_addr.clone(),
 						..Default::default()
 					};
 					ServerInbound::Tuic(TuicInbound::new(ctx, opts))
@@ -305,6 +328,7 @@ impl Plugin<TuicRouter> for TuicServerPlugin {
 							hooks,
 							active_for_inbound,
 							"tuic".into(),
+							bound_addr.clone(),
 						))
 					});
 				}
@@ -326,8 +350,9 @@ impl Plugin<TuicRouter> for TuicServerPlugin {
 			});
 			let rf_addr = restful_cfg.addr;
 			let rf_cancel = app.context().token.child_token();
+			let restful_bound_addr = self.restful_bound_addr;
 			app.context().tasks.spawn(async move {
-				if let Err(e) = restful::serve(rf_state, rf_addr, rf_cancel).await {
+				if let Err(e) = restful::serve(rf_state, rf_addr, rf_cancel, restful_bound_addr).await {
 					tracing::warn!("RESTful API server stopped: {e}");
 				}
 			});

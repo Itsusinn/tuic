@@ -52,7 +52,7 @@ async fn test_ipv6_server_client_integration() -> eyre::Result<()> {
 
 	let server_config = tuic_server::Config {
 		log_level: tuic_server::config::LogLevel::Debug,
-		server: "[::1]:8444".parse::<SocketAddr>()?,
+		server: "[::1]:0".parse::<SocketAddr>()?,
 		users: {
 			let mut users = HashMap::new();
 			users.insert(
@@ -101,23 +101,13 @@ async fn test_ipv6_server_client_integration() -> eyre::Result<()> {
 		..Default::default()
 	};
 
-	info!("[IPv6 Test] Starting TUIC server on [::1]:8444...");
-	let server_handle = tokio::spawn(async move {
-		// Must outlast the whole test body; a 10s cap could kill it mid-test.
-		match timeout(Duration::from_secs(30), tuic_server::run(server_config)).await {
-			Ok(Ok(())) => info!("[IPv6 Test] Server completed successfully"),
-			Ok(Err(e)) => error!("[IPv6 Test] Server error: {}", e),
-			Err(_) => info!("[IPv6 Test] Server timed out (expected at test end)"),
-		}
-	});
-
-	info!("[IPv6 Test] Waiting for server to initialize...");
-	tokio::time::sleep(Duration::from_secs(1)).await;
-	info!("[IPv6 Test] Server should be ready now");
+	info!("[IPv6 Test] Starting TUIC server...");
+	let server = tuic_server::run(server_config).await?;
+	info!("[IPv6 Test] TUIC server listening on {}", server.local_addr);
 
 	let client_config = tuic_client::Config {
 		relay: tuic_client::config::Relay {
-			server: ("[::1]".to_string(), 8444),
+			server: ("[::1]".to_string(), server.local_addr.port()),
 			uuid: Uuid::parse_str("00000000-0000-0000-0000-000000000000")?,
 			password: std::sync::Arc::from(b"test_password".to_vec().into_boxed_slice()),
 			ip: None,
@@ -148,7 +138,7 @@ async fn test_ipv6_server_client_integration() -> eyre::Result<()> {
 			lazy: false,
 		},
 		local: tuic_client::config::Local {
-			server: "[::1]:1081".parse()?,
+			server: "[::1]:0".parse()?,
 			username: None,
 			password: None,
 			dual_stack: Some(false),
@@ -159,27 +149,19 @@ async fn test_ipv6_server_client_integration() -> eyre::Result<()> {
 		log_level: "debug".to_string(),
 	};
 
-	info!("[IPv6 Test] Starting TUIC client with SOCKS5 server on [::1]:1081...");
-	let client_handle = tokio::spawn(async move {
-		match timeout(Duration::from_secs(10), tuic_client::run(client_config)).await {
-			Ok(Ok(())) => info!("[IPv6 Test] Client completed successfully"),
-			Ok(Err(e)) => error!("[IPv6 Test] Client error: {}", e),
-			Err(_) => error!("[IPv6 Test] Client timeout"),
-		}
-	});
-
-	info!("[IPv6 Test] Waiting for client to connect and start SOCKS5 server...");
-	tokio::time::sleep(Duration::from_secs(2)).await;
-	info!("[IPv6 Test] SOCKS5 proxy should be ready now\n");
+	info!("[IPv6 Test] Starting TUIC client...");
+	let client = tuic_client::run(client_config).await?;
+	let socks5 = client.socks5_addr.to_string();
+	info!("[IPv6 Test] SOCKS5 proxy listening on {socks5}");
 
 	use tokio::net::TcpStream;
 	info!("[IPv6 Test] Testing SOCKS5 proxy connectivity on IPv6...");
 	// The proxy must be up: fail fast here instead of letting the IPv6 relay
 	// tests below time out opaquely.
-	let stream = TcpStream::connect("[::1]:1081").await.unwrap_or_else(|e| {
+	let stream = TcpStream::connect(client.socks5_addr).await.unwrap_or_else(|e| {
 		panic!("[IPv6 Test] ✗ Failed to connect to SOCKS5 proxy: {e} — TUIC client may not have started on IPv6")
 	});
-	info!("[IPv6 Test] ✓ Successfully connected to SOCKS5 proxy at [::1]:1081");
+	info!("[IPv6 Test] ✓ Successfully connected to SOCKS5 proxy at {socks5}");
 	info!("[IPv6 Test] Local: {:?}, Peer: {:?}", stream.local_addr(), stream.peer_addr());
 	drop(stream);
 
@@ -191,7 +173,7 @@ async fn test_ipv6_server_client_integration() -> eyre::Result<()> {
 		tokio::time::sleep(Duration::from_millis(200)).await;
 
 		let test_data = b"Hello IPv6 TUIC!";
-		let ok = test_tcp_through_socks5("[::1]:1081", echo_addr, test_data, "IPv6 TCP Test").await;
+		let ok = test_tcp_through_socks5(&socks5, echo_addr, test_data, "IPv6 TCP Test").await;
 
 		echo_task.abort();
 		info!("[IPv6 TCP Test] TCP test completed\n");
@@ -214,7 +196,7 @@ async fn test_ipv6_server_client_integration() -> eyre::Result<()> {
 
 		let test_data = b"Hello, IPv6 UDP through TUIC!";
 		let client_bind_addr = std::net::SocketAddr::new(IpAddr::V6(Ipv6Addr::UNSPECIFIED), 0);
-		let ok = test_udp_through_socks5("[::1]:1081", echo_addr, test_data, "IPv6 UDP Test", client_bind_addr).await;
+		let ok = test_udp_through_socks5(&socks5, echo_addr, test_data, "IPv6 UDP Test", client_bind_addr).await;
 
 		echo_task.abort();
 		info!("[IPv6 UDP Test] UDP test completed\n");
@@ -226,10 +208,8 @@ async fn test_ipv6_server_client_integration() -> eyre::Result<()> {
 		.expect("IPv6 UDP relay test timed out");
 	assert!(udp_ok, "IPv6 UDP relay through SOCKS5/TUIC failed");
 
-	client_handle.abort();
-	server_handle.abort();
-
-	tokio::time::sleep(Duration::from_millis(100)).await;
+	client.shutdown().await;
+	server.shutdown().await;
 
 	info!("[IPv6 Test] ========================================");
 	info!("[IPv6 Test] IPv6 Integration Test Completed");

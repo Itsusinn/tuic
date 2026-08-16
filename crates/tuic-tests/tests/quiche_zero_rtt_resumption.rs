@@ -28,6 +28,7 @@ use std::{net::SocketAddr, time::Duration};
 use rcgen::generate_simple_self_signed;
 use serial_test::serial;
 use tokio::time::timeout;
+use tokio_util::sync::CancellationToken;
 use tuic_tests::install_crypto_provider;
 use wind_quic::{
 	QuicConnection as _,
@@ -44,9 +45,8 @@ const SSL_EARLY_DATA_ACCEPTED: u32 = 2;
 async fn quiche_zero_rtt_resumption_accepts_early_data() -> eyre::Result<()> {
 	install_crypto_provider();
 
-	let server_port: u16 = 8465;
-	let server_addr: SocketAddr = format!("127.0.0.1:{server_port}").parse()?;
-	let data_dir = std::env::temp_dir().join(format!("wind-quiche-resumption-test-{server_port}"));
+	let server_addr: SocketAddr = "127.0.0.1:0".parse().unwrap();
+	let data_dir = std::env::temp_dir().join("wind-quiche-resumption-test");
 	std::fs::create_dir_all(&data_dir)?;
 
 	// The quiche backend loads credentials from PEM file paths; materialize a
@@ -57,21 +57,25 @@ async fn quiche_zero_rtt_resumption_accepts_early_data() -> eyre::Result<()> {
 	std::fs::write(&cert_path, certified.cert.pem())?;
 	std::fs::write(&key_path, certified.signing_key.serialize_pem())?;
 
-	let server_tls = ServerTlsConfig::from_pem_paths(
-		cert_path.to_str().unwrap(),
-		key_path.to_str().unwrap(),
-	);
-	let mut server_transport = TransportConfig::default();
-	server_transport.enable_0rtt = true; // mirrors tuic-server `zero_rtt_handshake`
+	let server_tls = ServerTlsConfig::from_pem_paths(cert_path.to_str().unwrap(), key_path.to_str().unwrap());
+	let server_transport = TransportConfig {
+		enable_0rtt: true, // mirrors tuic-server `zero_rtt_handshake`
+		..Default::default()
+	};
 
 	let mut acceptor = quiche::bind_server(server_addr, &server_tls, &server_transport, None).await?;
-	let server = tokio::spawn(async move {
-		// First connection (1-RTT): the client closes it once it has the
-		// ticket, so just accept and drop.
-		let _ = acceptor.accept().await;
-		// Second (resumed) connection: hold it open until the test ends.
-		let _ = acceptor.accept().await;
-		tokio::time::sleep(Duration::from_secs(30)).await;
+	let server_addr = acceptor.local_addr();
+	let cancel = CancellationToken::new();
+	let mut server = tokio::spawn({
+		let cancel = cancel.clone();
+		async move {
+			// First connection (1-RTT): the client closes it once it has the
+			// ticket, so just accept and drop.
+			let _ = acceptor.accept().await;
+			// Second (resumed) connection: hold it open until the test ends.
+			let _ = acceptor.accept().await;
+			cancel.cancelled().await;
+		}
 	});
 
 	let client_tls = ClientTlsConfig {
@@ -83,8 +87,10 @@ async fn quiche_zero_rtt_resumption_accepts_early_data() -> eyre::Result<()> {
 	// 0-RTT must be enabled on the client's transport too: `enable_early_data`
 	// on the TLS config plus `enable_0rtt` on the transport is what quiche
 	// needs to attempt early data on a resumed handshake.
-	let mut client_transport = TransportConfig::default();
-	client_transport.enable_0rtt = true;
+	let client_transport = TransportConfig {
+		enable_0rtt: true,
+		..Default::default()
+	};
 
 	// 1) First connection: full 1-RTT handshake; capture the session ticket.
 	let conn1 = quiche::connect(server_addr, &client_tls, &client_transport).await?;
@@ -111,8 +117,7 @@ async fn quiche_zero_rtt_resumption_accepts_early_data() -> eyre::Result<()> {
 	// rejected, session not resumed — means no 0-RTT happened.
 	let reason = conn2.early_data_reason();
 	assert_eq!(
-		reason,
-		SSL_EARLY_DATA_ACCEPTED,
+		reason, SSL_EARLY_DATA_ACCEPTED,
 		"quiche server did not accept 0-RTT early data on the resumed handshake (SSL_early_data_reason={reason}, \
 		 expected 2 = SSL_EARLY_DATA_ACCEPTED)"
 	);
@@ -120,6 +125,7 @@ async fn quiche_zero_rtt_resumption_accepts_early_data() -> eyre::Result<()> {
 	// Let the second connection close cleanly before tearing the server down.
 	conn2.close(0, b"second connection done");
 	tokio::time::sleep(Duration::from_millis(100)).await;
-	server.abort();
+	cancel.cancel();
+	let _ = timeout(Duration::from_secs(10), &mut server).await;
 	Ok(())
 }

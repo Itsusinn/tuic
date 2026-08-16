@@ -34,5 +34,9 @@ async fn main() -> eyre::Result<()> {
 	};
 	let _guards = tuic_server::log::init(&cfg)?;
 
-	tuic_server::run(cfg).await
+	let guard = tuic_server::run(cfg).await?;
+	tracing::info!("TUIC server listening on {}", guard.local_addr);
+	wind_core::shutdown_signal().await;
+	guard.shutdown().await;
+	Ok(())
 }

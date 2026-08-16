@@ -11,8 +11,7 @@ use std::{
 };
 
 use serial_test::serial;
-use tokio::time::timeout;
-use tracing::{error, info};
+use tracing::info;
 use tuic_server::config::ExperimentalConfig;
 use tuic_tests::{
 	run_socks5_server, run_tcp_echo_server, run_udp_echo_server, test_tcp_through_socks5, test_udp_through_socks5,
@@ -30,7 +29,7 @@ use uuid::Uuid;
 #[serial]
 #[tracing_test::traced_test]
 async fn test_client_proxy_configuration() -> eyre::Result<()> {
-	use std::{collections::HashMap, net::SocketAddr, path::PathBuf};
+	use std::{collections::HashMap, path::PathBuf};
 
 	#[cfg(feature = "aws-lc-rs")]
 	let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
@@ -43,7 +42,7 @@ async fn test_client_proxy_configuration() -> eyre::Result<()> {
 
 	let server_config = tuic_server::Config {
 		log_level: tuic_server::config::LogLevel::Debug,
-		server: "127.0.0.1:8445".parse::<SocketAddr>()?,
+		server: "127.0.0.1:0".parse().unwrap(),
 		users: {
 			let mut users = HashMap::new();
 			users.insert(
@@ -85,12 +84,9 @@ async fn test_client_proxy_configuration() -> eyre::Result<()> {
 		..Default::default()
 	};
 
-	info!("[Proxy Config Test] Starting TUIC server on {}...", server_config.server);
-	let server_handle = tokio::spawn(async move {
-		let _ = tuic_server::run(server_config).await;
-	});
-
-	tokio::time::sleep(Duration::from_millis(500)).await;
+	info!("[Proxy Config Test] Starting TUIC server...");
+	let server = tuic_server::run(server_config).await?;
+	info!("[Proxy Config Test] TUIC server listening on {}", server.local_addr);
 
 	info!("[Proxy Config Test] Test 1: Client with SOCKS5 proxy configuration");
 
@@ -102,7 +98,7 @@ async fn test_client_proxy_configuration() -> eyre::Result<()> {
 
 	let config = tuic_client::config::Config {
 		relay: tuic_client::config::Relay {
-			server: ("127.0.0.1".to_string(), 8445),
+			server: ("127.0.0.1".to_string(), server.local_addr.port()),
 			uuid: Uuid::parse_str("00000000-0000-0000-0000-000000000000")?,
 			password: std::sync::Arc::from("test_password".as_bytes()),
 			skip_cert_verify: true,
@@ -116,27 +112,16 @@ async fn test_client_proxy_configuration() -> eyre::Result<()> {
 			..Default::default()
 		},
 		local: tuic_client::config::Local {
-			server: "127.0.0.1:1082".parse()?,
+			server: "127.0.0.1:0".parse().unwrap(),
 			..Default::default()
 		},
 		log_level: "debug".to_string(),
 	};
-	let local_socks = "127.0.0.1:1082";
 	info!("[Proxy Config Test] ✓ Config built successfully");
 
 	info!("[Proxy Config Test] Starting TUIC client with proxy configuration...");
-	let client_handle = tokio::spawn(async move {
-		match timeout(Duration::from_secs(5), tuic_client::run(config)).await {
-			Ok(Ok(())) => info!("[Proxy Config Test] Client completed successfully"),
-			Ok(Err(e)) => {
-				info!("[Proxy Config Test] Client error: {}", e);
-			}
-			Err(_) => error!("[Proxy Config Test] Client timeout"),
-		}
-	});
-
-	// Give client time to start and connect through proxy
-	tokio::time::sleep(Duration::from_secs(2)).await;
+	let client = tuic_client::run(config).await?;
+	let local_socks = client.socks5_addr.to_string();
 
 	info!("[Proxy Config Test] ✓ Client started with proxy configuration");
 
@@ -147,7 +132,7 @@ async fn test_client_proxy_configuration() -> eyre::Result<()> {
 
 	info!("[Proxy Config Test] Testing connection through SOCKS5 proxy to echo server...");
 	let test_data = b"Hello through SOCKS5 proxy!";
-	let success = test_tcp_through_socks5(local_socks, echo_addr, test_data, "Proxy Test 1").await;
+	let success = test_tcp_through_socks5(&local_socks, echo_addr, test_data, "Proxy Test 1").await;
 
 	assert!(
 		success,
@@ -156,10 +141,10 @@ async fn test_client_proxy_configuration() -> eyre::Result<()> {
 	info!("[Proxy Config Test] ✓ Successfully connected through SOCKS5 proxy!");
 
 	echo_handle.abort();
-	client_handle.abort();
 	socks5_handle.abort();
-	server_handle.abort();
-	tokio::time::sleep(Duration::from_millis(100)).await;
+
+	client.shutdown().await;
+	server.shutdown().await;
 
 	Ok(())
 }
