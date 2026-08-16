@@ -34,7 +34,6 @@ use std::{net::SocketAddr, sync::Arc, time::Duration};
 
 use rcgen::generate_simple_self_signed;
 use rustls::pki_types::PrivateKeyDer;
-use serial_test::serial;
 use tokio::time::timeout;
 use tokio_util::sync::CancellationToken;
 use tuic_tests::install_crypto_provider;
@@ -44,7 +43,6 @@ use wind_quic::{
 };
 
 #[tokio::test]
-#[serial]
 #[tracing_test::traced_test]
 async fn quinn_zero_rtt_resumption_accepts_early_data() -> eyre::Result<()> {
 	install_crypto_provider();

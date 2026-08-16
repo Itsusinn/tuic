@@ -6,9 +6,9 @@
 //! QUIC handshake, RFC 5705 exporter authentication, the `ApplicationOverQuic`
 //! worker, and the channel-bridged TCP/UDP relay.
 //!
-//! `tuic_client::run` installs a process-global connection, so this file runs a
-//! single client and covers both TCP and UDP within one test. (0-RTT lives in a
-//! separate test file = separate process; cert hot-reload in another.)
+//! This file runs a single client and covers both TCP and UDP within one test.
+//! (0-RTT lives in a separate test file = separate process; cert hot-reload in
+//! another.)
 
 // These e2e tests drive real QUIC sockets; only *run* them on 64-bit hosts
 // (cross-emulated 32-bit test execution is unreliable for networking). The
@@ -23,14 +23,12 @@ use std::{
 	time::Duration,
 };
 
-use serial_test::serial;
 use tokio::time::timeout;
 use tuic_tests::{
 	run_tcp_echo_server, run_udp_echo_server, start_quiche_pair, test_tcp_through_socks5, test_udp_through_socks5,
 };
 
 #[tokio::test]
-#[serial]
 #[tracing_test::traced_test]
 async fn quiche_tcp_and_udp_relay() -> eyre::Result<()> {
 	let pair = start_quiche_pair(false).await;

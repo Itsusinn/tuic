@@ -3,16 +3,10 @@
 //! Spawns multiple simultaneous TCP connections through the TUIC proxy to
 //! verify that the multiplexed QUIC transport handles concurrent streams
 //! correctly.
-//!
-//! NOTE: `tuic_client::run` installs a process-global connection handle
-//! (`OnceCell`), so at most one client may run per test process. Each `#[test]`
-//! in this file launches its own server + client pair; use `#[serial]` to avoid
-//! collisions.
 
 use std::{net::SocketAddr, time::Duration};
 
 use fast_socks5::client::{Config, Socks5Stream};
-use serial_test::serial;
 use tokio::{
 	io::{AsyncReadExt, AsyncWriteExt},
 	net::TcpListener,
@@ -57,7 +51,6 @@ async fn run_multi_echo(addr: &str, count: usize) -> (tokio::task::JoinHandle<()
 }
 
 #[tokio::test(flavor = "multi_thread")]
-#[serial]
 #[traced_test]
 async fn test_concurrent_5_tcp_connections() -> eyre::Result<()> {
 	let pair = start_quinn_pair(false).await;

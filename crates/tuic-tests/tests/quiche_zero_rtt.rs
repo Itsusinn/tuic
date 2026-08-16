@@ -1,10 +1,9 @@
 //! 0-RTT *config-path* integration test for the tokio-quiche (`wind-tuiche`)
 //! backend.
 //!
-//! Runs in its own test binary (separate process) because `tuic_client::run`
-//! installs a process-global connection. 0-RTT early data is enabled on both
-//! the server (`enable_early_data`) and the client (`zero_rtt_handshake`); the
-//! test verifies that the 0-RTT-enabled *configuration* path still handshakes
+//! Runs in its own test binary (separate process). 0-RTT early data is enabled
+//! on both the server (`enable_early_data`) and the client (`zero_rtt_handshake`);
+//! the test verifies that the 0-RTT-enabled *configuration* path still handshakes
 //! and relays both TCP and UDP correctly (mirrors `quinn_zero_rtt.rs` for
 //! backend parity).
 //!
@@ -25,14 +24,12 @@ use std::{
 	time::Duration,
 };
 
-use serial_test::serial;
 use tokio::time::timeout;
 use tuic_tests::{
 	run_tcp_echo_server, run_udp_echo_server, start_quiche_pair, test_tcp_through_socks5, test_udp_through_socks5,
 };
 
 #[tokio::test]
-#[serial]
 #[tracing_test::traced_test]
 async fn quiche_zero_rtt_config_tcp_and_udp_relay() -> eyre::Result<()> {
 	let pair = start_quiche_pair(true).await;

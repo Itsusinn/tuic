@@ -168,10 +168,6 @@ pub struct TestPair {
 impl TestPair {
 	/// Start a `tuic-server` + `tuic-client` pair on OS-assigned loopback
 	/// ports.
-	///
-	/// NOTE: `tuic_client::run` installs a **process-global** connection
-	/// (`OnceCell`), so at most one client may run per test process — keep to
-	/// one client-starting test per `tests/*.rs` file.
 	pub async fn start(backend: Backend, zero_rtt: bool) -> Self {
 		install_crypto_provider();
 
@@ -705,9 +701,7 @@ pub async fn low_level_tcp_echo(
 }
 
 // ---------------------------------------------------------------------------
-// Full-stack (SOCKS5) e2e case helpers — used by thin per-backend test files
-// because `tuic_client::run` installs a process-global connection (at most one
-// client per test binary).
+// Full-stack (SOCKS5) e2e case helpers — used by thin per-backend test files.
 // ---------------------------------------------------------------------------
 
 /// Minimal HTTP/1.1 client over a raw TCP stream, enough for the local

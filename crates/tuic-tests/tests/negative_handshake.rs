@@ -15,7 +15,6 @@
 
 use std::{net::SocketAddr, sync::Arc, time::Duration};
 
-use serial_test::serial;
 use tokio::time::timeout;
 use tuic_server::legacy::{AclAddress, AclRule};
 use tuic_tests::{
@@ -147,7 +146,6 @@ async fn run_cases(backend: Backend) {
 }
 
 #[tokio::test]
-#[serial]
 #[tracing_test::traced_test]
 async fn negative_handshake_quinn() {
 	run_cases(Backend::Quinn).await;
@@ -158,7 +156,6 @@ async fn negative_handshake_quinn() {
 	not(any(target_os = "android", target_os = "freebsd", target_arch = "loongarch64"))
 ))]
 #[tokio::test]
-#[serial]
 #[tracing_test::traced_test]
 async fn negative_handshake_quiche() {
 	run_cases(Backend::Quiche).await;

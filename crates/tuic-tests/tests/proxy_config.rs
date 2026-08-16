@@ -1,7 +1,4 @@
 //! SOCKS5-proxy-configuration integration test.
-//!
-//! In its own test binary (separate process) because it runs
-//! `tuic_client::run`, which sets process-global connection/SOCKS state.
 
 #![allow(unused_imports)]
 
@@ -10,7 +7,6 @@ use std::{
 	time::Duration,
 };
 
-use serial_test::serial;
 use tracing::info;
 use tuic_server::config::ExperimentalConfig;
 use tuic_tests::{
@@ -26,7 +22,6 @@ use uuid::Uuid;
 //   udp_buffer_size)
 // - Configuration parsing for different proxy scenarios
 #[tokio::test]
-#[serial]
 #[tracing_test::traced_test]
 async fn test_client_proxy_configuration() -> eyre::Result<()> {
 	use std::{collections::HashMap, path::PathBuf};

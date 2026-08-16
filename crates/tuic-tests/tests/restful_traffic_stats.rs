@@ -8,14 +8,9 @@
 //! `/traffic` reports an empty object even after real traffic. This test fails
 //! in that state and passes once the plugin wires the collector through
 //! `App::set_stats_collector`.
-//!
-//! NOTE: `tuic_client::run` installs a process-global connection (`OnceCell`),
-//! so at most one client-starting test may live per `tests/*.rs` file — keep
-//! this file to a single `#[serial]` test.
 
 use std::{net::SocketAddr, time::Duration};
 
-use serial_test::serial;
 use tokio::{
 	io::{AsyncReadExt, AsyncWriteExt},
 	net::TcpStream,
@@ -95,7 +90,6 @@ async fn start_pair_with_restful() -> RestfulPair {
 }
 
 #[tokio::test]
-#[serial]
 async fn restful_traffic_reflects_inbound_stats() {
 	let pair = start_pair_with_restful().await;
 	let socks5 = pair.client.socks5_addr.to_string();

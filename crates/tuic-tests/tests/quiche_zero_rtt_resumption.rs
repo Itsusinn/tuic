@@ -26,7 +26,6 @@
 use std::{net::SocketAddr, time::Duration};
 
 use rcgen::generate_simple_self_signed;
-use serial_test::serial;
 use tokio::time::timeout;
 use tokio_util::sync::CancellationToken;
 use tuic_tests::install_crypto_provider;
@@ -40,7 +39,6 @@ use wind_quic::{
 const SSL_EARLY_DATA_ACCEPTED: u32 = 2;
 
 #[tokio::test]
-#[serial]
 #[tracing_test::traced_test]
 async fn quiche_zero_rtt_resumption_accepts_early_data() -> eyre::Result<()> {
 	install_crypto_provider();

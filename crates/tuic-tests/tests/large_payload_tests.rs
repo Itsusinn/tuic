@@ -5,7 +5,6 @@
 
 use std::time::Duration;
 
-use serial_test::serial;
 use tokio::time::timeout;
 use tracing::info;
 use tracing_test::traced_test;
@@ -16,7 +15,6 @@ fn make_test_data(size: usize) -> Vec<u8> {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-#[serial]
 #[traced_test]
 async fn test_tcp_512b_payload() -> eyre::Result<()> {
 	let pair = start_quinn_pair(false).await;
@@ -42,7 +40,6 @@ async fn test_tcp_512b_payload() -> eyre::Result<()> {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-#[serial]
 #[traced_test]
 async fn test_tcp_varied_payloads() -> eyre::Result<()> {
 	let pair = start_quinn_pair(false).await;

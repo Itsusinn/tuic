@@ -2,9 +2,8 @@
 //! the default backend, which until now had no 0-RTT coverage (only the quiche
 //! backend did).
 //!
-//! Runs in its own test binary (separate process) because `tuic_client::run`
-//! installs a process-global connection. 0-RTT early data is enabled on the
-//! server via `zero_rtt_handshake`, which wires into the inbound's
+//! Runs in its own test binary (separate process). 0-RTT early data is enabled
+//! on the server via `zero_rtt_handshake`, which wires into the inbound's
 //! `max_early_data_size` and the `into_0rtt()` accept path (see
 //! `wind_tuic::quinn::inbound`). The test verifies that the 0-RTT-enabled
 //! *configuration* path still handshakes and relays TCP and UDP correctly.
@@ -18,14 +17,12 @@ use std::{
 	time::Duration,
 };
 
-use serial_test::serial;
 use tokio::time::timeout;
 use tuic_tests::{
 	run_tcp_echo_server, run_udp_echo_server, start_quinn_pair, test_tcp_through_socks5, test_udp_through_socks5,
 };
 
 #[tokio::test]
-#[serial]
 #[tracing_test::traced_test]
 async fn quinn_zero_rtt_config_tcp_and_udp_relay() -> eyre::Result<()> {
 	let pair = start_quinn_pair(true).await;
