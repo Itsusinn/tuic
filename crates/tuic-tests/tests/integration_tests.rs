@@ -4,7 +4,6 @@ use std::{
 };
 
 use bytes::BytesMut;
-use serial_test::serial;
 use tokio::time::timeout;
 use tokio_util::codec::{Decoder, Encoder};
 use tracing::{error, info};
@@ -227,7 +226,6 @@ fn test_various_domain_names() {
 // IMPORTANT: The server ACL must be configured to allow localhost connections
 // for the test to work, since all echo servers run on 127.0.0.1
 #[tokio::test]
-#[serial]
 #[tracing_test::traced_test]
 async fn test_server_client_integration() -> eyre::Result<()> {
 	use std::{collections::HashMap, path::PathBuf};

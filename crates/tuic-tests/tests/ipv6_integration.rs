@@ -1,8 +1,4 @@
 //! IPv6 end-to-end integration test.
-//!
-//! In its own test binary (separate process) because it runs
-//! `tuic_client::run`, which sets process-global connection/SOCKS state that
-//! cannot be re-set by a second client in the same process.
 
 #![allow(unused_imports)]
 
@@ -11,7 +7,6 @@ use std::{
 	time::Duration,
 };
 
-use serial_test::serial;
 use tokio::time::timeout;
 use tracing::{error, info};
 use tuic_server::config::ExperimentalConfig;
@@ -29,7 +24,6 @@ use uuid::Uuid;
 // This addresses the error that occurs when using IPv6 addresses like
 // "[::1]:443"
 #[tokio::test]
-#[serial]
 #[tracing_test::traced_test]
 async fn test_ipv6_server_client_integration() -> eyre::Result<()> {
 	use std::{collections::HashMap, net::SocketAddr, path::PathBuf};
