@@ -32,7 +32,12 @@ jobs:
       rust-toolchain: "stable"
       packages: "tuic-server,tuic-client"
       target-config-file: ".github/target.toml"
-      rustflags: ""
+      # The reusable workflow exports this as the `RUSTFLAGS` env var, which
+      # overrides `.cargo/config.toml [build] rustflags`; mirror the committed
+      # `--cfg reqwest_unstable` here so it stays enabled in CI. It is required
+      # for the `tuic-tests` masquerade test, whose reqwest dependency turns on
+      # the experimental `http3` feature (inert for `tuic-server`/`tuic-client`).
+      rustflags: "--cfg reqwest_unstable"
       enable-tmate: false
       enable-sccache: true
       only-clippy-tests-on-pr: false
