@@ -119,12 +119,25 @@ async fn restful_traffic_reflects_inbound_stats() {
 		kicked["kicked"].as_u64().unwrap_or(0) > 0,
 		"kick must hit the live connection, got: {kick_body}"
 	);
-	// Let the final sample land in the collector.
-	tokio::time::sleep(Duration::from_millis(1000)).await;
-
-	// 3. Ask the RESTful API for the cumulative per-user traffic.
-	let body = http_request(restful_addr, "GET", "/traffic", None).await;
-	info!("[restful stats test] /traffic response: {body}");
+	// 3. Poll the RESTful API for the cumulative per-user traffic until the final
+	//    sample lands in the collector or the deadline passes. Polling instead of
+	//    a fixed sleep is faster on the happy path and robust to scheduling jitter.
+	let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+	let body = loop {
+		let body = http_request(restful_addr, "GET", "/traffic", None).await;
+		info!("[restful stats test] /traffic response: {body}");
+		let parsed: serde_json::Value = serde_json::from_str(&body).expect("valid JSON body");
+		if let Some(entry) = parsed.get(pair.uuid.to_string()) {
+			if entry["tx"].as_u64().unwrap_or(0) > 0 && entry["rx"].as_u64().unwrap_or(0) > 0 {
+				break body;
+			}
+		}
+		assert!(
+			tokio::time::Instant::now() < deadline,
+			"timed out waiting for traffic to appear in /traffic, last response: {body}"
+		);
+		tokio::time::sleep(Duration::from_millis(50)).await;
+	};
 
 	// 4. The response must contain this user with non-zero tx/rx. Before the fix,
 	//    the plugin never injects its collector into the App, so the inbound has no
