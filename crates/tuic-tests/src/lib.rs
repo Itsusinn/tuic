@@ -288,6 +288,20 @@ pub async fn run_udp_echo_server(
 	std::net::SocketAddr,
 	std::sync::Arc<tokio::net::UdpSocket>,
 ) {
+	run_udp_echo_server_sized(bind_addr, test_name, 1024).await
+}
+
+/// `run_udp_echo_server` with a caller-sized receive buffer (for >MTU UDP
+/// fragmentation tests).
+pub async fn run_udp_echo_server_sized(
+	bind_addr: &str,
+	test_name: &str,
+	buf_size: usize,
+) -> (
+	tokio::task::JoinHandle<()>,
+	std::net::SocketAddr,
+	std::sync::Arc<tokio::net::UdpSocket>,
+) {
 	use std::sync::Arc;
 
 	use tokio::net::UdpSocket;
@@ -299,7 +313,7 @@ pub async fn run_udp_echo_server(
 	let echo_server_clone = echo_server.clone();
 	let test_name = test_name.to_string();
 	let echo_task = tokio::spawn(async move {
-		let mut buf = vec![0u8; 1024];
+		let mut buf = vec![0u8; buf_size];
 		info!("[{} Echo Server] Waiting for packets...", test_name);
 		match timeout(Duration::from_secs(5), echo_server_clone.recv_from(&mut buf)).await {
 			Ok(Ok((n, addr))) => {
@@ -402,6 +416,19 @@ pub async fn test_udp_through_socks5(
 	test_name: &str,
 	bind_addr: std::net::SocketAddr,
 ) -> bool {
+	test_udp_through_socks5_sized(socks5_addr, target_addr, test_data, test_name, bind_addr, 1024).await
+}
+
+/// `test_udp_through_socks5` with a caller-sized receive buffer (for >MTU UDP
+/// fragmentation tests).
+pub async fn test_udp_through_socks5_sized(
+	socks5_addr: &str,
+	target_addr: std::net::SocketAddr,
+	test_data: &[u8],
+	test_name: &str,
+	bind_addr: std::net::SocketAddr,
+	buf_size: usize,
+) -> bool {
 	use fast_socks5::client::Socks5Datagram;
 	use tokio::net::TcpStream;
 
@@ -438,7 +465,7 @@ pub async fn test_udp_through_socks5(
 							info!("[{}] Successfully sent {} bytes through SOCKS5 proxy", test_name, sent);
 							info!("[{}] Waiting for echo response...", test_name);
 
-							let mut buffer = vec![0u8; 1024];
+							let mut buffer = vec![0u8; buf_size];
 							match timeout(Duration::from_secs(5), socks.recv_from(&mut buffer)).await {
 								Ok(Ok((len, addr))) => {
 									info!("[{}] Received {} bytes from {:?}", test_name, len, addr);
@@ -590,4 +617,237 @@ pub async fn run_socks5_server(
 	});
 
 	(server_task, server_addr)
+}
+
+// ---------------------------------------------------------------------------
+// Low-level helpers for negative / handshake tests.
+//
+// These bypass the SOCKS5 inbound entirely and drive a `TuicOutbound` directly
+// (mirroring `tests/graceful_shutdown.rs`), so a single test binary can
+// exercise several distinct failure modes against both backends without the
+// "one `tuic_client::run` per process" constraint.
+// ---------------------------------------------------------------------------
+
+/// Build low-level `TuicOutboundOpts` against a local server, with the knobs
+/// the negative tests need to tweak (TLS verification, ALPN, auth).
+pub fn low_level_outbound_opts(
+	server_port: u16,
+	uuid: Uuid,
+	password: &str,
+	skip_cert_verify: bool,
+	alpn: &[&str],
+) -> wind_tuic::quinn::outbound::TuicOutboundOpts {
+	use wind_tuic::quinn::outbound::{ReconnectConfig, TuicOutboundOpts};
+
+	let password_bytes: Arc<[u8]> = Arc::from(password.as_bytes());
+	TuicOutboundOpts {
+		peer_addr: SocketAddr::from(([127, 0, 0, 1], server_port)),
+		sni: "localhost".to_string(),
+		auth: (uuid, password_bytes),
+		zero_rtt_handshake: false,
+		heartbeat: Duration::from_secs(30),
+		gc_interval: Duration::from_secs(10),
+		gc_lifetime: Duration::from_secs(30),
+		skip_cert_verify,
+		alpn: alpn.iter().map(|s| s.to_string()).collect(),
+		// Reconnect is irrelevant here (the supervisor is only started by
+		// `start_poll`, which these tests never call); disable it explicitly so
+		// a failed handshake cannot accidentally spawn a retry loop.
+		reconnect: ReconnectConfig {
+			enabled: false,
+			..Default::default()
+		},
+	}
+}
+
+/// Drive a single TCP echo round-trip through a low-level `TuicOutbound`
+/// (bypassing SOCKS5). Returns `true` iff the echoed bytes match `test_data`
+/// within `timeout_dur`; returns `false` on timeout, EOF, or mismatch — the
+/// failure signal the negative tests assert on.
+pub async fn low_level_tcp_echo(
+	outbound: Arc<wind_tuic::quinn::outbound::TuicOutbound>,
+	echo_addr: SocketAddr,
+	test_data: &[u8],
+	timeout_dur: Duration,
+) -> bool {
+	use tokio::io::{AsyncReadExt, AsyncWriteExt};
+	use wind_core::{FlowContext, Outbound, hooks::Protocol, rule::NetworkType, types::TargetAddr};
+
+	let (local, remote) = tokio::io::duplex(8192);
+	let target = TargetAddr::IPv4(std::net::Ipv4Addr::LOCALHOST, echo_addr.port());
+	let ctx = FlowContext {
+		target,
+		network: NetworkType::Tcp,
+		source: None,
+		inbound_tag: "tuic-test".into(),
+		protocol: Protocol::Tuic,
+		user: None,
+		inbound_port: None,
+		inbound_type: None,
+	};
+
+	let tunnel = tokio::spawn(async move {
+		let _ = outbound.handle_tcp(ctx, Box::new(remote)).await;
+	});
+
+	let (mut reader, mut writer) = tokio::io::split(local);
+	if writer.write_all(test_data).await.is_err() {
+		tunnel.abort();
+		return false;
+	}
+	let mut buf = vec![0u8; test_data.len()];
+	let echoed = matches!(
+		tokio::time::timeout(timeout_dur, reader.read_exact(&mut buf)).await,
+		Ok(Ok(_))
+	) && buf.as_slice() == test_data;
+	tunnel.abort();
+	echoed
+}
+
+// ---------------------------------------------------------------------------
+// Full-stack (SOCKS5) e2e case helpers — used by thin per-backend test files
+// because `tuic_client::run` installs a process-global connection (at most one
+// client per test binary).
+// ---------------------------------------------------------------------------
+
+/// Minimal HTTP/1.1 client over a raw TCP stream, enough for the local
+/// RESTful API (`/kick`, `/traffic`). Returns the response body (asserts HTTP
+/// 200).
+pub async fn restful_request(addr: SocketAddr, method: &str, path: &str, body: Option<&str>) -> String {
+	use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+	let mut stream = timeout(Duration::from_secs(5), tokio::net::TcpStream::connect(addr))
+		.await
+		.expect("connect to restful api")
+		.expect("tcp connect");
+	let mut request =
+		format!("{method} {path} HTTP/1.1\r\nHost: {addr}\r\nAccept: application/json\r\nConnection: close\r\n");
+	if let Some(b) = body {
+		request.push_str("Content-Type: application/json\r\n");
+		request.push_str(&format!("Content-Length: {}\r\n", b.len()));
+	}
+	request.push_str("\r\n");
+	if let Some(b) = body {
+		request.push_str(b);
+	}
+	stream.write_all(request.as_bytes()).await.expect("write request");
+	let mut buf = Vec::new();
+	stream.read_to_end(&mut buf).await.expect("read response");
+	let response = String::from_utf8_lossy(&buf);
+	assert!(
+		response.starts_with("HTTP/1.1 200"),
+		"unexpected status in response: {response}"
+	);
+	response.split_once("\r\n\r\n").map(|(_, b)| b).unwrap_or(&response).trim().to_string()
+}
+
+/// Full-stack reconnect E2E: server (RESTful enabled) + client with
+/// `reconnect` on. Prove a TCP echo works, kick the user to drop the live
+/// connection, then poll until a fresh echo succeeds — proving the client
+/// supervisor re-established the QUIC connection and resumed relaying.
+pub async fn reconnect_case(backend: Backend) {
+	install_crypto_provider();
+
+	let uuid = Uuid::new_v4();
+	let password = "test_password";
+	let data_dir = std::env::temp_dir().join(format!("wind-tuic-reconnect-{}", Uuid::new_v4()));
+
+	let server_addr: SocketAddr = "127.0.0.1:0".parse().unwrap();
+	let mut scfg = match backend {
+		Backend::Quinn => quinn_server_config(server_addr, data_dir, uuid, password, false),
+		Backend::Quiche => quiche_server_config(server_addr, data_dir, uuid, password, false),
+	};
+	scfg.restful.enabled = true;
+	scfg.restful.addr = "127.0.0.1:0".parse().unwrap();
+	scfg.restful.secret = String::new();
+
+	let server = tuic_server::run(scfg).await.expect("reconnect test server failed to start");
+	let restful_addr = server.restful_addr.expect("RESTful API should report its bound address");
+
+	let mut ccfg = tuic_client_config(server.local_addr.port(), 0, uuid, password, false);
+	ccfg.relay.reconnect = true;
+	ccfg.relay.reconnect_initial_backoff = Duration::from_millis(100);
+	ccfg.relay.reconnect_max_backoff = Duration::from_millis(500);
+	let client = tuic_client::run(ccfg).await.expect("reconnect test client failed to start");
+	let socks5 = client.socks5_addr.to_string();
+
+	// 1. Initial echo proves the connection + auth work.
+	let (echo_task, echo_addr) = run_tcp_echo_server("127.0.0.1:0", "reconnect-before").await;
+	tokio::time::sleep(Duration::from_millis(200)).await;
+	let ok = test_tcp_through_socks5(&socks5, echo_addr, b"before-kick", "reconnect-before").await;
+	assert!(ok, "initial TCP echo must succeed before the kick");
+	echo_task.abort();
+
+	// 2. Kick the user to drop the live QUIC connection.
+	let kick_body = restful_request(restful_addr, "POST", "/kick", Some(&format!("[\"{uuid}\"]"))).await;
+	let kicked: serde_json::Value = serde_json::from_str(&kick_body).expect("valid kick JSON");
+	assert!(kicked["kicked"].as_u64().unwrap_or(0) > 0, "kick must hit the live connection, got: {kick_body}");
+
+	// 3. Poll a fresh echo until the supervisor reconnects and relay recovers.
+	let deadline = tokio::time::Instant::now() + Duration::from_secs(20);
+	loop {
+		let (echo_task, echo_addr) = run_tcp_echo_server("127.0.0.1:0", "reconnect-after").await;
+		tokio::time::sleep(Duration::from_millis(200)).await;
+		let ok = test_tcp_through_socks5(&socks5, echo_addr, b"after-kick", "reconnect-after").await;
+		echo_task.abort();
+		if ok {
+			break;
+		}
+		assert!(
+			tokio::time::Instant::now() < deadline,
+			"client must auto-reconnect and relay data after the connection was kicked"
+		);
+		tokio::time::sleep(Duration::from_millis(200)).await;
+	}
+
+	client.shutdown().await;
+	server.shutdown().await;
+}
+
+/// Full-stack >MTU UDP fragmentation/reassembly E2E: send a UDP payload larger
+/// than the QUIC max datagram size through the SOCKS5 proxy, forcing the
+/// client to fragment it (`UdpStream::send_fragmented_packet`) and the server
+/// to reassemble it (`FragmentReassemblyBuffer`), and the reverse on the echo
+/// return path. The echoed payload must round-trip intact.
+pub async fn udp_fragmentation_case(backend: Backend) {
+	install_crypto_provider();
+
+	let uuid = Uuid::new_v4();
+	let password = "test_password";
+	let data_dir = std::env::temp_dir().join(format!("wind-tuic-udpfrag-{}", Uuid::new_v4()));
+
+	let server_addr: SocketAddr = "127.0.0.1:0".parse().unwrap();
+	let scfg = match backend {
+		Backend::Quinn => quinn_server_config(server_addr, data_dir, uuid, password, false),
+		Backend::Quiche => quiche_server_config(server_addr, data_dir, uuid, password, false),
+	};
+	let server = tuic_server::run(scfg)
+		.await
+		.expect("udp fragmentation test server failed to start");
+
+	let ccfg = tuic_client_config(server.local_addr.port(), 0, uuid, password, false);
+	let client = tuic_client::run(ccfg)
+		.await
+		.expect("udp fragmentation test client failed to start");
+	let socks5 = client.socks5_addr.to_string();
+
+	// 4000 bytes comfortably exceeds the QUIC max datagram size (~1200 B), so
+	// the client must fragment and the server must reassemble.
+	let payload: Vec<u8> = (0..4000).map(|i| (i % 251) as u8).collect();
+	let (echo_task, echo_addr, _echo_server) = run_udp_echo_server_sized("127.0.0.1:0", "udp-frag", 65536).await;
+	tokio::time::sleep(Duration::from_millis(200)).await;
+
+	let bind_addr = std::net::SocketAddr::new(std::net::IpAddr::V4(std::net::Ipv4Addr::UNSPECIFIED), 0);
+	let ok = timeout(
+		Duration::from_secs(15),
+		test_udp_through_socks5_sized(&socks5, echo_addr, &payload, "udp-frag", bind_addr, 65536),
+	)
+	.await
+	.unwrap_or(false);
+
+	echo_task.abort();
+	assert!(ok, ">MTU UDP payload must round-trip through fragmentation/reassembly");
+
+	client.shutdown().await;
+	server.shutdown().await;
 }
