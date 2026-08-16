@@ -138,115 +138,94 @@ pub fn tuic_client_config(
 	}
 }
 
-/// Poll the client's SOCKS5 proxy listener until it accepts TCP connections,
-/// so callers know the client process is up before driving traffic through it.
-/// This proves the listener is bound, not that the QUIC tunnel to the server
-/// is fully established — the relay tests below do that validation.
-///
-/// Without this, a server/client that fails to start (port already in use,
-/// bad config, certificate issue) just leaves a silently-dead pair and the
-/// relay tests below can fail — or worse, pass without exercising anything.
-async fn wait_for_socks5_ready(socks_port: u16, backend: &str) {
-	let addr: SocketAddr = format!("127.0.0.1:{socks_port}").parse().unwrap();
-	let deadline = tokio::time::Instant::now() + Duration::from_secs(15);
-	loop {
-		match tokio::net::TcpStream::connect(addr).await {
-			Ok(_) => {
-				info!("[{backend} test] SOCKS5 proxy is ready at {addr}");
-				return;
-			}
-			Err(_) if tokio::time::Instant::now() < deadline => {
-				tokio::time::sleep(Duration::from_millis(200)).await;
-			}
-			Err(e) => panic!(
-				"[{backend} test] SOCKS5 proxy at {addr} never became ready (last error: {e}); the tuic-server or tuic-client \
-				 task may have failed to start"
-			),
+/// Which `tuic-server` backend the pair exercises.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum Backend {
+	Quinn,
+	Quiche,
+}
+
+impl Backend {
+	fn label(self) -> &'static str {
+		match self {
+			Backend::Quinn => "quinn",
+			Backend::Quiche => "quiche",
 		}
 	}
 }
 
-/// Start a quiche-backed `tuic-server` plus a `tuic-client`, waiting for the
-/// client's SOCKS5 proxy to come up. Returns the SOCKS5 address.
+/// A running `tuic-server` + `tuic-client` pair for integration tests.
 ///
-/// NOTE: `tuic_client::run` installs a **process-global** connection
-/// (`OnceCell`), so at most one client may run per test process — keep to one
-/// client-starting test per `tests/*.rs` file.
-pub async fn start_quiche_pair(server_port: u16, socks_port: u16, zero_rtt: bool) -> String {
-	install_crypto_provider();
-
-	let uuid = Uuid::new_v4();
-	let password = "test_password";
-	let server_addr: SocketAddr = format!("127.0.0.1:{server_port}").parse().unwrap();
-	let data_dir = std::env::temp_dir().join(format!("wind-tuiche-test-{server_port}"));
-
-	let scfg = quiche_server_config(server_addr, data_dir, uuid, password, zero_rtt);
-	tokio::spawn(async move {
-		match timeout(Duration::from_secs(20), tuic_server::run(scfg)).await {
-			Ok(Ok(())) => info!("[quiche test] server exited ok"),
-			Ok(Err(e)) => error!("[quiche test] server error: {e}"),
-			Err(_) => info!("[quiche test] server timed out (expected at test end)"),
-		}
-	});
-	tokio::time::sleep(Duration::from_secs(1)).await;
-
-	let ccfg = tuic_client_config(server_port, socks_port, uuid, password, zero_rtt);
-	tokio::spawn(async move {
-		match timeout(Duration::from_secs(20), tuic_client::run(ccfg)).await {
-			Ok(Ok(())) => info!("[quiche test] client exited ok"),
-			Ok(Err(e)) => error!("[quiche test] client error: {e}"),
-			Err(_) => info!("[quiche test] client timed out (expected at test end)"),
-		}
-	});
-	tokio::time::sleep(Duration::from_secs(2)).await;
-
-	// Fail fast if the pair never came up instead of letting the relay tests
-	// below run against a dead server/client.
-	wait_for_socks5_ready(socks_port, "quiche").await;
-
-	format!("127.0.0.1:{socks_port}")
+/// Both processes bind to port `0` — the OS assigns a free port atomically, so
+/// there is no bind/unbind race — and report their actually-bound addresses
+/// back through the returned guards. `shutdown` cancels both tokens and waits
+/// (bounded) for the processes to drain, with a `Drop` guard as a last resort.
+pub struct TestPair {
+	server: tuic_server::ServerGuard,
+	client: tuic_client::ClientGuard,
 }
 
-/// Start a quinn-backed `tuic-server` plus a `tuic-client`, waiting for the
-/// client's SOCKS5 proxy to come up. Returns the SOCKS5 address. Mirrors
-/// [`start_quiche_pair`] but exercises the default quinn backend.
-///
-/// NOTE: `tuic_client::run` installs a **process-global** connection
-/// (`OnceCell`), so at most one client may run per test process — keep to one
-/// client-starting test per `tests/*.rs` file.
-pub async fn start_quinn_pair(server_port: u16, socks_port: u16, zero_rtt: bool) -> String {
-	install_crypto_provider();
+impl TestPair {
+	/// Start a `tuic-server` + `tuic-client` pair on OS-assigned loopback
+	/// ports.
+	///
+	/// NOTE: `tuic_client::run` installs a **process-global** connection
+	/// (`OnceCell`), so at most one client may run per test process — keep to
+	/// one client-starting test per `tests/*.rs` file.
+	pub async fn start(backend: Backend, zero_rtt: bool) -> Self {
+		install_crypto_provider();
 
-	let uuid = Uuid::new_v4();
-	let password = "test_password";
-	let server_addr: SocketAddr = format!("127.0.0.1:{server_port}").parse().unwrap();
-	let data_dir = std::env::temp_dir().join(format!("wind-tuic-quinn-test-{server_port}"));
+		let uuid = Uuid::new_v4();
+		let password = "test_password";
+		// Unique per-test data dir: the server binds to `:0`, so its actual port
+		// isn't known until startup returns.
+		let data_dir = std::env::temp_dir().join(format!("wind-tuic-test-{}", Uuid::new_v4()));
 
-	let scfg = quinn_server_config(server_addr, data_dir, uuid, password, zero_rtt);
-	tokio::spawn(async move {
-		match timeout(Duration::from_secs(20), tuic_server::run(scfg)).await {
-			Ok(Ok(())) => info!("[quinn test] server exited ok"),
-			Ok(Err(e)) => error!("[quinn test] server error: {e}"),
-			Err(_) => info!("[quinn test] server timed out (expected at test end)"),
-		}
-	});
-	tokio::time::sleep(Duration::from_secs(1)).await;
+		let server_addr: SocketAddr = "127.0.0.1:0".parse().unwrap();
+		let label = backend.label();
+		let scfg = match backend {
+			Backend::Quinn => quinn_server_config(server_addr, data_dir, uuid, password, zero_rtt),
+			Backend::Quiche => quiche_server_config(server_addr, data_dir, uuid, password, zero_rtt),
+		};
 
-	let ccfg = tuic_client_config(server_port, socks_port, uuid, password, zero_rtt);
-	tokio::spawn(async move {
-		match timeout(Duration::from_secs(20), tuic_client::run(ccfg)).await {
-			Ok(Ok(())) => info!("[quinn test] client exited ok"),
-			Ok(Err(e)) => error!("[quinn test] client error: {e}"),
-			Err(_) => info!("[quinn test] client timed out (expected at test end)"),
-		}
-	});
-	tokio::time::sleep(Duration::from_secs(2)).await;
+		let server = tuic_server::run(scfg)
+			.await
+			.unwrap_or_else(|e| panic!("[{label} test] tuic-server failed to start: {e:#}"));
 
-	// Fail fast if the pair never came up instead of letting the relay tests
-	// below run against a dead server/client.
-	wait_for_socks5_ready(socks_port, "quinn").await;
+		let ccfg = tuic_client_config(server.local_addr.port(), 0, uuid, password, zero_rtt);
+		let client = tuic_client::run(ccfg)
+			.await
+			.unwrap_or_else(|e| panic!("[{label} test] tuic-client failed to start: {e:#}"));
 
-	format!("127.0.0.1:{socks_port}")
+		TestPair { server, client }
+	}
+
+	/// The server's actually-bound QUIC address.
+	pub fn server_addr(&self) -> SocketAddr {
+		self.server.local_addr
+	}
+
+	/// The client's SOCKS5 address as `"host:port"` — the format the relay
+	/// helpers expect.
+	pub fn socks5_addr(&self) -> String {
+		self.client.socks5_addr.to_string()
+	}
+
+	/// Cancel both processes and wait (bounded) for them to drain.
+	pub async fn shutdown(self) {
+		self.client.shutdown().await;
+		self.server.shutdown().await;
+	}
+}
+
+/// Start a quiche-backed pair. See [`TestPair::start`].
+pub async fn start_quiche_pair(zero_rtt: bool) -> TestPair {
+	TestPair::start(Backend::Quiche, zero_rtt).await
+}
+
+/// Start a quinn-backed pair. See [`TestPair::start`].
+pub async fn start_quinn_pair(zero_rtt: bool) -> TestPair {
+	TestPair::start(Backend::Quinn, zero_rtt).await
 }
 
 pub async fn run_tcp_echo_server(bind_addr: &str, test_name: &str) -> (tokio::task::JoinHandle<()>, std::net::SocketAddr) {

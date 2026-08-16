@@ -18,7 +18,6 @@
 
 use std::{net::SocketAddr, sync::Arc, time::Duration};
 
-use async_trait::async_trait;
 use quinn::Endpoint;
 use rustls::{
 	DigitallySignedStruct, SignatureScheme,
@@ -111,19 +110,15 @@ fn self_signed() -> (String, String) {
 
 /// Connect to `addr`, complete the handshake, and return the served leaf
 /// certificate (DER).
-async fn fetch_served_cert(endpoint: &Endpoint, addr: SocketAddr) -> Vec<u8> {
-	let conn = endpoint
-		.connect(addr, "localhost")
-		.expect("connect config")
-		.await
-		.expect("handshake");
+async fn fetch_served_cert(endpoint: &Endpoint, addr: SocketAddr) -> eyre::Result<Vec<u8>> {
+	let conn = endpoint.connect(addr, "localhost").expect("connect config").await?;
 	let identity = conn.peer_identity().expect("peer identity present");
 	let chain = identity
 		.downcast::<Vec<CertificateDer<'static>>>()
 		.expect("peer identity is a cert chain");
 	let leaf = chain.first().expect("non-empty chain").as_ref().to_vec();
 	conn.close(0u32.into(), b"done");
-	leaf
+	Ok(leaf)
 }
 
 #[tokio::test]
@@ -140,9 +135,10 @@ async fn quiche_certificate_hot_reload() -> eyre::Result<()> {
 	std::fs::write(&cert_path, &cert_a)?;
 	std::fs::write(&key_path, &key_a)?;
 
-	let listen: SocketAddr = "127.0.0.1:8468".parse()?;
+	let (addr_tx, mut addr_rx) = tokio::sync::watch::channel(None::<SocketAddr>);
 	let inbound = TuicheInboundBuilder::new()
-		.listen_addr(listen)
+		.listen_addr("127.0.0.1:0".parse().unwrap())
+		.bound_addr(addr_tx)
 		.certificate_path(cert_path.to_string_lossy().into_owned())
 		.private_key_path(key_path.to_string_lossy().into_owned())
 		.build()
@@ -154,7 +150,13 @@ async fn quiche_certificate_hot_reload() -> eyre::Result<()> {
 	tokio::spawn(async move {
 		let _ = inbound.listen(&dispatcher).await;
 	});
-	tokio::time::sleep(Duration::from_secs(1)).await;
+
+	// Wait for the listener to bind and report its OS-assigned address.
+	let listen = addr_rx
+		.wait_for(|a| a.is_some())
+		.await
+		.expect("listener exited before reporting its bound address")
+		.expect("wait_for predicate guarantees Some");
 
 	// quinn client that accepts any cert (we only want to read what is served).
 	let provider = Arc::new(rustls::crypto::aws_lc_rs::default_provider());
@@ -169,14 +171,14 @@ async fn quiche_certificate_hot_reload() -> eyre::Result<()> {
 	endpoint.set_default_client_config(quinn::ClientConfig::new(Arc::new(qcc)));
 
 	// 1) Served cert before rotation.
-	let served_a = fetch_served_cert(&endpoint, listen).await;
+	let served_a = fetch_served_cert(&endpoint, listen).await?;
 
 	// 2) Rotate to a different certificate B and reconnect.
 	let (cert_b, key_b) = self_signed();
 	store.update(cert_b.as_bytes(), key_b.as_bytes())?;
 	// Small settle so the next handshake observes the swap.
 	tokio::time::sleep(Duration::from_millis(200)).await;
-	let served_b = fetch_served_cert(&endpoint, listen).await;
+	let served_b = fetch_served_cert(&endpoint, listen).await?;
 
 	assert_ne!(
 		served_a, served_b,

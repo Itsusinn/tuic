@@ -21,6 +21,7 @@ use axum::{
 };
 use dashmap::DashMap;
 use serde_json::{Value, json};
+use tokio::sync::watch;
 use tokio_util::sync::CancellationToken;
 use tracing::warn;
 use uuid::Uuid;
@@ -181,7 +182,6 @@ impl KickConnections for NoopConnections {
 		true
 	}
 }
-
 
 impl KickConnections for ConnectionTracker {
 	fn kick_user(&self, user: &UserId) -> usize {
@@ -351,7 +351,12 @@ async fn reset_traffic_handler(State(state): State<Arc<RestfulState>>, headers: 
 }
 
 /// Build the axum [`Router`] and start serving on the configured address.
-pub async fn serve(state: Arc<RestfulState>, addr: SocketAddr, cancel: CancellationToken) -> eyre::Result<()> {
+pub async fn serve(
+	state: Arc<RestfulState>,
+	addr: SocketAddr,
+	cancel: CancellationToken,
+	bound_addr: Option<watch::Sender<Option<SocketAddr>>>,
+) -> eyre::Result<()> {
 	let app = Router::new()
 		.route("/kick", post(kick_handler))
 		.route("/online", get(online_handler))
@@ -374,6 +379,10 @@ pub async fn serve(state: Arc<RestfulState>, addr: SocketAddr, cancel: Cancellat
 			}
 		}
 	};
+
+	if let Some(tx) = &bound_addr {
+		let _ = tx.send_replace(Some(listener.local_addr()?));
+	}
 
 	warn!("RESTful API server started, listening on {addr}");
 	axum::serve(listener, app)

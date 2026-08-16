@@ -19,7 +19,7 @@ use tokio::{
 };
 use tracing::info;
 use tracing_test::traced_test;
-use tuic_tests::{install_crypto_provider, start_quinn_pair};
+use tuic_tests::start_quinn_pair;
 
 /// Start a multi-connection TCP echo server that handles `count` concurrent
 /// connections, each in its own spawned task.
@@ -60,9 +60,8 @@ async fn run_multi_echo(addr: &str, count: usize) -> (tokio::task::JoinHandle<()
 #[serial]
 #[traced_test]
 async fn test_concurrent_5_tcp_connections() -> eyre::Result<()> {
-	install_crypto_provider();
-
-	let socks5 = start_quinn_pair(21100, 21101, false).await;
+	let pair = start_quinn_pair(false).await;
+	let socks5 = pair.socks5_addr();
 	let (echo_task, echo_addr) = run_multi_echo("127.0.0.1:0", 5).await;
 	tokio::time::sleep(Duration::from_millis(200)).await;
 
@@ -105,5 +104,6 @@ async fn test_concurrent_5_tcp_connections() -> eyre::Result<()> {
 	echo_task.abort();
 	assert_eq!(ok, 5, "5 concurrent TCP echoes must all succeed (got {ok})");
 
+	pair.shutdown().await;
 	Ok(())
 }
