@@ -359,7 +359,8 @@ mod tests {
 
 	#[test]
 	fn test_make_outbound_action_direct_single_ip_no_lb() {
-		// Single bind address → still a DirectOutbound (no LoadBalance wrapping).
+		// Single bind address → still a DirectOutbound (no LoadBalance
+		// wrapping).
 		let rule = OutboundRule {
 			kind: "direct".to_string(),
 			ip_mode: None,

@@ -52,7 +52,8 @@ impl CertResolver {
 				_ = interval.tick() => {}
 			}
 
-			// Treat I/O errors as transient (ACME renaming, perm changes, etc.).
+			// Treat I/O errors as transient (ACME renaming, perm changes,
+			// etc.).
 			let new_hash = match Self::calc_hash(&self.cert_path, &self.key_path).await {
 				Ok(h) => h,
 				Err(e) => {
@@ -372,8 +373,8 @@ mod tests {
 	#[tokio::test]
 	async fn test_load_priv_key_rejects_random_bytes() {
 		// 256 bytes of non-DER, non-PEM nonsense (first byte = 0xFF, not 0x30
-		// SEQUENCE). Previously this was silently wrapped as PKCS8 and failed later
-		// inside rustls with an opaque error far from the load site.
+		// SEQUENCE). Previously this was silently wrapped as PKCS8 and failed
+		// later inside rustls with an opaque error far from the load site.
 		let mut garbage = vec![0u8; 256];
 		for (i, b) in garbage.iter_mut().enumerate() {
 			*b = (i as u8).wrapping_mul(31).wrapping_add(0x80);

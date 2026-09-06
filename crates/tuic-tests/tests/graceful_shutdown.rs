@@ -304,8 +304,8 @@ async fn drains_while_active_traffic_flows() {
 		let _ = c.handle_tcp(test_ctx(&target), Box::new(remote)).await;
 	});
 
-	// 5. Pump traffic through the tunnel: send a ping, expect the echo back. Run in
-	//    a loop to keep the connection busy.
+	// 5. Pump traffic through the tunnel: send a ping, expect the echo back.
+	//    Run in a loop to keep the connection busy.
 	let traffic_done = Arc::new(AtomicBool::new(false));
 	let td = traffic_done.clone();
 	// Count successful ping→echo round-trips so the test can prove traffic

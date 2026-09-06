@@ -633,11 +633,12 @@ fn address_to_rule_types(addr: &AclAddress) -> Vec<wrule::RuleType> {
 			// `{ip}/32` first — `ipnet::IpNet` HAPPILY accepts
 			// `"2001:db8::1/32"`, because `/32` is a legal IPv6 prefix length,
 			// but it returns the network `2001:db8::/32` instead of the host
-			// `/128`, silently expanding the ACL to cover all of `2001:db8::/32`.
-			// Now parse the address first, then construct the host-prefixed
-			// CIDR by IP family. Truly malformed literals return an empty Vec
-			// (drops the rule) instead of falling back to `0.0.0.0/32`, which
-			// turned bad data into a silently-passing "match nothing" rule.
+			// `/128`, silently expanding the ACL to cover all of
+			// `2001:db8::/32`. Now parse the address first, then construct
+			// the host-prefixed CIDR by IP family. Truly malformed literals
+			// return an empty Vec (drops the rule) instead of falling back
+			// to `0.0.0.0/32`, which turned bad data into a silently-passing
+			// "match nothing" rule.
 			match ip_str.parse::<std::net::IpAddr>() {
 				Ok(std::net::IpAddr::V4(v4)) => {
 					if let Ok(net) = ipnet::Ipv4Net::new(v4, 32) {
@@ -660,11 +661,12 @@ fn address_to_rule_types(addr: &AclAddress) -> Vec<wrule::RuleType> {
 			}
 		}
 		AclAddress::Cidr(cidr_str) => {
-			// The grammar accepts prefixes like `/999` (acl.pest only bounds the
-			// digit count), so a malformed CIDR such as `10.0.0.0/99` can reach
-			// here. Warn on failure -- like the `Ip` arm above -- instead of
-			// dropping the rule silently, which would fail-open (e.g. a `reject`
-			// rule vanishing and its traffic being allowed).
+			// The grammar accepts prefixes like `/999` (acl.pest only bounds
+			// the digit count), so a malformed CIDR such as `10.0.0.0/99`
+			// can reach here. Warn on failure -- like the `Ip` arm above --
+			// instead of dropping the rule silently, which would fail-open
+			// (e.g. a `reject` rule vanishing and its traffic being
+			// allowed).
 			match cidr_str.parse::<ipnet::IpNet>() {
 				Ok(net) => vec![wrule::RuleType::IpCidr(net)],
 				Err(e) => {
@@ -930,9 +932,10 @@ mod tests {
 
 	#[tokio::test]
 	async fn keyword_prefix_of_domain_is_not_swallowed() {
-		// `private`/`localhost` must be complete tokens, not prefixes. Before the
-		// boundary assertion, `proxy privatetracker.org` parsed as
-		// addr=Private + hijack="tracker.org", silently rerouting all of RFC1918.
+		// `private`/`localhost` must be complete tokens, not prefixes. Before
+		// the boundary assertion, `proxy privatetracker.org` parsed as
+		// addr=Private + hijack="tracker.org", silently rerouting all of
+		// RFC1918.
 		let result = parse_acl_rule("proxy privatetracker.org").unwrap();
 		assert_eq!(result.outbound, "proxy");
 		assert_eq!(result.addr, AclAddress::Domain("privatetracker.org".into()));

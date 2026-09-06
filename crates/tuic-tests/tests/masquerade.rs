@@ -8,7 +8,8 @@
 //! adapter, the `h3` server, and the reqwest reverse proxy to the upstream.
 //!
 //! Runs with the default build; reqwest's experimental HTTP/3 stack needs the
-//! `--cfg reqwest_unstable` flag, which the workspace `.cargo/config.toml` sets.
+//! `--cfg reqwest_unstable` flag, which the workspace `.cargo/config.toml`
+//! sets.
 #![cfg(all(reqwest_unstable, target_pointer_width = "64"))]
 
 use std::{collections::HashMap, net::SocketAddr, time::Duration};
@@ -31,7 +32,8 @@ async fn start_upstream() -> SocketAddr {
 	tokio::spawn(async move {
 		while let Ok((mut sock, _)) = listener.accept().await {
 			tokio::spawn(async move {
-				// A probe GET has no body, so a single read drains the request line
+				// A probe GET has no body, so a single read drains the request
+				// line
 				// + headers; we don't need to parse it.
 				let mut buf = [0u8; 8192];
 				let _ = sock.read(&mut buf).await;
@@ -90,8 +92,8 @@ async fn masquerade_reverse_proxies_http3_probes() -> eyre::Result<()> {
 	// failure to start surfaces as an error here.
 	let server = tuic_server::run(cfg).await?;
 
-	// reqwest as a real HTTP/3 prober. `danger_accept_invalid_certs` because the
-	// server uses a self-signed cert; `http3_prior_knowledge` forces h3.
+	// reqwest as a real HTTP/3 prober. `danger_accept_invalid_certs` because
+	// the server uses a self-signed cert; `http3_prior_knowledge` forces h3.
 	let client = reqwest::Client::builder()
 		.danger_accept_invalid_certs(true)
 		.http3_prior_knowledge()

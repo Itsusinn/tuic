@@ -18,8 +18,8 @@ use std::{net::SocketAddr, sync::Arc, time::Duration};
 use tokio::time::timeout;
 use tuic_server::legacy::{AclAddress, AclRule};
 use tuic_tests::{
-	Backend, install_crypto_provider, low_level_outbound_opts, low_level_tcp_echo, quiche_server_config,
-	quinn_server_config, run_tcp_echo_server,
+	Backend, install_crypto_provider, low_level_outbound_opts, low_level_tcp_echo, quiche_server_config, quinn_server_config,
+	run_tcp_echo_server,
 };
 use uuid::Uuid;
 use wind_core::AppContext;
@@ -73,7 +73,8 @@ async fn try_connect(
 async fn run_cases(backend: Backend) {
 	install_crypto_provider();
 
-	// 1. Certificate verification failure: self-signed server + verification on.
+	// 1. Certificate verification failure: self-signed server + verification
+	//    on.
 	{
 		let uuid = Uuid::new_v4();
 		let server = start_server(backend, uuid, "correct", vec!["h3".into()], vec![], Duration::from_secs(3)).await;

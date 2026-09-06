@@ -2,10 +2,10 @@
 //! backend.
 //!
 //! Runs in its own test binary (separate process). 0-RTT early data is enabled
-//! on both the server (`enable_early_data`) and the client (`zero_rtt_handshake`);
-//! the test verifies that the 0-RTT-enabled *configuration* path still handshakes
-//! and relays both TCP and UDP correctly (mirrors `quinn_zero_rtt.rs` for
-//! backend parity).
+//! on both the server (`enable_early_data`) and the client
+//! (`zero_rtt_handshake`); the test verifies that the 0-RTT-enabled
+//! *configuration* path still handshakes and relays both TCP and UDP correctly
+//! (mirrors `quinn_zero_rtt.rs` for backend parity).
 //!
 //! Note: this only proves the config path works over a fresh 1-RTT connection.
 //! Whether early data is actually *accepted* on a resumed handshake is covered

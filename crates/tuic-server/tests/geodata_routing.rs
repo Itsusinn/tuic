@@ -56,8 +56,8 @@ fn build_geodata() -> (tempfile::TempPath, Arc<GeoData>) {
 async fn geoip_rule_routes_through_the_server_engine() {
 	let (_tmp, geo) = build_geodata();
 
-	// Mirror TuicRouter::new: raw wind rules (here a Metacubex GEOIP rule, as it
-	// would arrive via `config.rules`) plus the geodata database.
+	// Mirror TuicRouter::new: raw wind rules (here a Metacubex GEOIP rule, as
+	// it would arrive via `config.rules`) plus the geodata database.
 	let engine = AclEngine::builder("direct")
 		.rules([Rule::parse("GEOIP,CN,reject").unwrap()])
 		.geodata(geo)

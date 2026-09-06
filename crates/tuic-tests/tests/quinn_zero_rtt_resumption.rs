@@ -6,8 +6,8 @@
 //!
 //! 1. connect once (full 1-RTT handshake; the server sends a TLS 1.3 session
 //!    ticket which the client caches in memory);
-//! 2. reconnect on the **same** client endpoint/config (so the ticket is
-//!    still there) and convert the handshake via `Connecting::into_0rtt()`;
+//! 2. reconnect on the **same** client endpoint/config (so the ticket is still
+//!    there) and convert the handshake via `Connecting::into_0rtt()`;
 //! 3. open a stream and write before the handshake completes, then assert on
 //!    the server side that the received stream `is_0rtt()` — i.e. the server
 //!    *accepted* the client's early data rather than rejecting it.
@@ -90,10 +90,11 @@ async fn quinn_zero_rtt_resumption_accepts_early_data() -> eyre::Result<()> {
 				let conn1 = incoming.accept()?.await?;
 				conn1.close(0u32.into(), b"server done with first connection");
 
-				// Second (resumed) connection: accept as 0.5-RTT immediately so we
-				// can observe the stream *before* the handshake finishes. If the
-				// server accepted the client's early data, the stream is visible
-				// here and reports `is_0rtt() == true`.
+				// Second (resumed) connection: accept as 0.5-RTT immediately so
+				// we can observe the stream *before* the handshake
+				// finishes. If the server accepted the client's early data,
+				// the stream is visible here and reports `is_0rtt() ==
+				// true`.
 				let incoming = server_endpoint
 					.accept()
 					.await
@@ -116,7 +117,8 @@ async fn quinn_zero_rtt_resumption_accepts_early_data() -> eyre::Result<()> {
 			}
 			.await;
 			let _ = result_tx.send(outcome);
-			// Keep the endpoint and `conn2` alive until the test signals teardown.
+			// Keep the endpoint and `conn2` alive until the test signals
+			// teardown.
 			cancel.cancelled().await;
 			drop(conn2_holder);
 		}
@@ -143,8 +145,7 @@ async fn quinn_zero_rtt_resumption_accepts_early_data() -> eyre::Result<()> {
 	let connecting = client.connecting(server_addr)?;
 	let conn2 = connecting.into_0rtt().map_err(|_| {
 		eyre::eyre!(
-			"client did not attempt 0-RTT on reconnect: no resumable session ticket was \
-			 cached from the first connection"
+			"client did not attempt 0-RTT on reconnect: no resumable session ticket was cached from the first connection"
 		)
 	})?;
 

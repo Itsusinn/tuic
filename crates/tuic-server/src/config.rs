@@ -660,9 +660,9 @@ impl Config {
 
 		// Migrate QUIC-related fields into the quinn backend tuning.
 		//
-		// A deprecated top-level `[quic]` section is applied first (as a whole),
-		// then the even-older flat scalar keys override individual fields, so the
-		// historical precedence (flat keys win) is preserved.
+		// A deprecated top-level `[quic]` section is applied first (as a
+		// whole), then the even-older flat scalar keys override individual
+		// fields, so the historical precedence (flat keys win) is preserved.
 		#[allow(deprecated)]
 		{
 			if let Some(quic) = self.__quic.take() {
@@ -698,8 +698,9 @@ impl Config {
 		}
 
 		// Migrate the v1.8.11 `[camouflage]` section into `[masquerade]`.
-		// `reverse_proxy_hostname` / `request_timeout` / `skip_backend_tls_verify`
-		// have no modern counterpart and are discarded.
+		// `reverse_proxy_hostname` / `request_timeout` /
+		// `skip_backend_tls_verify` have no modern counterpart and are
+		// discarded.
 		#[allow(deprecated)]
 		{
 			if let Some(cam) = self.__camouflage.take() {
@@ -711,7 +712,8 @@ impl Config {
 		}
 
 		// Migrate the pre-1.8.11 `restful_server` scalar into `[restful]`,
-		// restoring the historical "restful configured => API enabled" semantics.
+		// restoring the historical "restful configured => API enabled"
+		// semantics.
 		#[allow(deprecated)]
 		{
 			if let Some(addr) = self.__restful_server.take() {
@@ -835,8 +837,8 @@ fn infer_config_format(content: &str) -> ConfigFormat {
 		// YAML key-value with colon and typically followed by space or newline
 		if let Some(colon_pos) = trimmed_line.find(':') {
 			let after_colon = &trimmed_line[colon_pos + 1..];
-			// In YAML, after colon there's usually a space, newline, or it's at the end
-			// In TOML, = is used instead of :
+			// In YAML, after colon there's usually a space, newline, or it's at
+			// the end In TOML, = is used instead of :
 			return after_colon.is_empty() || after_colon.starts_with(' ') || after_colon.starts_with('\t');
 		}
 		false
@@ -1218,16 +1220,18 @@ mod tests {
 		let result = test_parse_config(config, ".json").await;
 		assert!(result.is_err());
 
-		// Test non-existent configuration files - should fail when trying to parse
+		// Test non-existent configuration files - should fail when trying to
+		// parse
 		let result = Cli::try_parse_from(vec!["test_binary", "--config", "non_existent.toml"]);
-		// This will succeed at parsing CLI level, but fail when actually loading the
-		// file
+		// This will succeed at parsing CLI level, but fail when actually
+		// loading the file
 		if let Ok(cli) = result {
 			assert!(cli.config.is_some());
 			assert!(!cli.config.unwrap().exists());
 		}
 
-		// Test missing configuration file parameters - should fail at CLI parsing level
+		// Test missing configuration file parameters - should fail at CLI
+		// parsing level
 		let result = Cli::try_parse_from(vec!["test_binary"]);
 		// This should succeed because --config is optional in CLI definition
 		assert!(result.is_ok());
@@ -1249,8 +1253,8 @@ mod tests {
 
 	#[tokio::test]
 	async fn test_outbound_valid_with_default() {
-		// Test that when named outbound rules exist with a proper default, validation
-		// passes
+		// Test that when named outbound rules exist with a proper default,
+		// validation passes
 		let config = include_str!("../tests/config/outbound_valid_with_default.toml");
 
 		let result = test_parse_config(config, ".toml").await.unwrap();
@@ -1313,7 +1317,8 @@ mod tests {
 		assert_eq!(ports1.entries[0].port_spec, AclPortSpec::Single(53));
 		assert!(rule1.hijack.is_none());
 
-		// Test complex ports rule: "allow localhost udp/53,tcp/80,tcp/443,udp/443"
+		// Test complex ports rule: "allow localhost
+		// udp/53,tcp/80,tcp/443,udp/443"
 		let rule2 = &result.acl[1];
 		assert_eq!(rule2.outbound, "allow");
 		assert_eq!(rule2.addr, AclAddress::Localhost);
@@ -1497,8 +1502,8 @@ max_idle_time = "45s"
 
 	#[tokio::test]
 	async fn test_legacy_quic_section_migrates_to_backend_quinn() {
-		// A deprecated top-level `[quic]` section must still load, migrating into
-		// `backend.quinn`.
+		// A deprecated top-level `[quic]` section must still load, migrating
+		// into `backend.quinn`.
 		let config = r#"
 server = "127.0.0.1:8080"
 
@@ -1658,8 +1663,8 @@ send_window = 12345678
 		// Test that JSON5 parser can handle standard JSON
 		let config = include_str!("../tests/config/json5_backward_compatibility.json5");
 
-		// Create dummy cert/key files referenced by the test config (no data_dir,
-		// so paths resolve relative to CWD).
+		// Create dummy cert/key files referenced by the test config (no
+		// data_dir, so paths resolve relative to CWD).
 		let _ = std::fs::write("cert.pem", b"dummy");
 		let _ = std::fs::write("key.pem", b"dummy");
 
@@ -1887,7 +1892,8 @@ send_window = 12345678
 
 	#[tokio::test]
 	async fn test_env_state_in_docker_inference() {
-		// Test IN_DOCKER=true triggers content inference for files without extension
+		// Test IN_DOCKER=true triggers content inference for files without
+		// extension
 		let config_content = include_str!("../tests/config/env_docker_inference.config");
 
 		let env_state = EnvState {
@@ -1955,7 +1961,8 @@ send_window = 12345678
 	#[tokio::test]
 	async fn test_env_state_from_system() {
 		// Test EnvState::from_system() reads environment variables correctly
-		// Note: This test doesn't actually set env vars, just tests the structure
+		// Note: This test doesn't actually set env vars, just tests the
+		// structure
 		let env_state = EnvState::from_system();
 
 		// `from_system` must not panic. There is no value we can usefully
@@ -2142,7 +2149,8 @@ skip_backend_tls_verify = true
 
 	#[tokio::test]
 	async fn test_v1811_camouflage_default_upstream_keeps_modern_default() {
-		// camouflage without reverse_proxy_url must not clobber the modern default.
+		// camouflage without reverse_proxy_url must not clobber the modern
+		// default.
 		let cfg = r#"
 server = "127.0.0.1:8443"
 
@@ -2235,7 +2243,8 @@ self_sign = true
 	#[test]
 	fn toml_section_still_detected() {
 		// `infer_config_format` short-circuits `starts_with('[')` to JSON.
-		// Verify TOML is still detected when first non-comment line is `key = value`.
+		// Verify TOML is still detected when first non-comment line is `key =
+		// value`.
 		let toml = "# config\nlog_level = \"info\"\n[server]\nport = 9443\n";
 		assert_eq!(infer_config_format(toml), ConfigFormat::Toml);
 	}
