@@ -137,11 +137,13 @@ impl Plugin<TuicRouter> for TuicServerPlugin {
 				let masquerade_enabled = cfg.masquerade.enabled;
 				let masquerade_upstream = cfg.masquerade.upstream.clone();
 
-				// ACME: obtain cert resolver outside the non-async closure so we can
-				// call the async `start_acme_with_cert`.  The resolver is passed into
-				// closure via `cert_resolver`; the `certificate`/`private_key` fields
-				// are set to placeholders — `create_server_config` uses the resolver
-				// when it is `Some`, bypassing the file-based cert path entirely.
+				// ACME: obtain cert resolver outside the non-async closure so
+				// we can call the async `start_acme_with_cert`.  The
+				// resolver is passed into closure via `cert_resolver`; the
+				// `certificate`/`private_key` fields are set to
+				// placeholders — `create_server_config` uses the resolver
+				// when it is `Some`, bypassing the file-based cert path
+				// entirely.
 				let cert_resolver: Option<std::sync::Arc<dyn rustls::server::ResolvesServerCert>> =
 					if auto_ssl && !tls_self_sign {
 						match wind_acme::start_acme_with_cert(
@@ -254,8 +256,8 @@ impl Plugin<TuicRouter> for TuicServerPlugin {
 						..Default::default()
 					};
 
-					// ACME: provision cert to disk via HTTP-01 so the file-based
-					// quiche backend can consume it.
+					// ACME: provision cert to disk via HTTP-01 so the
+					// file-based quiche backend can consume it.
 					if auto_ssl && !tls_self_sign {
 						match wind_acme::http01::ensure_acme_cert(
 							&hostname,

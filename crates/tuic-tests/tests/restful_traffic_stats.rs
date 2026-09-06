@@ -103,19 +103,20 @@ async fn restful_traffic_reflects_inbound_stats() {
 		"TCP echo through the SOCKS5 proxy must succeed"
 	);
 
-	// 2. Kick the user so the server closes the live connection: the TUIC traffic
-	//    sampler only records bytes on its (default 60s) tick or on close, so
-	//    closing the connection triggers the final sample that bills the echoed
-	//    bytes.
+	// 2. Kick the user so the server closes the live connection: the TUIC
+	//    traffic sampler only records bytes on its (default 60s) tick or on
+	//    close, so closing the connection triggers the final sample that bills
+	//    the echoed bytes.
 	let kick_body = http_request(restful_addr, "POST", "/kick", Some(&format!("[\"{}\"]", pair.uuid))).await;
 	let kicked: serde_json::Value = serde_json::from_str(&kick_body).expect("valid kick JSON");
 	assert!(
 		kicked["kicked"].as_u64().unwrap_or(0) > 0,
 		"kick must hit the live connection, got: {kick_body}"
 	);
-	// 3. Poll the RESTful API for the cumulative per-user traffic until the final
-	//    sample lands in the collector or the deadline passes. Polling instead of
-	//    a fixed sleep is faster on the happy path and robust to scheduling jitter.
+	// 3. Poll the RESTful API for the cumulative per-user traffic until the
+	//    final sample lands in the collector or the deadline passes. Polling
+	//    instead of a fixed sleep is faster on the happy path and robust to
+	//    scheduling jitter.
 	let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
 	let body = loop {
 		let body = http_request(restful_addr, "GET", "/traffic", None).await;
@@ -133,9 +134,10 @@ async fn restful_traffic_reflects_inbound_stats() {
 		tokio::time::sleep(Duration::from_millis(50)).await;
 	};
 
-	// 4. The response must contain this user with non-zero tx/rx. Before the fix,
-	//    the plugin never injects its collector into the App, so the inbound has no
-	//    collector to write into and the API returns `{}` — failing this assertion.
+	// 4. The response must contain this user with non-zero tx/rx. Before the
+	//    fix, the plugin never injects its collector into the App, so the
+	//    inbound has no collector to write into and the API returns `{}` —
+	//    failing this assertion.
 	let parsed: serde_json::Value = serde_json::from_str(&body).expect("valid JSON body");
 	let user_entry = parsed
 		.get(pair.uuid.to_string())

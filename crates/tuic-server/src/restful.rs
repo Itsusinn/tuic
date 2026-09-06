@@ -510,7 +510,8 @@ mod tests {
 		// but entries remain in the tracker until on_disconnect fires.
 		let kicked = t.kick_user(&alice);
 		assert_eq!(kicked, 2);
-		// Entries are still present; they'll be removed on the actual disconnect.
+		// Entries are still present; they'll be removed on the actual
+		// disconnect.
 		assert_eq!(t.len(), 3);
 		assert_eq!(t.count_for(&bob), 1);
 	}

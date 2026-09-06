@@ -57,8 +57,8 @@ pub fn quinn_server_config(
 	password: &str,
 	zero_rtt: bool,
 ) -> tuic_server::Config {
-	// Default `BackendMode` is `Quinn`, so leave `backend.mode` untouched. On the
-	// quinn backend `zero_rtt_handshake` flows into the inbound's
+	// Default `BackendMode` is `Quinn`, so leave `backend.mode` untouched. On
+	// the quinn backend `zero_rtt_handshake` flows into the inbound's
 	// `max_early_data_size`/`into_0rtt()` accept path (see wind-tuic
 	// quinn::inbound).
 	tuic_server::Config {
@@ -173,8 +173,8 @@ impl TestPair {
 
 		let uuid = Uuid::new_v4();
 		let password = "test_password";
-		// Unique per-test data dir: the server binds to `:0`, so its actual port
-		// isn't known until startup returns.
+		// Unique per-test data dir: the server binds to `:0`, so its actual
+		// port isn't known until startup returns.
 		let data_dir = std::env::temp_dir().join(format!("wind-tuic-test-{}", Uuid::new_v4()));
 
 		let server_addr: SocketAddr = "127.0.0.1:0".parse().unwrap();
@@ -541,7 +541,8 @@ pub async fn run_socks5_server(
 					let password = auth_password.clone();
 
 					tokio::spawn(async move {
-						// Handle authentication and read command based on configuration
+						// Handle authentication and read command based on
+						// configuration
 						let result = match (username, password) {
 							(Some(u), Some(p)) => {
 								info!("[{} SOCKS5 Server] Using password authentication", test_name_clone);
@@ -583,7 +584,8 @@ pub async fn run_socks5_server(
 									Socks5Command::UDPAssociate => {
 										info!("[{} SOCKS5 Server] Handling UDP ASSOCIATE request", test_name_clone);
 
-										// Use 127.0.0.1 as the reply address for UDP ASSOCIATE
+										// Use 127.0.0.1 as the reply address
+										// for UDP ASSOCIATE
 										let reply_ip = "127.0.0.1".parse().unwrap();
 										if let Err(e) = run_udp_proxy(proto, &target_addr, None, reply_ip, None).await {
 											error!("[{} SOCKS5 Server] UDP proxy error: {:?}", test_name_clone, e);
@@ -714,8 +716,7 @@ pub async fn restful_request(addr: SocketAddr, method: &str, path: &str, body: O
 		.await
 		.expect("connect to restful api")
 		.expect("tcp connect");
-	let mut request =
-		format!("{method} {path} HTTP/1.1\r\nHost: {addr}\r\nAccept: application/json\r\nConnection: close\r\n");
+	let mut request = format!("{method} {path} HTTP/1.1\r\nHost: {addr}\r\nAccept: application/json\r\nConnection: close\r\n");
 	if let Some(b) = body {
 		request.push_str("Content-Type: application/json\r\n");
 		request.push_str(&format!("Content-Length: {}\r\n", b.len()));
@@ -732,7 +733,12 @@ pub async fn restful_request(addr: SocketAddr, method: &str, path: &str, body: O
 		response.starts_with("HTTP/1.1 200"),
 		"unexpected status in response: {response}"
 	);
-	response.split_once("\r\n\r\n").map(|(_, b)| b).unwrap_or(&response).trim().to_string()
+	response
+		.split_once("\r\n\r\n")
+		.map(|(_, b)| b)
+		.unwrap_or(&response)
+		.trim()
+		.to_string()
 }
 
 /// Full-stack reconnect E2E: server (RESTful enabled) + client with
@@ -775,7 +781,10 @@ pub async fn reconnect_case(backend: Backend) {
 	// 2. Kick the user to drop the live QUIC connection.
 	let kick_body = restful_request(restful_addr, "POST", "/kick", Some(&format!("[\"{uuid}\"]"))).await;
 	let kicked: serde_json::Value = serde_json::from_str(&kick_body).expect("valid kick JSON");
-	assert!(kicked["kicked"].as_u64().unwrap_or(0) > 0, "kick must hit the live connection, got: {kick_body}");
+	assert!(
+		kicked["kicked"].as_u64().unwrap_or(0) > 0,
+		"kick must hit the live connection, got: {kick_body}"
+	);
 
 	// 3. Poll a fresh echo until the supervisor reconnects and relay recovers.
 	let deadline = tokio::time::Instant::now() + Duration::from_secs(20);

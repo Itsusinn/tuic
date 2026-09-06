@@ -12,9 +12,10 @@ pub mod tls;
 pub mod utils;
 pub mod wind_adapter;
 
+use std::{net::SocketAddr, time::Duration};
+
 pub use config::{Cli, Config, Control};
 pub use plugin::TuicServerPlugin;
-use std::{net::SocketAddr, time::Duration};
 use tokio_util::sync::CancellationToken;
 use wind_core::App;
 
