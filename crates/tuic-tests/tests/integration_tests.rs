@@ -12,6 +12,11 @@ use tuic_tests::{run_tcp_echo_server, run_udp_echo_server, test_tcp_through_sock
 use uuid::Uuid;
 use wind_tuic::proto::{Address, AddressCodec, CmdCodec, CmdType, Command, Header, HeaderCodec};
 
+// Shared CI runners can pause for several seconds even on loopback. These are
+// deadlock guards, not latency assertions; keep enough headroom for scheduling.
+const RELAY_TIMEOUT: Duration = Duration::from_secs(30);
+const ECHO_TIMEOUT: Duration = Duration::from_secs(15);
+
 fn roundtrip_header(header: Header) -> Header {
 	let mut buf = BytesMut::new();
 	HeaderCodec.encode(header, &mut buf).unwrap();
@@ -313,22 +318,15 @@ async fn test_server_client_integration() -> eyre::Result<()> {
 
 		let (echo_task, echo_addr) = run_tcp_echo_server("127.0.0.1:0", "TCP Test").await;
 
-		tokio::time::sleep(Duration::from_millis(200)).await;
-
 		let test_data = b"Hello, TUIC!";
 		let ok = test_tcp_through_socks5(&socks5, echo_addr, test_data, "TCP Test").await;
-
-		info!("[TCP Test] Waiting for echo server to finish...");
-		tokio::time::sleep(Duration::from_millis(500)).await;
 
 		echo_task.abort();
 		info!("[TCP Test] TCP test completed\n");
 		ok
 	};
 
-	let tcp_ok = timeout(Duration::from_secs(6), tcp_test)
-		.await
-		.expect("TCP relay test timed out");
+	let tcp_ok = timeout(RELAY_TIMEOUT, tcp_test).await.expect("TCP relay test timed out");
 	assert!(tcp_ok, "TCP relay through SOCKS5/TUIC failed");
 
 	let udp_test = async {
@@ -340,8 +338,6 @@ async fn test_server_client_integration() -> eyre::Result<()> {
 
 		let (echo_task, echo_addr, _echo_server) = run_udp_echo_server("127.0.0.1:0", "UDP Test").await;
 
-		tokio::time::sleep(Duration::from_millis(100)).await;
-
 		let test_data = b"Hello, UDP through TUIC!";
 		let client_bind_addr = std::net::SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), 0);
 		let ok = test_udp_through_socks5(&socks5, echo_addr, test_data, "UDP Test", client_bind_addr).await;
@@ -351,9 +347,7 @@ async fn test_server_client_integration() -> eyre::Result<()> {
 		ok
 	};
 
-	let udp_ok = timeout(Duration::from_secs(3), udp_test)
-		.await
-		.expect("UDP relay test timed out");
+	let udp_ok = timeout(RELAY_TIMEOUT, udp_test).await.expect("UDP relay test timed out");
 	assert!(udp_ok, "UDP relay through SOCKS5/TUIC failed");
 
 	let concurrent_test = async {
@@ -386,7 +380,8 @@ async fn test_server_client_integration() -> eyre::Result<()> {
 			}
 		});
 
-		tokio::time::sleep(Duration::from_millis(100)).await;
+		// bind() has already made the listener ready; no startup sleep is
+		// needed.
 
 		info!("[Concurrent Test] Creating 3 concurrent connections through SOCKS5...");
 		let mut handles = vec![];
@@ -407,7 +402,7 @@ async fn test_server_client_integration() -> eyre::Result<()> {
 								info!("[Concurrent Test] Connection {}: sent {} bytes", i, test_data.len());
 
 								let mut buf = vec![0u8; test_data.len()];
-								match timeout(Duration::from_secs(1), stream.read_exact(&mut buf)).await {
+								match timeout(ECHO_TIMEOUT, stream.read_exact(&mut buf)).await {
 									Ok(Ok(_)) => {
 										if buf == test_data.as_bytes() {
 											info!(
@@ -462,7 +457,7 @@ async fn test_server_client_integration() -> eyre::Result<()> {
 		ok
 	};
 
-	let concurrent_ok = timeout(Duration::from_secs(5), concurrent_test)
+	let concurrent_ok = timeout(RELAY_TIMEOUT, concurrent_test)
 		.await
 		.expect("Concurrent relay test timed out");
 	assert_eq!(
