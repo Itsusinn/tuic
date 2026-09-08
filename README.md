@@ -66,20 +66,26 @@ tuic-server --init
 # client.toml
 log_level = "info"
 
-[relay]
 server = "你的服务器域名:8443"
 uuid = "00000000-0000-0000-0000-000000000000"
 password = "请替换为高强度密码"
 udp_relay_mode = "native"
-congestion_control = "bbr"
 
+[tls]
 # 仅在服务端使用自签名证书进行测试时启用。
-# 生产环境请改用受信任证书，或通过 certificates 指定证书文件。
+# 生产环境请改用受信任证书，或通过 tls.certificates 指定证书文件。
 skip_cert_verify = true
+
+[backend.quinn.congestion_control]
+controller = "bbr"
 
 [local]
 server = "127.0.0.1:1080"
 ```
+
+客户端与服务端采用相同的分组方式：连接与认证字段位于顶层，TLS 选项放在 `[tls]`，QUIC 参数放在 `[backend.quinn]`，拥塞控制使用 `[backend.quinn.congestion_control]` 的 `controller` 字段。本地 SOCKS5 与端口转发仍放在 `[local]`；上游 SOCKS5 配置改用 `[proxy]`。`backend.mode` 默认为 `"quinn"`，客户端暂不支持 `"quiche"`。
+
+旧 `[relay]` 配置仍可加载，默认值保持不变；同时提供新旧字段时，新字段优先。TOML、JSON/JSON5 和 YAML 均使用这套结构。当前 Wind 客户端尚未应用部分传输调优选项，本次配置调整不改变这些选项的运行行为。
 
 启动客户端：
 
