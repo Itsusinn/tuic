@@ -48,9 +48,247 @@ pub struct Cli {
 	pub config: Option<PathBuf>,
 }
 
-#[derive(Debug, Deserialize, serde::Serialize, Educe)]
+/// On-disk configuration, grouped like tuic-server. Runtime callers can keep
+/// using Config/Relay; serialization always emits this modern layout.
+#[derive(Debug, Clone, Deserialize, serde::Serialize, Educe)]
 #[educe(Default)]
-#[serde(deny_unknown_fields, default)]
+#[serde(default, deny_unknown_fields)]
+struct ConfigFile {
+	#[serde(deserialize_with = "deserialize_server", serialize_with = "serialize_server")]
+	pub server: (String, u16),
+
+	#[educe(Default(expression = Uuid::nil()))]
+	pub uuid: Uuid,
+
+	#[serde(deserialize_with = "deserialize_password", serialize_with = "serialize_password")]
+	#[educe(Default(expression = Arc::from([])))]
+	pub password: Arc<[u8]>,
+
+	#[educe(Default = None)]
+	pub ip: Option<IpAddr>,
+
+	#[educe(Default(expression = StackPrefer::V4first))]
+	pub ipstack_prefer: StackPrefer,
+
+	#[educe(Default(expression = UdpRelayMode::Native))]
+	pub udp_relay_mode: UdpRelayMode,
+
+	#[educe(Default = false)]
+	pub zero_rtt_handshake: bool,
+
+	#[educe(Default(expression = Duration::from_secs(8)))]
+	#[serde(with = "humantime_serde")]
+	pub timeout: Duration,
+
+	#[educe(Default(expression = Duration::from_secs(3)))]
+	#[serde(with = "humantime_serde")]
+	pub heartbeat: Duration,
+
+	#[educe(Default(expression = Duration::from_secs(3)))]
+	#[serde(with = "humantime_serde")]
+	pub gc_interval: Duration,
+
+	#[educe(Default(expression = Duration::from_secs(15)))]
+	#[serde(with = "humantime_serde")]
+	pub gc_lifetime: Duration,
+
+	#[educe(Default = None)]
+	pub proxy: Option<ProxyConfig>,
+
+	/// Automatically reconnect to the relay after the connection drops.
+	#[educe(Default = true)]
+	pub reconnect: bool,
+
+	/// Delay before the first reconnect attempt; doubled after each failure.
+	#[educe(Default(expression = Duration::from_millis(500)))]
+	#[serde(with = "humantime_serde")]
+	pub reconnect_initial_backoff: Duration,
+
+	/// Upper bound on the reconnect backoff delay.
+	#[educe(Default(expression = Duration::from_secs(30)))]
+	#[serde(with = "humantime_serde")]
+	pub reconnect_max_backoff: Duration,
+
+	/// Defer the QUIC connection establishment until the first actual
+	/// traffic arrives.  When `false` (eager), the connection is
+	/// established immediately at startup and the process exits on
+	/// failure.  Defaults to `true` (matching v1.8.11 `startup_mode =
+	/// "lazy"`).
+	#[educe(Default = true)]
+	#[serde(default)]
+	pub lazy: bool,
+
+	pub tls: TlsConfig,
+	pub backend: BackendConfig,
+	pub local: Local,
+	#[educe(Default = "info")]
+	pub log_level: String,
+}
+
+#[derive(Debug, Clone, Deserialize, serde::Serialize, Educe)]
+#[educe(Default)]
+#[serde(default, deny_unknown_fields)]
+pub struct TlsConfig {
+	#[educe(Default(expression = Vec::new()))]
+	pub certificates: Vec<PathBuf>,
+
+	#[educe(Default(expression = Vec::new()))]
+	#[serde(deserialize_with = "deserialize_alpn", serialize_with = "serialize_alpn")]
+	pub alpn: Vec<Vec<u8>>,
+
+	#[educe(Default = false)]
+	pub disable_sni: bool,
+
+	#[educe(Default = None)]
+	pub sni: Option<String>,
+
+	#[educe(Default = false)]
+	pub disable_native_certs: bool,
+
+	#[educe(Default = false)]
+	pub skip_cert_verify: bool,
+}
+
+#[derive(Debug, Clone, Deserialize, serde::Serialize, Educe)]
+#[educe(Default)]
+#[serde(default, deny_unknown_fields)]
+pub struct QuinnConfig {
+	pub congestion_control: CongestionControlConfig,
+
+	#[educe(Default = 16777216)]
+	pub send_window: u64,
+
+	#[educe(Default = 8388608)]
+	pub receive_window: u32,
+
+	#[educe(Default = 1200)]
+	pub initial_mtu: u16,
+
+	#[educe(Default = 1200)]
+	pub min_mtu: u16,
+
+	#[educe(Default = true)]
+	pub gso: bool,
+
+	#[educe(Default = true)]
+	pub pmtu: bool,
+}
+
+#[derive(Debug, Clone, Deserialize, serde::Serialize, Educe)]
+#[educe(Default)]
+#[serde(default, deny_unknown_fields)]
+pub struct CongestionControlConfig {
+	#[educe(Default(expression = CongestionControl::Bbr))]
+	pub controller: CongestionControl,
+}
+
+#[derive(Debug, Clone, Deserialize, serde::Serialize, Educe)]
+#[educe(Default)]
+#[serde(default, deny_unknown_fields)]
+pub struct BackendConfig {
+	pub mode: BackendMode,
+	pub quinn: QuinnConfig,
+}
+
+/// The client currently supports only the quinn backend.
+#[derive(Debug, Clone, Copy, Default, Deserialize, serde::Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum BackendMode {
+	#[default]
+	Quinn,
+}
+
+impl From<ConfigFile> for Config {
+	fn from(file: ConfigFile) -> Self {
+		Self {
+			local: file.local,
+			log_level: file.log_level,
+			relay: Relay {
+				server: file.server,
+				uuid: file.uuid,
+				password: file.password,
+				ip: file.ip,
+				ipstack_prefer: file.ipstack_prefer,
+				certificates: file.tls.certificates,
+				udp_relay_mode: file.udp_relay_mode,
+				congestion_control: file.backend.quinn.congestion_control.controller,
+				alpn: file.tls.alpn,
+				zero_rtt_handshake: file.zero_rtt_handshake,
+				disable_sni: file.tls.disable_sni,
+				sni: file.tls.sni,
+				timeout: file.timeout,
+				heartbeat: file.heartbeat,
+				disable_native_certs: file.tls.disable_native_certs,
+				send_window: file.backend.quinn.send_window,
+				receive_window: file.backend.quinn.receive_window,
+				initial_mtu: file.backend.quinn.initial_mtu,
+				min_mtu: file.backend.quinn.min_mtu,
+				gso: file.backend.quinn.gso,
+				pmtu: file.backend.quinn.pmtu,
+				gc_interval: file.gc_interval,
+				gc_lifetime: file.gc_lifetime,
+				skip_cert_verify: file.tls.skip_cert_verify,
+				proxy: file.proxy,
+				reconnect: file.reconnect,
+				reconnect_initial_backoff: file.reconnect_initial_backoff,
+				reconnect_max_backoff: file.reconnect_max_backoff,
+				lazy: file.lazy,
+			},
+		}
+	}
+}
+
+impl From<Config> for ConfigFile {
+	fn from(config: Config) -> Self {
+		let relay = config.relay;
+		Self {
+			local: config.local,
+			log_level: config.log_level,
+			server: relay.server,
+			uuid: relay.uuid,
+			password: relay.password,
+			ip: relay.ip,
+			ipstack_prefer: relay.ipstack_prefer,
+			udp_relay_mode: relay.udp_relay_mode,
+			zero_rtt_handshake: relay.zero_rtt_handshake,
+			timeout: relay.timeout,
+			heartbeat: relay.heartbeat,
+			gc_interval: relay.gc_interval,
+			gc_lifetime: relay.gc_lifetime,
+			proxy: relay.proxy,
+			reconnect: relay.reconnect,
+			reconnect_initial_backoff: relay.reconnect_initial_backoff,
+			reconnect_max_backoff: relay.reconnect_max_backoff,
+			lazy: relay.lazy,
+			tls: TlsConfig {
+				certificates: relay.certificates,
+				alpn: relay.alpn,
+				disable_sni: relay.disable_sni,
+				sni: relay.sni,
+				disable_native_certs: relay.disable_native_certs,
+				skip_cert_verify: relay.skip_cert_verify,
+			},
+			backend: BackendConfig {
+				mode: BackendMode::Quinn,
+				quinn: QuinnConfig {
+					congestion_control: CongestionControlConfig {
+						controller: relay.congestion_control,
+					},
+					send_window: relay.send_window,
+					receive_window: relay.receive_window,
+					initial_mtu: relay.initial_mtu,
+					min_mtu: relay.min_mtu,
+					gso: relay.gso,
+					pmtu: relay.pmtu,
+				},
+			},
+		}
+	}
+}
+
+#[derive(Debug, Clone, serde::Serialize, Educe)]
+#[educe(Default)]
+#[serde(into = "ConfigFile")]
 pub struct Config {
 	pub relay: Relay,
 
@@ -60,12 +298,23 @@ pub struct Config {
 	pub log_level: String,
 }
 
+impl<'de> Deserialize<'de> for Config {
+	fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+		let mut values = figment::value::Dict::deserialize(deserializer)?;
+		migrate_relay(&mut values).map_err(D::Error::custom)?;
+		Figment::from(Serialized::defaults(values))
+			.extract::<ConfigFile>()
+			.map(Config::from)
+			.map_err(D::Error::custom)
+	}
+}
+
 #[derive(Debug, Deserialize, serde::Serialize, Educe)]
 #[educe(Default)]
 #[serde(deny_unknown_fields, default)]
 #[derive(Clone)]
 pub struct Relay {
-	#[serde(deserialize_with = "deserialize_server")]
+	#[serde(deserialize_with = "deserialize_server", serialize_with = "serialize_server")]
 	pub server: (String, u16),
 
 	#[educe(Default(expression = Uuid::nil()))]
@@ -91,7 +340,7 @@ pub struct Relay {
 	pub congestion_control: CongestionControl,
 
 	#[educe(Default(expression = Vec::new()))]
-	#[serde(deserialize_with = "deserialize_alpn")]
+	#[serde(deserialize_with = "deserialize_alpn", serialize_with = "serialize_alpn")]
 	pub alpn: Vec<Vec<u8>>,
 
 	#[educe(Default = false)]
@@ -174,7 +423,7 @@ pub struct Relay {
 #[educe(Default)]
 #[serde(deny_unknown_fields, default)]
 pub struct ProxyConfig {
-	#[serde(deserialize_with = "deserialize_server")]
+	#[serde(deserialize_with = "deserialize_server", serialize_with = "serialize_server")]
 	#[educe(Default(expression = ("".to_string(), 0)))]
 	pub server: (String, u16),
 
@@ -197,11 +446,17 @@ pub struct Local {
 	pub server: SocketAddr,
 
 	#[educe(Default = None)]
-	#[serde(deserialize_with = "deserialize_optional_bytes")]
+	#[serde(
+		deserialize_with = "deserialize_optional_bytes",
+		serialize_with = "serialize_optional_bytes"
+	)]
 	pub username: Option<Vec<u8>>,
 
 	#[educe(Default = None)]
-	#[serde(deserialize_with = "deserialize_optional_bytes")]
+	#[serde(
+		deserialize_with = "deserialize_optional_bytes",
+		serialize_with = "serialize_optional_bytes"
+	)]
 	pub password: Option<Vec<u8>>,
 
 	#[educe(Default = None)]
@@ -221,7 +476,7 @@ pub struct Local {
 #[serde(deny_unknown_fields)]
 pub struct TcpForward {
 	pub listen: SocketAddr,
-	#[serde(deserialize_with = "deserialize_server")]
+	#[serde(deserialize_with = "deserialize_server", serialize_with = "serialize_server")]
 	pub remote: (String, u16),
 }
 
@@ -229,9 +484,9 @@ pub struct TcpForward {
 #[serde(deny_unknown_fields)]
 pub struct UdpForward {
 	pub listen: SocketAddr,
-	#[serde(deserialize_with = "deserialize_server")]
+	#[serde(deserialize_with = "deserialize_server", serialize_with = "serialize_server")]
 	pub remote: (String, u16),
-	#[serde(default = "default_udp_timeout", deserialize_with = "deserialize_duration")]
+	#[serde(default = "default_udp_timeout", with = "humantime_serde")]
 	pub timeout: Duration,
 }
 
@@ -247,7 +502,7 @@ impl Config {
 			bail!(ConfigError::ConfigNotFound(path));
 		}
 
-		let figmet = Figment::from(Serialized::defaults(Config::default()));
+		let figmet = Figment::new();
 		let format;
 
 		if env_state.tuic_force_toml {
@@ -306,35 +561,100 @@ enum ConfigFormat {
 }
 
 fn infer_config_format(content: &str) -> ConfigFormat {
-	let trimmed = content.trim();
-
-	if trimmed.lines().any(|line| {
-		let line = line.trim();
-		// YAML typically has keys followed by colons (not in quotes)
-		// and doesn't use brackets for top-level structure
-		line.contains(':')
-			&& !line.starts_with('{')
-			&& !line.starts_with('[')
-			&& !line.starts_with('"')
-			&& !line.starts_with('\'')
-	}) && !trimmed.starts_with('{')
-		&& !trimmed.starts_with('[')
+	// Parse a mapping instead of guessing from ':' in host:port strings or
+	// '[' in table headers. Modern minimal TOML has no section headers.
+	if Figment::from(Json5::string(content))
+		.extract::<figment::value::Dict>()
+		.is_ok()
 	{
-		return ConfigFormat::Yaml;
+		ConfigFormat::Json
+	} else if Figment::from(Toml::string(content)).extract::<figment::value::Dict>().is_ok() {
+		ConfigFormat::Toml
+	} else if Figment::from(Yaml::string(content)).extract::<figment::value::Dict>().is_ok() {
+		ConfigFormat::Yaml
+	} else {
+		ConfigFormat::Unknown
 	}
+}
 
-	if trimmed.lines().any(|line| {
-		let line = line.trim();
-		line.starts_with('[') && line.ends_with(']') && !line.contains('{')
-	}) {
-		return ConfigFormat::Toml;
+/// Move explicitly supplied legacy fields before merging defaults, so modern
+/// fields (including explicit default values) always take precedence.
+fn migrate_relay(values: &mut figment::value::Dict) -> eyre::Result<()> {
+	use figment::value::Value;
+	let Some(legacy) = values.remove("relay") else {
+		return Ok(());
+	};
+	let Value::Dict(_, legacy) = legacy else {
+		bail!("relay must be a table");
+	};
+	// Validate the entire old section, including fields shadowed by modern
+	// ones.
+	let _: Relay = Figment::from(Serialized::defaults(legacy.clone())).extract()?;
+	for (key, value) in legacy {
+		let path: &[&str] = match key.as_str() {
+			"certificates" | "alpn" | "disable_sni" | "sni" | "disable_native_certs" | "skip_cert_verify" => &["tls"],
+			"congestion_control" => &["backend", "quinn", "congestion_control"],
+			"send_window" | "receive_window" | "initial_mtu" | "min_mtu" | "gso" | "pmtu" => &["backend", "quinn"],
+			_ => &[],
+		};
+		let mut target = &mut *values;
+		for section in path {
+			let entry = target
+				.entry((*section).to_owned())
+				.or_insert_with(|| Value::from(figment::value::Dict::new()));
+			let Value::Dict(_, dict) = entry else {
+				bail!("{section} must be a table");
+			};
+			target = dict;
+		}
+		let key = if key == "congestion_control" {
+			"controller".to_owned()
+		} else {
+			key
+		};
+		match target.entry(key) {
+			std::collections::btree_map::Entry::Vacant(entry) => {
+				entry.insert(value);
+			}
+			std::collections::btree_map::Entry::Occupied(mut entry) => {
+				// A partially migrated [proxy] inherits unspecified legacy
+				// fields.
+				if let (Value::Dict(_, modern), Value::Dict(_, legacy)) = (entry.get_mut(), value) {
+					for (key, value) in legacy {
+						modern.entry(key).or_insert(value);
+					}
+				}
+			}
+		}
 	}
+	tracing::warn!("The [relay] section is deprecated; use top-level connection fields, [tls] and [backend.quinn]");
+	Ok(())
+}
 
-	if trimmed.starts_with('{') || trimmed.starts_with('[') {
-		return ConfigFormat::Json;
-	}
+pub fn serialize_server<S: serde::Serializer>(server: &(String, u16), serializer: S) -> Result<S::Ok, S::Error> {
+	let host = server.0.trim_start_matches('[').trim_end_matches(']');
+	let address = if host.contains(':') {
+		format!("[{host}]:{}", server.1)
+	} else {
+		format!("{host}:{}", server.1)
+	};
+	serializer.serialize_str(&address)
+}
 
-	ConfigFormat::Unknown
+pub fn serialize_alpn<S: serde::Serializer>(alpn: &[Vec<u8>], serializer: S) -> Result<S::Ok, S::Error> {
+	use serde::Serialize;
+	alpn.iter()
+		.map(|value| String::from_utf8_lossy(value))
+		.collect::<Vec<_>>()
+		.serialize(serializer)
+}
+
+pub fn serialize_optional_bytes<S: serde::Serializer>(value: &Option<Vec<u8>>, serializer: S) -> Result<S::Ok, S::Error> {
+	use serde::Serialize;
+	value
+		.as_ref()
+		.map(|bytes| String::from_utf8_lossy(bytes))
+		.serialize(serializer)
 }
 
 pub fn deserialize_server<'de, D>(deserializer: D) -> Result<(String, u16), D::Error>
@@ -427,6 +747,127 @@ pub enum ConfigError {
 #[cfg(test)]
 mod tests {
 	use super::*;
+
+	#[test]
+	fn modern_and_legacy_layouts_are_equivalent() {
+		let modern = test_parse_config(include_str!("../tests/config/toml_full_config.toml"), ".toml").unwrap();
+		let legacy = test_parse_config(include_str!("../tests/config/legacy_full_config.toml"), ".toml").unwrap();
+		assert_eq!(toml::to_string(&modern).unwrap(), toml::to_string(&legacy).unwrap());
+	}
+
+	#[test]
+	fn modern_formats_and_headerless_toml_inference() {
+		for content in [
+			r#"server = "example.com:8443"
+uuid = "00000000-0000-0000-0000-000000000000"
+password = "test"
+"#,
+			r#"{server: "example.com:8443", password: "test", tls: {alpn: ["h3"]}, backend: {quinn: {congestion_control: {controller: "cubic"}}}}"#,
+			"server: example.com:8443\npassword: test\ntls:\n  alpn: [h3]\nbackend:\n  quinn:\n    congestion_control:\n      \
+			 controller: cubic\n",
+		] {
+			let config = test_parse_config(content, ".config").unwrap();
+			assert_eq!(config.relay.server, ("example.com".into(), 8443));
+			assert_eq!(&*config.relay.password, b"test");
+			if !content.starts_with("server =") {
+				assert_eq!(config.relay.alpn, vec![b"h3".to_vec()]);
+				assert_eq!(config.relay.congestion_control, CongestionControl::Cubic);
+			}
+		}
+	}
+
+	#[test]
+	fn modern_explicit_defaults_override_legacy_fields() {
+		let config = test_parse_config(
+			r#"
+server = "modern.example:8443"
+zero_rtt_handshake = false
+[tls]
+skip_cert_verify = false
+alpn = []
+[backend.quinn]
+gso = true
+[backend.quinn.congestion_control]
+controller = "bbr"
+[proxy]
+username = "modern_user"
+[relay]
+server = "legacy.example:443"
+zero_rtt_handshake = true
+skip_cert_verify = true
+alpn = ["h3"]
+gso = false
+congestion_control = "cubic"
+heartbeat = "7s"
+[relay.proxy]
+server = "127.0.0.1:1080"
+username = "legacy_user"
+"#,
+			".toml",
+		)
+		.unwrap();
+		assert_eq!(config.relay.server.0, "modern.example");
+		assert!(!config.relay.zero_rtt_handshake);
+		assert!(!config.relay.skip_cert_verify);
+		assert!(config.relay.alpn.is_empty());
+		assert!(config.relay.gso);
+		assert_eq!(config.relay.congestion_control, CongestionControl::Bbr);
+		assert_eq!(config.relay.heartbeat, Duration::from_secs(7));
+		let proxy = config.relay.proxy.unwrap();
+		assert_eq!(proxy.server, ("127.0.0.1".into(), 1080));
+		assert_eq!(proxy.username.as_deref(), Some("modern_user"));
+	}
+
+	#[test]
+	fn rejects_invalid_sections_and_unknown_fields() {
+		for content in [
+			"typo = true",
+			"[tls]\nskip_cert_verfy = true",
+			"[backend]\nmode = 'quiche'",
+			"[backend.quinn]\nsend_windw = 10",
+			"[backend.quinn.congestion_control]\ncontroller = 'invalid'",
+			"[relay]\ntypo = true",
+			"relay = false",
+			"tls = false\n[relay]\nalpn = ['h3']",
+		] {
+			assert!(test_parse_config(content, ".toml").is_err(), "accepted {content}");
+		}
+	}
+
+	#[test]
+	fn serialization_emits_modern_layout_and_roundtrips_values() {
+		let mut config = test_parse_config(include_str!("../tests/config/all_relay_options_toml.toml"), ".toml").unwrap();
+		config.relay.server = ("::1".into(), 8443);
+		config.relay.proxy = Some(ProxyConfig {
+			server: ("::1".into(), 1080),
+			username: Some("proxy_user".into()),
+			password: Some("proxy_password".into()),
+			..Default::default()
+		});
+		config.local.tcp_forward.push(TcpForward {
+			listen: "127.0.0.1:8080".parse().unwrap(),
+			remote: ("::1".into(), 80),
+		});
+		config.local.udp_forward.push(UdpForward {
+			listen: "127.0.0.1:5353".parse().unwrap(),
+			remote: ("::1".into(), 53),
+			timeout: Duration::from_secs(12),
+		});
+		let output = toml::to_string_pretty(&config).unwrap();
+		assert!(!output.contains("[relay"));
+		assert!(output.contains("[tls]"));
+		assert!(output.contains("[backend.quinn.congestion_control]"));
+		assert!(output.contains("[::1]:8443"));
+		let reparsed: Config = toml::from_str(&output).unwrap();
+		assert_eq!(output, toml::to_string_pretty(&reparsed).unwrap());
+	}
+
+	#[test]
+	fn direct_serde_still_accepts_legacy_files() {
+		let config: Config = toml::from_str(include_str!("../tests/config/legacy_full_config.toml")).unwrap();
+		assert_eq!(config.relay.server.0, "example.com");
+		assert_eq!(config.relay.alpn, vec![b"h3".to_vec(), b"h2".to_vec()]);
+	}
 
 	fn parse_server(s: &str) -> Result<(String, u16), serde::de::value::Error> {
 		use serde::de::IntoDeserializer;
