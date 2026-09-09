@@ -1177,6 +1177,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "educe"
+version = "0.7.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e451fac8dd8dece16234604bf1efce6e90fddd8ab6ad4d66eec0eca5160959dd"
+dependencies = [
+ "enum-ordinalize",
+ "proc-macro2",
+ "quote",
+ "syn 3.0.5",
+]
+
+[[package]]
 name = "either"
 version = "1.18.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5143,14 +5155,14 @@ checksum = "e421abadd41a4225275504ea4d6566923418b7f05506fbc9c0fe86ba7396114b"
 
 [[package]]
 name = "tuic-client"
-version = "2.0.0-dev6"
+version = "2.0.0-dev7"
 dependencies = [
  "async-trait",
  "aws-lc-rs",
  "bytes",
  "chrono",
  "clap",
- "educe",
+ "educe 0.6.0",
  "eyre",
  "fast-socks5",
  "figment",
@@ -5183,7 +5195,7 @@ dependencies = [
 
 [[package]]
 name = "tuic-server"
-version = "2.0.0-dev6"
+version = "2.0.0-dev7"
 dependencies = [
  "arc-swap",
  "async-trait",
@@ -5193,7 +5205,7 @@ dependencies = [
  "clap",
  "dashmap",
  "derive_more",
- "educe",
+ "educe 0.6.0",
  "eyre",
  "figment",
  "figment-json5",
@@ -5241,7 +5253,7 @@ dependencies = [
 
 [[package]]
 name = "tuic-tests"
-version = "2.0.0-dev6"
+version = "2.0.0-dev7"
 dependencies = [
  "async-trait",
  "aws-lc-rs",
@@ -5593,7 +5605,6 @@ dependencies = [
 name = "wind-acme"
 version = "0.2.0"
 dependencies = [
- "arc-swap",
  "async-trait",
  "axum",
  "eyre",
@@ -5651,7 +5662,7 @@ dependencies = [
 name = "wind-dns"
 version = "0.2.0"
 dependencies = [
- "educe",
+ "educe 0.7.6",
  "eyre",
  "hickory-resolver",
  "humantime-serde",
