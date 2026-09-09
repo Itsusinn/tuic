@@ -1177,18 +1177,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "educe"
-version = "0.7.6"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e451fac8dd8dece16234604bf1efce6e90fddd8ab6ad4d66eec0eca5160959dd"
-dependencies = [
- "enum-ordinalize",
- "proc-macro2",
- "quote",
- "syn 3.0.5",
-]
-
-[[package]]
 name = "either"
 version = "1.18.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5162,7 +5150,7 @@ dependencies = [
  "bytes",
  "chrono",
  "clap",
- "educe 0.6.0",
+ "educe",
  "eyre",
  "fast-socks5",
  "figment",
@@ -5205,7 +5193,7 @@ dependencies = [
  "clap",
  "dashmap",
  "derive_more",
- "educe 0.6.0",
+ "educe",
  "eyre",
  "figment",
  "figment-json5",
@@ -5605,6 +5593,7 @@ dependencies = [
 name = "wind-acme"
 version = "0.2.0"
 dependencies = [
+ "arc-swap",
  "async-trait",
  "axum",
  "eyre",
@@ -5662,7 +5651,7 @@ dependencies = [
 name = "wind-dns"
 version = "0.2.0"
 dependencies = [
- "educe 0.7.6",
+ "educe",
  "eyre",
  "hickory-resolver",
  "humantime-serde",
