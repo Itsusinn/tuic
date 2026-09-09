@@ -17,15 +17,11 @@ RUN --mount=type=bind,source=${BINARY_DIR},target=/tmp/binaries \
     fi && \
     chmod +x /usr/bin/tuic-server
 
-# Setup environment
-RUN mkdir -p /etc/tuic
-
 FROM gcr.io/distroless/cc
 
 COPY --from=prepare /usr/bin/tuic-server /usr/bin/tuic-server
-COPY --from=prepare /etc/tuic /etc/tuic
 
-WORKDIR /root
+WORKDIR /var/lib/tuic
 ENV IN_DOCKER=true
 
 ENTRYPOINT [ "/usr/bin/tuic-server" ]

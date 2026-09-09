@@ -35,8 +35,7 @@ async fn main() -> eyre::Result<()> {
 	let _guards = tuic_server::log::init(&cfg)?;
 
 	let guard = tuic_server::run(cfg).await?;
-	// The actual bound address is already reported by the wind-tuic inbound
-	// ("TUIC server listening on ..."), so don't log it again here.
+
 	wind_core::shutdown_signal().await;
 	guard.shutdown().await;
 	Ok(())

@@ -10,7 +10,6 @@ Minimalistic TUIC server implementation as a reference.
 - [Installation](#installation)
 - [Usage](#usage)
 - [Configuration](#configuration)
-- [RESTful API](#restful-api)
 - [TLS Certificates](#tls-certificates)
 - [Contributing](#contributing)
 - [License](#license)
@@ -63,14 +62,13 @@ The `-d/--dir` option searches for the first recognizable configuration file (`.
 docker run --name tuic-server \
   --restart always \
   --network host \
+  -v /PATH/TO/DATA_DIR:/var/lib/tuic/ \
   -v /PATH/TO/CONFIG_FILE:/etc/tuic/config.toml \
-  -v /PATH/TO/CERTIFICATE:/PATH/TO/CERTIFICATE \
-  -v /PATH/TO/PRIVATE_KEY:/PATH/TO/PRIVATE_KEY \
+  -v /PATH/TO/CERTIFICATE:/var/lib/tuic/fullchain.pem \
+  -v /PATH/TO/PRIVATE_KEY:/var/lib/tuic/key.pem \
   -dit ghcr.io/itsusinn/tuic-server:latest
   ## or -dit docker.io/itsusinn/tuic-server:latest
 ```
-
-**Note:** The Docker image now uses `-d /etc/tuic` by default, allowing you to mount your config directory.
 
 ### Docker Compose
 
@@ -83,10 +81,10 @@ services:
     container_name: tuic
     network_mode: host
     volumes:
+      - ./data:/var/lib/tuic # Mount data directory
       - ./config.toml:/etc/tuic/config.toml:ro  # Mount config file
-      #- ./config:/etc/tuic:ro # Mount config directory
-      - ./cert.crt:/PATH/TO/CERT:ro
-      - ./key.crt:/PATH/TO/KEY:ro
+      - ./cert.crt:/var/lib/tuic/fullchain.pem:ro
+      - ./key.crt:/var/lib/tuic/key.pem:ro
 ```
 
 The server will automatically detect and use the first config file found in `/etc/tuic`.
@@ -159,25 +157,6 @@ outbound = "default"
 # Hijack: optional, redirect to specified address
 hijack = "1.1.1.1"
 
-[[acl]]
-addr = "localhost"
-outbound = "drop"
-
-# You can also use 'private' to match all LAN/private IP addresses
-# This includes: 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 169.254.0.0/16 (IPv4)
-# and fc00::/7, fe80::/10 (IPv6)
-[[acl]]
-addr = "private"
-outbound = "drop"
-
-# Format 2: Multi-line string format (more concise)
-acl = '''
-# Format: <outbound_name> <address> [<ports>] [<hijack_address>]
-direct localhost tcp/80,tcp/443,udp/443
-drop localhost
-drop private
-default 8.8.4.4 udp/53 1.1.1.1
-'''
 
 [users]
 # User list: UUID = password
@@ -249,16 +228,7 @@ max_idle_time = "30s"
 
 # Experimental features
 [experimental]
-# Drop connections to loopback addresses (127.0.0.1, ::1) when no explicit ACL rule matches
-# This is a built-in safety feature to prevent accidental exposure of localhost services
-# Set to false to allow connections to loopback addresses by default
 drop_loopback = true
-
-# Drop connections to private/LAN addresses when no explicit ACL rule matches
-# This prevents proxying to RFC 1918 private networks:
-# - IPv4: 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 169.254.0.0/16 (link-local)
-# - IPv6: fc00::/7 (unique local), fe80::/10 (link-local)
-# Set to false to allow connections to private addresses by default
 drop_private = true
 
 # Outbound configuration
