@@ -5764,6 +5764,7 @@ dependencies = [
  "secrecy",
  "serde",
  "snafu",
+ "socket2 0.6.5",
  "thiserror 2.0.20",
  "tokio",
  "tokio-rustls",
