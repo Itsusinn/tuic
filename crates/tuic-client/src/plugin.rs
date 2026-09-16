@@ -84,6 +84,14 @@ async fn build_tuic_outbound(ctx: Arc<AppContext>, relay: Relay) -> eyre::Result
 			.map(|v| String::from_utf8_lossy(&v).to_string())
 			.collect(),
 		reconnect,
+		client_config: None,
+		congestion_control: relay.congestion_control,
+		max_concurrent_bi_streams: None,
+		max_concurrent_uni_streams: None,
+		send_window: Some(relay.send_window),
+		stream_receive_window: Some(u64::from(relay.receive_window)),
+		max_idle_time: None,
+		udp_relay_mode: relay.udp_relay_mode,
 	};
 
 	let outbound: TuicOutbound = TuicOutbound::new(ctx, opts).await?;
