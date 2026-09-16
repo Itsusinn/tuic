@@ -158,6 +158,14 @@ async fn active_connection_drains_on_cancel() {
 		gc_interval: Duration::from_secs(10),
 		gc_lifetime: Duration::from_secs(30),
 		reconnect: Default::default(),
+		client_config: None,
+		congestion_control: wind_tuic::quinn::CongestionControl::Bbr,
+		max_concurrent_bi_streams: None,
+		max_concurrent_uni_streams: None,
+		send_window: None,
+		stream_receive_window: None,
+		max_idle_time: None,
+		udp_relay_mode: wind_tuic::quinn::UdpRelayMode::Native,
 	};
 	// `new` performs the QUIC/TLS handshake: success means the server accepted
 	// the connection, so a failed handshake must fail this test rather than
@@ -233,6 +241,14 @@ async fn connect_tuic_client(
 		gc_interval: Duration::from_secs(10),
 		gc_lifetime: Duration::from_secs(30),
 		reconnect: Default::default(),
+		client_config: None,
+		congestion_control: wind_tuic::quinn::CongestionControl::Bbr,
+		max_concurrent_bi_streams: None,
+		max_concurrent_uni_streams: None,
+		send_window: None,
+		stream_receive_window: None,
+		max_idle_time: None,
+		udp_relay_mode: wind_tuic::quinn::UdpRelayMode::Native,
 	};
 	let client = wind_tuic::quinn::outbound::TuicOutbound::new(ctx, opts)
 		.await

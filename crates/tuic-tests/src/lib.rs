@@ -655,6 +655,14 @@ pub fn low_level_outbound_opts(
 			enabled: false,
 			..Default::default()
 		},
+		client_config: None,
+		congestion_control: wind_tuic::quinn::CongestionControl::Bbr,
+		max_concurrent_bi_streams: None,
+		max_concurrent_uni_streams: None,
+		send_window: None,
+		stream_receive_window: None,
+		max_idle_time: None,
+		udp_relay_mode: wind_tuic::quinn::UdpRelayMode::Native,
 	}
 }
 
