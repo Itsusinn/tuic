@@ -640,6 +640,7 @@ pub fn low_level_outbound_opts(
 	let password_bytes: Arc<[u8]> = Arc::from(password.as_bytes());
 	TuicOutboundOpts {
 		peer_addr: SocketAddr::from(([127, 0, 0, 1], server_port)),
+		peer_resolver: None,
 		sni: "localhost".to_string(),
 		auth: (uuid, password_bytes),
 		zero_rtt_handshake: false,
@@ -663,6 +664,7 @@ pub fn low_level_outbound_opts(
 		stream_receive_window: None,
 		max_idle_time: None,
 		udp_relay_mode: wind_tuic::quinn::UdpRelayMode::Native,
+		socket_factory: None,
 	}
 }
 

@@ -149,6 +149,7 @@ async fn active_connection_drains_on_cancel() {
 	let password_bytes: Arc<[u8]> = Arc::from(password.as_bytes());
 	let client_opts = wind_tuic::quinn::outbound::TuicOutboundOpts {
 		peer_addr: addr,
+		peer_resolver: None,
 		sni: "localhost".to_string(),
 		auth: (uuid, password_bytes),
 		alpn: vec!["h3".to_string()],
@@ -166,6 +167,7 @@ async fn active_connection_drains_on_cancel() {
 		stream_receive_window: None,
 		max_idle_time: None,
 		udp_relay_mode: wind_tuic::quinn::UdpRelayMode::Native,
+		socket_factory: None,
 	};
 	// `new` performs the QUIC/TLS handshake: success means the server accepted
 	// the connection, so a failed handshake must fail this test rather than
@@ -232,6 +234,7 @@ async fn connect_tuic_client(
 	let password_bytes: Arc<[u8]> = Arc::from(password.as_bytes());
 	let opts = wind_tuic::quinn::outbound::TuicOutboundOpts {
 		peer_addr: addr,
+		peer_resolver: None,
 		sni: "localhost".to_string(),
 		auth: (uuid, password_bytes),
 		alpn: vec!["h3".to_string()],
@@ -249,6 +252,7 @@ async fn connect_tuic_client(
 		stream_receive_window: None,
 		max_idle_time: None,
 		udp_relay_mode: wind_tuic::quinn::UdpRelayMode::Native,
+		socket_factory: None,
 	};
 	let client = wind_tuic::quinn::outbound::TuicOutbound::new(ctx, opts)
 		.await

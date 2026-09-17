@@ -71,6 +71,7 @@ async fn build_tuic_outbound(ctx: Arc<AppContext>, relay: Relay) -> eyre::Result
 
 	let opts = TuicOutboundOpts {
 		peer_addr: server_addr,
+		peer_resolver: None,
 		sni,
 		auth: (relay.uuid, password),
 		zero_rtt_handshake: relay.zero_rtt_handshake,
@@ -92,6 +93,7 @@ async fn build_tuic_outbound(ctx: Arc<AppContext>, relay: Relay) -> eyre::Result
 		stream_receive_window: Some(u64::from(relay.receive_window)),
 		max_idle_time: None,
 		udp_relay_mode: relay.udp_relay_mode,
+		socket_factory: None,
 	};
 
 	let outbound: TuicOutbound = TuicOutbound::new(ctx, opts).await?;
