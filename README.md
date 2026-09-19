@@ -1,5 +1,10 @@
 # TUIC
 
+[![Release](https://img.shields.io/github/v/release/Itsusinn/tuic?include_prereleases&label=release)](https://github.com/Itsusinn/tuic/releases)
+[![Rust](https://img.shields.io/badge/rust-1.85.0%2B%20%7C%20edition%202024-blue)](https://github.com/Itsusinn/tuic/blob/main/Cargo.toml)
+[![Docker](https://img.shields.io/badge/ghcr.io-tuic--server-blue?logo=docker)](https://github.com/Itsusinn/tuic/pkgs/container/tuic-server)
+[![Telegram](https://img.shields.io/badge/Telegram-2CA5E0?logo=telegram&logoColor=white)](https://t.me/gh_rustproxy)
+
 基于 QUIC 的低延迟代理协议实现，提供独立的服务端与客户端。
 
 本仓库 fork 自 [tuic-protocol/tuic](https://github.com/tuic-protocol/tuic)，在保持 TUIC 简洁、低握手开销特性的同时，增加了更完整的部署、路由、安全与可观测能力。
