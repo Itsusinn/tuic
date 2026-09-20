@@ -65,7 +65,7 @@ If a change involves Wind, run its formatting, Clippy, and test commands separat
 
 ## Configuration compatibility
 
-Both the server and client accept TOML, JSON/JSON5, and YAML. They can infer the format from the extension or content. The precedence of `TUIC_FORCE_TOML` and `TUIC_CONFIG_FORMAT`, along with legacy-field migration, is part of the compatibility contract.
+Both the server and client accept TOML, JSON/JSON5, and YAML. They determine the format from the file extension, with `TUIC_CONFIG_FORMAT` as an explicit override. Legacy-field migration is part of the compatibility contract.
 
 When changing configuration behavior:
 

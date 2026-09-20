@@ -22,7 +22,6 @@ FROM gcr.io/distroless/cc
 COPY --from=prepare /usr/bin/tuic-server /usr/bin/tuic-server
 
 WORKDIR /var/lib/tuic
-ENV IN_DOCKER=true
 
 ENTRYPOINT [ "/usr/bin/tuic-server" ]
 CMD [ "-d", "/etc/tuic" ]
