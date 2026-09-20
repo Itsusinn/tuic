@@ -28,7 +28,7 @@ The client supports both JSON5 and TOML configuration formats:
 - **JSON5 format**: Use `.json` or `.json5` file extension (legacy format, still supported)
 - **Yaml format**: Use `.yaml` or `.yml` file extension
 
-The format is automatically detected based on the file extension. You can also force TOML parsing by setting the `TUIC_FORCE_TOML` environment variable. Or use `TUIC_CONFIG_FORMAT` environment variable to explicitly specify the format (`toml` or `json5`).
+The format is automatically detected based on the file extension. If the extension is not one of the supported formats, the client exits with an error; use the `TUIC_CONFIG_FORMAT` environment variable to explicitly specify the format (`toml`, `json`, `json5`, `yaml`, or `yml`).
 
 ```
 

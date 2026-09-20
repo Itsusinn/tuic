@@ -24,7 +24,6 @@ use crate::utils::{CongestionControl, StackPrefer, UdpRelayMode};
 /// Environment state for configuration parsing
 #[derive(Debug, Clone, Default)]
 pub struct EnvState {
-	pub tuic_force_toml: bool,
 	pub tuic_config_format: Option<String>,
 }
 
@@ -32,7 +31,6 @@ impl EnvState {
 	/// Create EnvState from system environment variables
 	pub fn from_system() -> Self {
 		Self {
-			tuic_force_toml: std::env::var("TUIC_FORCE_TOML").is_ok(),
 			tuic_config_format: std::env::var("TUIC_CONFIG_FORMAT").ok().map(|v| v.to_lowercase()),
 		}
 	}
@@ -503,16 +501,14 @@ impl Config {
 		}
 
 		let figmet = Figment::new();
-		let format;
 
-		if env_state.tuic_force_toml {
-			format = ConfigFormat::Toml;
-		} else if let Some(ref env_format) = env_state.tuic_config_format {
+		// Priority: TUIC_CONFIG_FORMAT > file extension
+		let format = if let Some(ref env_format) = env_state.tuic_config_format {
 			match env_format.to_lowercase().as_str() {
-				"json" | "json5" => format = ConfigFormat::Json,
-				"yaml" | "yml" => format = ConfigFormat::Yaml,
-				"toml" => format = ConfigFormat::Toml,
-				_ => format = ConfigFormat::Unknown,
+				"json" | "json5" => ConfigFormat::Json,
+				"yaml" | "yml" => ConfigFormat::Yaml,
+				"toml" => ConfigFormat::Toml,
+				other => bail!(ConfigError::UnsupportedFormat(other.to_string())),
 			}
 		} else {
 			match path
@@ -522,28 +518,17 @@ impl Config {
 				.to_lowercase()
 				.as_str()
 			{
-				"json" | "json5" => format = ConfigFormat::Json,
-				"yaml" | "yml" => format = ConfigFormat::Yaml,
-				"toml" => format = ConfigFormat::Toml,
-				_ => format = ConfigFormat::Unknown,
+				"json" | "json5" => ConfigFormat::Json,
+				"yaml" | "yml" => ConfigFormat::Yaml,
+				"toml" => ConfigFormat::Toml,
+				_ => bail!(ConfigError::UnknownFormat),
 			}
-		}
+		};
 
 		let figmet = match format {
 			ConfigFormat::Json => figmet.merge(Json5::file(&path)),
 			ConfigFormat::Toml => figmet.merge(Toml::file(&path)),
 			ConfigFormat::Yaml => figmet.merge(Yaml::file(&path)),
-			ConfigFormat::Unknown => {
-				let content = std::fs::read_to_string(&path)?;
-				let inferred_format = infer_config_format(&content);
-
-				match inferred_format {
-					ConfigFormat::Json => figmet.merge(Json5::string(&content)),
-					ConfigFormat::Toml => figmet.merge(Toml::string(&content)),
-					ConfigFormat::Yaml => figmet.merge(Yaml::string(&content)),
-					ConfigFormat::Unknown => Err(ConfigError::UnknownFormat)?,
-				}
-			}
 		};
 
 		let config: Config = figmet.extract().map_err(ConfigError::Figment)?;
@@ -557,24 +542,6 @@ enum ConfigFormat {
 	Json,
 	Toml,
 	Yaml,
-	Unknown,
-}
-
-fn infer_config_format(content: &str) -> ConfigFormat {
-	// Parse a mapping instead of guessing from ':' in host:port strings or
-	// '[' in table headers. Modern minimal TOML has no section headers.
-	if Figment::from(Json5::string(content))
-		.extract::<figment::value::Dict>()
-		.is_ok()
-	{
-		ConfigFormat::Json
-	} else if Figment::from(Toml::string(content)).extract::<figment::value::Dict>().is_ok() {
-		ConfigFormat::Toml
-	} else if Figment::from(Yaml::string(content)).extract::<figment::value::Dict>().is_ok() {
-		ConfigFormat::Yaml
-	} else {
-		ConfigFormat::Unknown
-	}
 }
 
 /// Move explicitly supplied legacy fields before merging defaults, so modern
@@ -736,8 +703,13 @@ pub enum ConfigError {
 	NoConfig,
 	#[error("config file not found: {0}")]
 	ConfigNotFound(PathBuf),
-	#[error("cannot infer config format from file extension or content")]
+	#[error(
+		"cannot determine config format from file extension, please use a .toml, .json, .json5, .yaml, or .yml file or set \
+		 TUIC_CONFIG_FORMAT"
+	)]
 	UnknownFormat,
+	#[error("unsupported TUIC_CONFIG_FORMAT value {0:?}, expected one of: toml, json, json5, yaml, yml")]
+	UnsupportedFormat(String),
 	#[error(transparent)]
 	Io(#[from] IoError),
 	#[error("configuration error: {0}")]
@@ -756,17 +728,27 @@ mod tests {
 	}
 
 	#[test]
-	fn modern_formats_and_headerless_toml_inference() {
-		for content in [
-			r#"server = "example.com:8443"
+	fn modern_layout_across_formats() {
+		for (content, extension) in
+			[
+				(
+					r#"server = "example.com:8443"
 uuid = "00000000-0000-0000-0000-000000000000"
 password = "test"
 "#,
-			r#"{server: "example.com:8443", password: "test", tls: {alpn: ["h3"]}, backend: {quinn: {congestion_control: {controller: "cubic"}}}}"#,
-			"server: example.com:8443\npassword: test\ntls:\n  alpn: [h3]\nbackend:\n  quinn:\n    congestion_control:\n      \
-			 controller: cubic\n",
-		] {
-			let config = test_parse_config(content, ".config").unwrap();
+					".toml",
+				),
+				(
+					r#"{server: "example.com:8443", password: "test", tls: {alpn: ["h3"]}, backend: {quinn: {congestion_control: {controller: "cubic"}}}}"#,
+					".json5",
+				),
+				(
+					"server: example.com:8443\npassword: test\ntls:\n  alpn: [h3]\nbackend:\n  quinn:\n    \
+					 congestion_control:\n      controller: cubic\n",
+					".yaml",
+				),
+			] {
+			let config = test_parse_config(content, extension).unwrap();
 			assert_eq!(config.relay.server, ("example.com".into(), 8443));
 			assert_eq!(&*config.relay.password, b"test");
 			if !content.starts_with("server =") {
@@ -1309,51 +1291,10 @@ server = "127.0.0.1:1081"
 	}
 
 	#[test]
-	fn test_format_inference_json() {
-		let config_content = include_str!("../tests/config/inference_json.txt");
-
-		// Use .txt extension to force format inference
-		let config = test_parse_config(config_content, ".txt").unwrap();
-		assert_eq!(config.relay.server.0, "inferred.example.com");
-	}
-
-	#[test]
-	fn test_format_inference_toml() {
-		let config_content = include_str!("../tests/config/inference_toml.config");
-
-		// Use .config extension to force format inference
-		let config = test_parse_config(config_content, ".config").unwrap();
-		assert_eq!(config.relay.server.0, "inferred.example.com");
-	}
-
-	#[test]
-	fn test_format_inference_yaml() {
-		let config_content = include_str!("../tests/config/inference_yaml.config");
-
-		let config = test_parse_config(config_content, ".config").unwrap();
-		assert_eq!(config.relay.server.0, "inferred.example.com");
-	}
-
-	#[test]
-	fn test_env_var_force_toml() {
-		let config_content = include_str!("../tests/config/env_var_force_toml.toml");
-
-		let env_state = EnvState {
-			tuic_force_toml: true,
-			tuic_config_format: None,
-		};
-
-		// Even with .json extension, should parse as TOML
-		let config = test_parse_config_with_env(config_content, ".json", env_state).unwrap();
-		assert_eq!(config.relay.server.0, "forced.example.com");
-	}
-
-	#[test]
 	fn test_env_var_config_format() {
 		let config_content = include_str!("../tests/config/env_yaml.toml");
 
 		let env_state = EnvState {
-			tuic_force_toml: false,
 			tuic_config_format: Some("yaml".to_string()),
 		};
 
@@ -1361,6 +1302,32 @@ server = "127.0.0.1:1081"
 		let config = test_parse_config_with_env(config_content, ".toml", env_state).unwrap();
 		assert_eq!(config.relay.server.0, "env.example.com");
 		assert_eq!(config.log_level, "error");
+	}
+
+	#[test]
+	fn test_env_var_unsupported_format() {
+		let config_content = include_str!("../tests/config/env_yaml.toml");
+
+		let env_state = EnvState {
+			tuic_config_format: Some("invalid_format".to_string()),
+		};
+
+		let result = test_parse_config_with_env(config_content, ".toml", env_state);
+		assert!(matches!(
+			result.unwrap_err().downcast_ref::<ConfigError>(),
+			Some(ConfigError::UnsupportedFormat(_))
+		));
+	}
+
+	#[test]
+	fn test_unknown_extension_errors() {
+		let config_content = include_str!("../tests/config/env_yaml.toml");
+
+		let result = test_parse_config(config_content, ".txt");
+		assert!(matches!(
+			result.unwrap_err().downcast_ref::<ConfigError>(),
+			Some(ConfigError::UnknownFormat)
+		));
 	}
 
 	#[test]

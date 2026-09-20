@@ -28,8 +28,6 @@ use crate::{
 /// Environment state for configuration parsing
 #[derive(Debug, Clone, Default)]
 pub struct EnvState {
-	pub in_docker: bool,
-	pub tuic_force_toml: bool,
 	pub tuic_config_format: Option<String>,
 }
 
@@ -37,8 +35,6 @@ impl EnvState {
 	/// Create EnvState from system environment variables
 	pub fn from_system() -> Self {
 		Self {
-			in_docker: std::env::var("IN_DOCKER").unwrap_or_default().to_lowercase() == "true",
-			tuic_force_toml: std::env::var("TUIC_FORCE_TOML").is_ok(),
 			tuic_config_format: std::env::var("TUIC_CONFIG_FORMAT").ok().map(|v| v.to_lowercase()),
 		}
 	}
@@ -810,79 +806,11 @@ impl From<LogLevel> for LevelFilter {
 	}
 }
 
-/// Infer the config format from file content
-fn infer_config_format(content: &str) -> ConfigFormat {
-	let trimmed = content.trim_start();
-
-	if trimmed.starts_with('{') || trimmed.starts_with('[') {
-		return ConfigFormat::Json;
-	}
-
-	// Check for YAML format (common indicators)
-	// YAML typically starts with --- or has key: value patterns
-	if trimmed.starts_with("---") || trimmed.starts_with("%YAML") {
-		return ConfigFormat::Yaml;
-	}
-
-	let lines: Vec<&str> = content
-		.lines()
-		.filter(|l| !l.trim().is_empty() && !l.trim_start().starts_with('#'))
-		.collect();
-	let has_yaml_patterns = lines.iter().any(|line| {
-		let trimmed_line = line.trim();
-		// YAML list items start with -
-		if trimmed_line.starts_with("- ") {
-			return true;
-		}
-		// YAML key-value with colon and typically followed by space or newline
-		if let Some(colon_pos) = trimmed_line.find(':') {
-			let after_colon = &trimmed_line[colon_pos + 1..];
-			// In YAML, after colon there's usually a space, newline, or it's at
-			// the end In TOML, = is used instead of :
-			return after_colon.is_empty() || after_colon.starts_with(' ') || after_colon.starts_with('\t');
-		}
-		false
-	});
-
-	// Check for TOML format: [section] tables and <ident> = assignments.
-	let is_toml_assignment = |s: &str| -> bool {
-		let bytes = s.as_bytes();
-		if bytes.is_empty() || !(bytes[0].is_ascii_alphabetic() || bytes[0] == b'_') {
-			return false;
-		}
-		let mut i = 1;
-		while i < bytes.len() && (bytes[i].is_ascii_alphanumeric() || bytes[i] == b'_' || bytes[i] == b'-') {
-			i += 1;
-		}
-		while i < bytes.len() && (bytes[i] == b' ' || bytes[i] == b'\t') {
-			i += 1;
-		}
-		matches!(bytes.get(i), Some(b'='))
-	};
-	let has_toml_patterns = lines.iter().any(|line| {
-		let trimmed = line.trim();
-		(trimmed.starts_with('[') && trimmed.contains(']') && !trimmed.contains(':')) || is_toml_assignment(trimmed)
-	});
-
-	if has_toml_patterns && !has_yaml_patterns {
-		ConfigFormat::Toml
-	} else if has_yaml_patterns && !has_toml_patterns {
-		ConfigFormat::Yaml
-	} else if has_toml_patterns && has_yaml_patterns {
-		// If both patterns exist, prefer TOML as it's more distinctive
-		// (YAML could have = in values, but TOML [sections] are more specific)
-		ConfigFormat::Toml
-	} else {
-		ConfigFormat::Unknown
-	}
-}
-
 #[derive(Debug, PartialEq, Eq)]
 enum ConfigFormat {
 	Json,
 	Toml,
 	Yaml,
-	Unknown,
 }
 
 /// Find the first recognizable config file in a directory
@@ -958,30 +886,20 @@ pub async fn parse_config(cli: Cli, env_state: EnvState) -> eyre::Result<Config>
 	}
 
 	let figmet = Figment::from(Serialized::defaults(Config::default()));
-	let format;
 
-	// Priority: TUIC_FORCE_TOML > TUIC_CONFIG_FORMAT > file extension > content
-	// inference (in Docker)
-	if env_state.tuic_force_toml {
-		format = ConfigFormat::Toml;
-	} else if let Some(ref env_format) = env_state.tuic_config_format {
+	// Priority: TUIC_CONFIG_FORMAT > file extension
+	let format = if let Some(ref env_format) = env_state.tuic_config_format {
 		// TUIC_CONFIG_FORMAT has higher priority than file extension
 		match env_format.to_lowercase().as_str() {
-			"json" | "json5" => {
-				format = ConfigFormat::Json;
+			"json" | "json5" => ConfigFormat::Json,
+			"yaml" | "yml" => ConfigFormat::Yaml,
+			"toml" => ConfigFormat::Toml,
+			other => {
+				return Err(eyre::eyre!(
+					"Unsupported TUIC_CONFIG_FORMAT value {other:?}, expected one of: toml, json, json5, yaml, yml"
+				));
 			}
-			"yaml" | "yml" => {
-				format = ConfigFormat::Yaml;
-			}
-			"toml" => {
-				format = ConfigFormat::Toml;
-			}
-			_ => format = ConfigFormat::Unknown,
 		}
-	} else if env_state.in_docker {
-		// In Docker without explicit format, prefer content inference over file
-		// extension
-		format = ConfigFormat::Unknown;
 	} else {
 		// Fall back to file extension
 		match cfg_path
@@ -991,38 +909,21 @@ pub async fn parse_config(cli: Cli, env_state: EnvState) -> eyre::Result<Config>
 			.to_lowercase()
 			.as_str()
 		{
-			"json" | "json5" => {
-				format = ConfigFormat::Json;
+			"json" | "json5" => ConfigFormat::Json,
+			"yaml" | "yml" => ConfigFormat::Yaml,
+			"toml" => ConfigFormat::Toml,
+			other => {
+				return Err(eyre::eyre!(
+					"Cannot determine config format from file extension {other:?}, please use a .toml, .json, .json5, .yaml, \
+					 or .yml file or set TUIC_CONFIG_FORMAT"
+				));
 			}
-			"yaml" | "yml" => {
-				format = ConfigFormat::Yaml;
-			}
-			"toml" => {
-				format = ConfigFormat::Toml;
-			}
-			_ => format = ConfigFormat::Unknown,
 		}
-	}
+	};
 	let figmet = match format {
 		ConfigFormat::Json => figmet.merge(Json5::file(&cfg_path)),
 		ConfigFormat::Toml => figmet.merge(Toml::file(&cfg_path)),
 		ConfigFormat::Yaml => figmet.merge(Yaml::file(&cfg_path)),
-		ConfigFormat::Unknown => {
-			let content = tokio::fs::read_to_string(&cfg_path).await?;
-			let inferred_format = infer_config_format(&content);
-
-			match inferred_format {
-				ConfigFormat::Json => figmet.merge(Json5::file(&cfg_path)),
-				ConfigFormat::Toml => figmet.merge(Toml::file(&cfg_path)),
-				ConfigFormat::Yaml => figmet.merge(Yaml::file(&cfg_path)),
-				ConfigFormat::Unknown => {
-					return Err(Control(
-						"Cannot infer config format from file extension or content, please set TUIC_CONFIG_FORMAT or \
-						 TUIC_FORCE_TOML",
-					))?;
-				}
-			}
-		}
 	};
 
 	let mut config: Config = figmet.extract()?;
@@ -1543,26 +1444,6 @@ send_window = 12345678
 	}
 
 	#[tokio::test]
-	async fn test_infer_format_toml_without_extension() {
-		// Test TOML config without file extension
-		let config = include_str!("../tests/config/infer_format_toml_without_extension");
-
-		let result = test_parse_config(config, "").await.unwrap();
-		assert_eq!(result.log_level, LogLevel::Info);
-		assert_eq!(result.server, "127.0.0.1:8080".parse::<SocketAddr>().unwrap());
-	}
-
-	#[tokio::test]
-	async fn test_infer_format_json_without_extension() {
-		// Test JSON config without file extension
-		let config = include_str!("../tests/config/infer_format_json_without_extension");
-
-		let result = test_parse_config(config, "").await.unwrap();
-		assert_eq!(result.log_level, LogLevel::Debug);
-		assert_eq!(result.server, "0.0.0.0:8443".parse::<SocketAddr>().unwrap());
-	}
-
-	#[tokio::test]
 	async fn test_yaml_config_format() {
 		// Test YAML config format with .yaml extension
 		// Note: test_parse_config helper trims whitespace which breaks YAML
@@ -1837,31 +1718,12 @@ send_window = 12345678
 	}
 
 	#[tokio::test]
-	async fn test_env_state_force_toml() {
-		// Test TUIC_FORCE_TOML forces TOML parsing even with .json extension
-		let config_content = include_str!("../tests/config/env_force_toml.toml");
-
-		let env_state = EnvState {
-			tuic_force_toml: true,
-			tuic_config_format: None,
-			in_docker: false,
-		};
-
-		// Use .json extension but content is TOML
-		let result = test_parse_config_with_env(config_content, ".json", env_state).await.unwrap();
-		assert_eq!(result.log_level, LogLevel::Info);
-		assert_eq!(result.server, "127.0.0.1:8443".parse::<SocketAddr>().unwrap());
-	}
-
-	#[tokio::test]
 	async fn test_env_state_config_format_yaml() {
 		// Test TUIC_CONFIG_FORMAT=yaml forces YAML parsing
 		let config_content = include_str!("../tests/config/env_format_yaml.yaml");
 
 		let env_state = EnvState {
-			tuic_force_toml: false,
 			tuic_config_format: Some("yaml".to_string()),
-			in_docker: false,
 		};
 
 		// Use .toml extension but content is YAML
@@ -1879,9 +1741,7 @@ send_window = 12345678
 		let config_content = include_str!("../tests/config/env_format_json.json");
 
 		let env_state = EnvState {
-			tuic_force_toml: false,
 			tuic_config_format: Some("json".to_string()),
-			in_docker: false,
 		};
 
 		// Use .toml extension but content is JSON
@@ -1891,71 +1751,17 @@ send_window = 12345678
 	}
 
 	#[tokio::test]
-	async fn test_env_state_in_docker_inference() {
-		// Test IN_DOCKER=true triggers content inference for files without
-		// extension
-		let config_content = include_str!("../tests/config/env_docker_inference.config");
-
-		let env_state = EnvState {
-			tuic_force_toml: false,
-			tuic_config_format: None,
-			in_docker: true,
-		};
-
-		// Use unknown extension to trigger inference
-		let result = test_parse_config_with_env(config_content, ".config", env_state)
-			.await
-			.unwrap();
-		assert_eq!(result.log_level, LogLevel::Trace);
-		assert_eq!(result.server, "127.0.0.1:7777".parse::<SocketAddr>().unwrap());
-	}
-
-	#[tokio::test]
-	async fn test_env_state_priority_force_toml_over_config_format() {
-		// Test that TUIC_FORCE_TOML has higher priority than TUIC_CONFIG_FORMAT
-		let config_content = include_str!("../tests/config/env_force_toml.toml");
-
-		let env_state = EnvState {
-			tuic_force_toml: true,
-			tuic_config_format: Some("json".to_string()), // This should be ignored
-			in_docker: false,
-		};
-
-		let result = test_parse_config_with_env(config_content, ".yaml", env_state).await.unwrap();
-		assert_eq!(result.log_level, LogLevel::Info);
-	}
-
-	#[tokio::test]
 	async fn test_env_state_priority_config_format_over_extension() {
 		// Test that TUIC_CONFIG_FORMAT has higher priority than file extension
 		let config_content = include_str!("../tests/config/env_format_yaml.yaml");
 
 		let env_state = EnvState {
-			tuic_force_toml: false,
 			tuic_config_format: Some("yaml".to_string()),
-			in_docker: false,
 		};
 
 		// File extension says .json but env says yaml
 		let result = test_parse_config_with_env(config_content, ".json", env_state).await.unwrap();
 		assert_eq!(result.log_level, LogLevel::Debug);
-	}
-
-	#[tokio::test]
-	async fn test_env_state_priority_config_format_over_docker() {
-		// Test that TUIC_CONFIG_FORMAT has higher priority than IN_DOCKER
-		let config_content = include_str!("../tests/config/env_format_json.json");
-
-		let env_state = EnvState {
-			tuic_force_toml: false,
-			tuic_config_format: Some("json".to_string()),
-			in_docker: true, // This should be ignored when config_format is set
-		};
-
-		let result = test_parse_config_with_env(config_content, ".unknown", env_state)
-			.await
-			.unwrap();
-		assert_eq!(result.log_level, LogLevel::Warn);
 	}
 
 	#[tokio::test]
@@ -1978,9 +1784,7 @@ send_window = 12345678
 		let config_content = include_str!("../tests/config/env_format_yaml.yaml");
 
 		let env_state = EnvState {
-			tuic_force_toml: false,
 			tuic_config_format: Some("YAML".to_string()), // Uppercase
-			in_docker: false,
 		};
 
 		let result = test_parse_config_with_env(config_content, ".toml", env_state).await.unwrap();
@@ -1989,20 +1793,25 @@ send_window = 12345678
 
 	#[tokio::test]
 	async fn test_env_state_invalid_format() {
-		// Test that invalid format in TUIC_CONFIG_FORMAT falls back to Unknown
+		// Test that an invalid format in TUIC_CONFIG_FORMAT is rejected
 		let config_content = include_str!("../tests/config/env_force_toml.toml");
 
 		let env_state = EnvState {
-			tuic_force_toml: false,
 			tuic_config_format: Some("invalid_format".to_string()),
-			in_docker: false,
 		};
 
-		// Should try to infer from content
-		let result = test_parse_config_with_env(config_content, ".txt", env_state).await;
+		let result = test_parse_config_with_env(config_content, ".toml", env_state).await;
+		assert!(result.is_err());
+	}
 
-		// Should succeed because inference will detect TOML
-		assert!(result.is_ok());
+	#[tokio::test]
+	async fn test_unknown_extension_errors() {
+		// Without TUIC_CONFIG_FORMAT, an unrecognized extension must be rejected
+		// rather than inferred from content.
+		let config_content = include_str!("../tests/config/env_force_toml.toml");
+
+		let result = test_parse_config(config_content, ".txt").await;
+		assert!(result.is_err());
 	}
 
 	#[tokio::test]
@@ -2229,37 +2038,5 @@ self_sign = true
 		let parsed_empty = test_parse_config(cfg_empty, ".toml").await.unwrap();
 		assert!(parsed_empty.outbound.default.bind_ipv4.is_empty());
 		assert!(parsed_empty.outbound.default.bind_ipv6.is_empty());
-	}
-
-	// infer_config_format regression tests
-
-	/// YAML values containing `=` must not be misclassified as TOML.
-	#[test]
-	fn yaml_with_equals_in_value_is_yaml() {
-		let yaml = "secret: aGVsbG8=\nfoo: bar\n";
-		assert_eq!(infer_config_format(yaml), ConfigFormat::Yaml);
-	}
-
-	#[test]
-	fn toml_section_still_detected() {
-		// `infer_config_format` short-circuits `starts_with('[')` to JSON.
-		// Verify TOML is still detected when first non-comment line is `key =
-		// value`.
-		let toml = "# config\nlog_level = \"info\"\n[server]\nport = 9443\n";
-		assert_eq!(infer_config_format(toml), ConfigFormat::Toml);
-	}
-
-	#[test]
-	fn toml_bare_assignment_still_detected() {
-		// `key = "value"` without a section header is still valid TOML.
-		let toml = "log_level = \"info\"\n";
-		assert_eq!(infer_config_format(toml), ConfigFormat::Toml);
-	}
-
-	#[test]
-	fn yaml_with_indented_block_not_misread_as_toml() {
-		// Indented list under a key — pure YAML, no top-level `=`.
-		let yaml = "rules:\n  - foo=bar\n  - baz\n";
-		assert_eq!(infer_config_format(yaml), ConfigFormat::Yaml);
 	}
 }
