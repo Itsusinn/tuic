@@ -7,6 +7,7 @@ TUIC 协议服务端实现。
 - 服务端：<https://rust-proxy.github.io/tuic/server/>
 - 快速开始：<https://rust-proxy.github.io/tuic/getting-started/>
 - Docker 部署：<https://rust-proxy.github.io/tuic/docker/>
+- 配置编辑器：<https://rust-proxy.github.io/config-editor/?schema=tuic-server>
 
 协议规范见 <https://rust-proxy.github.io/wind/tuic/>。
 
