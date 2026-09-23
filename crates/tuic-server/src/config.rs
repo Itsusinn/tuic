@@ -1806,8 +1806,8 @@ send_window = 12345678
 
 	#[tokio::test]
 	async fn test_unknown_extension_errors() {
-		// Without TUIC_CONFIG_FORMAT, an unrecognized extension must be rejected
-		// rather than inferred from content.
+		// Without TUIC_CONFIG_FORMAT, an unrecognized extension must be
+		// rejected rather than inferred from content.
 		let config_content = include_str!("../tests/config/env_force_toml.toml");
 
 		let result = test_parse_config(config_content, ".txt").await;
