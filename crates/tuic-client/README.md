@@ -6,6 +6,7 @@ TUIC 协议客户端实现，提供本地 SOCKS5 服务与 TCP/UDP 端口转发�
 
 - 客户端：<https://rust-proxy.github.io/tuic/client/>
 - 快速开始：<https://rust-proxy.github.io/tuic/getting-started/>
+- 配置编辑器：<https://rust-proxy.github.io/config-editor/?schema=tuic-client>
 
 协议规范见 <https://rust-proxy.github.io/wind/tuic/>。
 

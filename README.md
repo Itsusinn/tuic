@@ -9,7 +9,7 @@
 
 本仓库 fork 自 [tuic-protocol/tuic](https://github.com/tuic-protocol/tuic)，在保持 TUIC 简洁、低握手开销特性的同时，增加了更完整的部署、路由、安全与可观测能力。
 
-TUIC 协议的完整定义见[中文规范](https://rust-proxy.github.io/wind/tuic/)。安装、配置与 Docker 部署见[使用文档](https://rust-proxy.github.io/tuic/)。
+TUIC 协议的完整定义见[中文规范](https://rust-proxy.github.io/wind/tuic/)。安装、配置与 Docker 部署见[使用文档](https://rust-proxy.github.io/tuic/)，也可用[配置编辑器](https://rust-proxy.github.io/config-editor/)在浏览器本地生成服务端与客户端配置。
 
 ## 从源码构建
 
