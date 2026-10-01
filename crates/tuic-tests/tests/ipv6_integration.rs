@@ -130,6 +130,7 @@ async fn test_ipv6_server_client_integration() -> eyre::Result<()> {
 			reconnect_initial_backoff: Duration::from_millis(500),
 			reconnect_max_backoff: Duration::from_secs(30),
 			lazy: false,
+			..Default::default()
 		},
 		local: tuic_client::config::Local {
 			server: "[::1]:0".parse()?,

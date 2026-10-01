@@ -25,7 +25,8 @@ target = "x86_64-unknown-linux-gnu"
 release-name = "x86_64-linux"
 tool = "cross"
 # `quiche` (tokio-quiche) is 64-bit only; keep it out of the 32-bit targets
-# below. It is a no-op for packages that do not declare it (e.g. tuic-client).
+# below. It enables the optional quiche backend on the packages that declare it
+# (tuic-server, tuic-client, and tuic-tests).
 extra-args = "--features jemallocator,quiche"
 zig = "2.17"
 

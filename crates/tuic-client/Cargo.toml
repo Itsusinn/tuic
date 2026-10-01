@@ -16,6 +16,10 @@ default = ["aws-lc-rs"]
 ring = ["rustls/ring", "quinn/rustls-ring"]
 aws-lc-rs = ["dep:aws-lc-rs", "rustls/aws-lc-rs", "quinn/rustls-aws-lc-rs"]
 jemallocator = ["tikv-jemallocator"]
+# The tokio-quiche backend, hosted inside wind-tuic behind its `quiche`
+# feature. 64-bit only — tokio-quiche does not compile on 32-bit. Enabled per
+# target via `.github/target.toml`; do NOT enable on 32-bit targets.
+quiche = ["wind-tuic/quiche"]
 
 [dependencies]
 

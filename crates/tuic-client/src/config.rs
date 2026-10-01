@@ -172,6 +172,37 @@ pub struct QuinnConfig {
 	pub pmtu: bool,
 }
 
+/// Transport tuning for the tokio-quiche backend. Mirrors tuic-server's
+/// `[backend.quiche]`; the shared `[tls]`, `udp_relay_mode`, heartbeat, GC, and
+/// reconnect fields still apply to both backends.
+#[derive(Debug, Clone, Deserialize, serde::Serialize, Educe)]
+#[educe(Default)]
+#[serde(default, deny_unknown_fields)]
+pub struct QuicheConfig {
+	pub congestion_control: CongestionControlConfig,
+
+	#[serde(with = "humantime_serde")]
+	#[educe(Default(expression = Duration::from_secs(30)))]
+	pub max_idle_time: Duration,
+
+	#[educe(Default = 100)]
+	pub max_concurrent_bi_streams: u64,
+
+	#[educe(Default = 100)]
+	pub max_concurrent_uni_streams: u64,
+
+	#[educe(Default = 16777216)]
+	pub send_window: u64,
+
+	#[educe(Default = 8388608)]
+	pub receive_window: u64,
+
+	/// Enable 0-RTT early data, in addition to the shared
+	/// `zero_rtt_handshake` flag.
+	#[educe(Default = false)]
+	pub zero_rtt: bool,
+}
+
 #[derive(Debug, Clone, Deserialize, serde::Serialize, Educe)]
 #[educe(Default)]
 #[serde(default, deny_unknown_fields)]
@@ -186,14 +217,20 @@ pub struct CongestionControlConfig {
 pub struct BackendConfig {
 	pub mode: BackendMode,
 	pub quinn: QuinnConfig,
+	pub quiche: QuicheConfig,
 }
 
-/// The client currently supports only the quinn backend.
-#[derive(Debug, Clone, Copy, Default, Deserialize, serde::Serialize)]
+/// Selects the QUIC implementation.
+///
+/// `Quiche` requires the `quiche` cargo feature (64-bit targets only). Config
+/// parsing accepts it unconditionally so a config file is portable; the plugin
+/// rejects it at startup when the feature isn't compiled in.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize, serde::Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum BackendMode {
 	#[default]
 	Quinn,
+	Quiche,
 }
 
 impl From<ConfigFile> for Config {
@@ -210,6 +247,8 @@ impl From<ConfigFile> for Config {
 				certificates: file.tls.certificates,
 				udp_relay_mode: file.udp_relay_mode,
 				congestion_control: file.backend.quinn.congestion_control.controller,
+				backend_mode: file.backend.mode,
+				quiche: file.backend.quiche,
 				alpn: file.tls.alpn,
 				zero_rtt_handshake: file.zero_rtt_handshake,
 				disable_sni: file.tls.disable_sni,
@@ -267,7 +306,7 @@ impl From<Config> for ConfigFile {
 				skip_cert_verify: relay.skip_cert_verify,
 			},
 			backend: BackendConfig {
-				mode: BackendMode::Quinn,
+				mode: relay.backend_mode,
 				quinn: QuinnConfig {
 					congestion_control: CongestionControlConfig {
 						controller: relay.congestion_control,
@@ -279,6 +318,7 @@ impl From<Config> for ConfigFile {
 					gso: relay.gso,
 					pmtu: relay.pmtu,
 				},
+				quiche: relay.quiche,
 			},
 		}
 	}
@@ -415,6 +455,13 @@ pub struct Relay {
 	#[educe(Default = true)]
 	#[serde(default)]
 	pub lazy: bool,
+
+	/// Selected QUIC backend. Mirrors `backend.mode`.
+	#[educe(Default(expression = BackendMode::Quinn))]
+	pub backend_mode: BackendMode,
+
+	/// Transport tuning for the quiche backend. Mirrors `backend.quiche`.
+	pub quiche: QuicheConfig,
 }
 
 #[derive(Debug, Deserialize, serde::Serialize, Educe, Clone, PartialEq, Eq)]
@@ -594,7 +641,9 @@ fn migrate_relay(values: &mut figment::value::Dict) -> eyre::Result<()> {
 			}
 		}
 	}
-	tracing::warn!("The [relay] section is deprecated; use top-level connection fields, [tls] and [backend.quinn]");
+	tracing::warn!(
+		"The [relay] section is deprecated; use top-level connection fields, [tls], and [backend.quinn]/[backend.quiche]"
+	);
 	Ok(())
 }
 
@@ -805,15 +854,47 @@ username = "legacy_user"
 		for content in [
 			"typo = true",
 			"[tls]\nskip_cert_verfy = true",
-			"[backend]\nmode = 'quiche'",
+			"[backend]\nmode = 'quic'",
 			"[backend.quinn]\nsend_windw = 10",
 			"[backend.quinn.congestion_control]\ncontroller = 'invalid'",
+			"[backend.quiche]\nunknown_knob = 1",
 			"[relay]\ntypo = true",
 			"relay = false",
 			"tls = false\n[relay]\nalpn = ['h3']",
 		] {
 			assert!(test_parse_config(content, ".toml").is_err(), "accepted {content}");
 		}
+	}
+
+	#[test]
+	fn test_backend_mode_quiche_and_subsections() {
+		let config = r#"
+server = "127.0.0.1:8443"
+password = "test"
+
+[backend]
+mode = "quiche"
+
+[backend.quinn]
+initial_mtu = 1400
+
+[backend.quiche]
+max_concurrent_bi_streams = 50
+zero_rtt = true
+max_idle_time = "45s"
+"#;
+		let parsed = test_parse_config(config, ".toml").unwrap();
+		assert_eq!(parsed.relay.backend_mode, BackendMode::Quiche);
+		assert_eq!(parsed.relay.initial_mtu, 1400);
+		assert_eq!(parsed.relay.quiche.max_concurrent_bi_streams, 50);
+		assert!(parsed.relay.quiche.zero_rtt);
+		assert_eq!(parsed.relay.quiche.max_idle_time, Duration::from_secs(45));
+	}
+
+	#[test]
+	fn test_backend_mode_defaults_to_quinn() {
+		let parsed = test_parse_config("server = \"127.0.0.1:8443\"\n", ".toml").unwrap();
+		assert_eq!(parsed.relay.backend_mode, BackendMode::Quinn);
 	}
 
 	#[test]
@@ -839,6 +920,7 @@ username = "legacy_user"
 		assert!(!output.contains("[relay"));
 		assert!(output.contains("[tls]"));
 		assert!(output.contains("[backend.quinn.congestion_control]"));
+		assert!(output.contains("[backend.quiche]"));
 		assert!(output.contains("[::1]:8443"));
 		let reparsed: Config = toml::from_str(&output).unwrap();
 		assert_eq!(output, toml::to_string_pretty(&reparsed).unwrap());

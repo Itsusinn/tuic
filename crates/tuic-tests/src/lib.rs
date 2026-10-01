@@ -90,19 +90,20 @@ pub fn quinn_server_config(
 	}
 }
 
-/// Build a `tuic-client` config (quinn) pointing at a local server.
+/// Build a `tuic-client` config pointing at a local server.
 ///
-/// The client is always quinn-based regardless of the *server's* backend, so
-/// this builder is shared by both [`start_quiche_pair`] and
-/// [`start_quinn_pair`].
+/// `client_backend` selects the client's QUIC implementation independently of
+/// the server's, so the pair can mix backends (e.g. quinn server + quiche
+/// client).
 pub fn tuic_client_config(
 	server_port: u16,
 	socks_port: u16,
 	uuid: Uuid,
 	password: &str,
 	zero_rtt: bool,
+	client_backend: Backend,
 ) -> tuic_client::Config {
-	tuic_client::Config {
+	let mut cfg = tuic_client::Config {
 		relay: tuic_client::config::Relay {
 			server: ("127.0.0.1".to_string(), server_port),
 			uuid,
@@ -135,10 +136,18 @@ pub fn tuic_client_config(
 			udp_forward: Vec::new(),
 		},
 		log_level: "debug".to_string(),
-	}
+	};
+
+	cfg.relay.backend_mode = match client_backend {
+		Backend::Quinn => tuic_client::config::BackendMode::Quinn,
+		Backend::Quiche => tuic_client::config::BackendMode::Quiche,
+	};
+	cfg.relay.quiche.zero_rtt = zero_rtt;
+
+	cfg
 }
 
-/// Which `tuic-server` backend the pair exercises.
+/// Which QUIC backend a `tuic-server` / `tuic-client` in the pair exercises.
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum Backend {
 	Quinn,
@@ -167,8 +176,13 @@ pub struct TestPair {
 
 impl TestPair {
 	/// Start a `tuic-server` + `tuic-client` pair on OS-assigned loopback
-	/// ports.
+	/// ports. The client uses the quinn backend.
 	pub async fn start(backend: Backend, zero_rtt: bool) -> Self {
+		Self::start_with_client(backend, Backend::Quinn, zero_rtt).await
+	}
+
+	/// Start a pair with independently selected server and client backends.
+	pub async fn start_with_client(server_backend: Backend, client_backend: Backend, zero_rtt: bool) -> Self {
 		install_crypto_provider();
 
 		let uuid = Uuid::new_v4();
@@ -178,8 +192,8 @@ impl TestPair {
 		let data_dir = std::env::temp_dir().join(format!("wind-tuic-test-{}", Uuid::new_v4()));
 
 		let server_addr: SocketAddr = "127.0.0.1:0".parse().unwrap();
-		let label = backend.label();
-		let scfg = match backend {
+		let label = format!("{}+{}", server_backend.label(), client_backend.label());
+		let scfg = match server_backend {
 			Backend::Quinn => quinn_server_config(server_addr, data_dir, uuid, password, zero_rtt),
 			Backend::Quiche => quiche_server_config(server_addr, data_dir, uuid, password, zero_rtt),
 		};
@@ -188,7 +202,7 @@ impl TestPair {
 			.await
 			.unwrap_or_else(|e| panic!("[{label} test] tuic-server failed to start: {e:#}"));
 
-		let ccfg = tuic_client_config(server.local_addr.port(), 0, uuid, password, zero_rtt);
+		let ccfg = tuic_client_config(server.local_addr.port(), 0, uuid, password, zero_rtt, client_backend);
 		let client = tuic_client::run(ccfg)
 			.await
 			.unwrap_or_else(|e| panic!("[{label} test] tuic-client failed to start: {e:#}"));
@@ -222,6 +236,11 @@ pub async fn start_quiche_pair(zero_rtt: bool) -> TestPair {
 /// Start a quinn-backed pair. See [`TestPair::start`].
 pub async fn start_quinn_pair(zero_rtt: bool) -> TestPair {
 	TestPair::start(Backend::Quinn, zero_rtt).await
+}
+
+/// Start a quinn-server + quiche-client pair, exercising the quiche client.
+pub async fn start_quiche_client_pair(zero_rtt: bool) -> TestPair {
+	TestPair::start_with_client(Backend::Quinn, Backend::Quiche, zero_rtt).await
 }
 
 pub async fn run_tcp_echo_server(bind_addr: &str, test_name: &str) -> (tokio::task::JoinHandle<()>, std::net::SocketAddr) {
@@ -774,7 +793,7 @@ pub async fn reconnect_case(backend: Backend) {
 	let server = tuic_server::run(scfg).await.expect("reconnect test server failed to start");
 	let restful_addr = server.restful_addr.expect("RESTful API should report its bound address");
 
-	let mut ccfg = tuic_client_config(server.local_addr.port(), 0, uuid, password, false);
+	let mut ccfg = tuic_client_config(server.local_addr.port(), 0, uuid, password, false, Backend::Quinn);
 	ccfg.relay.reconnect = true;
 	ccfg.relay.reconnect_initial_backoff = Duration::from_millis(100);
 	ccfg.relay.reconnect_max_backoff = Duration::from_millis(500);
@@ -838,7 +857,7 @@ pub async fn udp_fragmentation_case(backend: Backend) {
 		.await
 		.expect("udp fragmentation test server failed to start");
 
-	let ccfg = tuic_client_config(server.local_addr.port(), 0, uuid, password, false);
+	let ccfg = tuic_client_config(server.local_addr.port(), 0, uuid, password, false, Backend::Quinn);
 	let client = tuic_client::run(ccfg)
 		.await
 		.expect("udp fragmentation test client failed to start");
