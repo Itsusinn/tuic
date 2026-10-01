@@ -81,7 +81,7 @@ async fn start_pair_with_restful() -> RestfulPair {
 		.await
 		.expect("restful stats test: server failed to start");
 
-	let ccfg = tuic_tests::tuic_client_config(server.local_addr.port(), 0, uuid, password, false);
+	let ccfg = tuic_tests::tuic_client_config(server.local_addr.port(), 0, uuid, password, false, tuic_tests::Backend::Quinn);
 	let client = tuic_client::run(ccfg)
 		.await
 		.expect("restful stats test: client failed to start");

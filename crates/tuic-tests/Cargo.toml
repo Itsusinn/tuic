@@ -52,6 +52,7 @@ unexpected_cfgs = { level = "warn", check-cfg = ['cfg(reqwest_unstable)'] }
 # Keep this predicate in sync with the crate-level cfg in the quiche test files.
 [target.'cfg(all(target_pointer_width = "64", not(any(target_os = "android", target_os = "freebsd", target_arch = "loongarch64"))))'.dependencies]
 tuic-server = { path = "../tuic-server", default-features = false, features = ["quiche"] }
+tuic-client = { path = "../tuic-client", default-features = false, features = ["quiche"] }
 wind-tuic = { path = "../wind/crates/wind-tuic", default-features = false, features = ["quiche"] }
 quinn = { workspace = true, default-features = false, features = ["runtime-tokio", "rustls-aws-lc-rs"] }
 rcgen = { version = "0.14", default-features = false, features = ["crypto", "pem", "aws_lc_rs"] }
