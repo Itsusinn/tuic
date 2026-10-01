@@ -218,7 +218,6 @@ fn build_server_config_with_user(addr: SocketAddr, uuid: uuid::Uuid, password: &
 		experimental: ExperimentalConfig {
 			drop_loopback: false,
 			drop_private: false,
-			..Default::default()
 		},
 		..Default::default()
 	}

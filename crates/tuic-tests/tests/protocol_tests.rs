@@ -235,9 +235,15 @@ mod udp {
 		}
 	}
 
+	/// A buffer with the default fragment lifetime; the reassembly scenarios
+	/// below complete long before it elapses.
+	fn buffer() -> FragmentReassemblyBuffer {
+		FragmentReassemblyBuffer::default()
+	}
+
 	#[tokio::test]
 	async fn single_fragment_completes_immediately() {
-		let buf = FragmentReassemblyBuffer::new();
+		let buf = buffer();
 		let target = TargetAddr::IPv4(Ipv4Addr::LOCALHOST, 9);
 		let pkt = buf
 			.add_fragment(info(1, 0, target.clone()), Bytes::from_static(b"hello"))
@@ -249,7 +255,7 @@ mod udp {
 
 	#[tokio::test]
 	async fn out_of_order_fragments_reassemble() {
-		let buf = FragmentReassemblyBuffer::new();
+		let buf = buffer();
 		let target = TargetAddr::IPv4(Ipv4Addr::LOCALHOST, 9);
 		assert!(
 			buf.add_fragment(info(3, 2, target.clone()), Bytes::from_static(b"C"))
@@ -270,7 +276,7 @@ mod udp {
 
 	#[tokio::test]
 	async fn forged_fragment_fields_are_rejected() {
-		let buf = FragmentReassemblyBuffer::new();
+		let buf = buffer();
 		let target = TargetAddr::IPv4(Ipv4Addr::LOCALHOST, 9);
 		// frag_total == 0 is meaningless.
 		assert!(
