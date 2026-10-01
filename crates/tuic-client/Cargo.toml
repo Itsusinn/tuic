@@ -13,8 +13,8 @@ repository.workspace = true
 
 [features]
 default = ["aws-lc-rs"]
-ring = ["rustls/ring", "quinn/rustls-ring"]
-aws-lc-rs = ["dep:aws-lc-rs", "rustls/aws-lc-rs", "quinn/rustls-aws-lc-rs"]
+ring = ["rustls/ring", "quinn/rustls-ring", "rcgen/ring"]
+aws-lc-rs = ["dep:aws-lc-rs", "rustls/aws-lc-rs", "quinn/rustls-aws-lc-rs", "rcgen/aws_lc_rs"]
 jemallocator = ["tikv-jemallocator"]
 # The tokio-quiche backend, hosted inside wind-tuic behind its `quiche`
 # feature. 64-bit only — tokio-quiche does not compile on 32-bit. Enabled per
@@ -58,6 +58,8 @@ tokio-util = { version = "0.7", default-features = false, features = ["compat", 
 rustls = { version = "0.23", default-features = false }
 rustls-native-certs = { version = "0.8", default-features = false }
 rustls-pemfile = { version = "2", default-features = false, features = ["std"] }
+# Built-in Mozilla root set used when `[tls] disable_native_certs = true`.
+webpki-roots = "1"
 aws-lc-rs = { version = "1", default-features = false, optional = true, features = ["prebuilt-nasm"] }
 
 # Error-handling
@@ -75,3 +77,5 @@ tikv-jemallocator = { version = "0.7", optional = true }
 
 [dev-dependencies]
 tempfile = "3"
+# Self-signed certificates for the `[tls]` trust-store tests.
+rcgen = { version = "0.14", default-features = false, features = ["crypto", "pem"] }
