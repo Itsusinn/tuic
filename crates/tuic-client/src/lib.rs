@@ -10,6 +10,7 @@ use wind_core::App;
 
 pub mod config;
 pub mod plugin;
+pub mod tls;
 pub mod tunnel;
 pub mod utils;
 

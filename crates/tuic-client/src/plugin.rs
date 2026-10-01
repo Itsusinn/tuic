@@ -13,6 +13,7 @@ use wind_tuic::quinn::outbound::{ReconnectConfig, TuicOutbound, TuicOutboundOpts
 
 use crate::{
 	config::{BackendMode, Relay},
+	tls::{TlsConfigError, build_client_config},
 	tunnel::{TunnelTcpInbound, TunnelUdpInbound},
 };
 
@@ -69,13 +70,31 @@ async fn resolve_peer(relay: &Relay) -> eyre::Result<(SocketAddr, String)> {
 /// Build the outbound selected by `backend.mode`.
 async fn build_outbound(ctx: Arc<AppContext>, relay: Relay) -> eyre::Result<Arc<dyn Outbound>> {
 	match relay.backend_mode {
-		BackendMode::Quinn => Ok(Arc::new(build_quinn_outbound(ctx, relay).await?) as Arc<dyn Outbound>),
+		BackendMode::Quinn => build_quinn_outbound(ctx, relay).await,
 		BackendMode::Quiche => build_quiche_outbound(ctx, relay).await,
 	}
 }
 
+/// Install the process-wide rustls crypto provider exactly once. Mirrors
+/// `wind-tuic`'s own installation so library users (integration tests, other
+/// binaries) get a working provider even when `main` never ran.
+fn install_crypto_provider() {
+	static PROVIDER_INSTALLED: std::sync::OnceLock<()> = std::sync::OnceLock::new();
+	PROVIDER_INSTALLED.get_or_init(|| {
+		#[cfg(feature = "aws-lc-rs")]
+		let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
+		#[cfg(feature = "ring")]
+		let _ = rustls::crypto::ring::default_provider().install_default();
+	});
+}
+
 /// Build a [`TuicOutbound`] (quinn backend) from the relay configuration.
-async fn build_quinn_outbound(ctx: Arc<AppContext>, relay: Relay) -> eyre::Result<TuicOutbound> {
+///
+/// Public so integration tests can exercise the real configuration path
+/// (including `crate::tls` and the rustls client configuration it builds)
+/// without duplicating it.
+pub async fn build_quinn_outbound(ctx: Arc<AppContext>, relay: Relay) -> eyre::Result<Arc<dyn Outbound>> {
+	install_crypto_provider();
 	let (server_addr, sni) = resolve_peer(&relay).await?;
 
 	let password: Arc<[u8]> = relay.password.clone();
@@ -85,6 +104,21 @@ async fn build_quinn_outbound(ctx: Arc<AppContext>, relay: Relay) -> eyre::Resul
 		initial_backoff: relay.reconnect_initial_backoff,
 		max_backoff: relay.reconnect_max_backoff,
 	};
+
+	// The whole rustls configuration is built here, because `[tls]
+	// disable_sni`, `disable_native_certs`, and `certificates` have no
+	// counterpart in wind's built-in configuration. `TuicOutboundOpts` uses a
+	// supplied `client_config` verbatim, so the ALPN list, the 0-RTT flag, and
+	// the skip-verify branch are reproduced by `crate::tls` (see its module
+	// docs and tests).
+	let client_config = build_client_config(&relay).map_err(|source| match source {
+		err @ (TlsConfigError::CertificateIo { .. }
+		| TlsConfigError::NoCertificate { .. }
+		| TlsConfigError::NoUsableCertificate { .. }) => {
+			eyre::Report::new(err).wrap_err("invalid `[tls] certificates` configuration")
+		}
+		err => eyre::Report::new(err),
+	})?;
 
 	let opts = TuicOutboundOpts {
 		peer_addr: server_addr,
@@ -102,7 +136,7 @@ async fn build_quinn_outbound(ctx: Arc<AppContext>, relay: Relay) -> eyre::Resul
 			.map(|v| String::from_utf8_lossy(&v).to_string())
 			.collect(),
 		reconnect,
-		client_config: None,
+		client_config: Some(Arc::new(client_config)),
 		congestion_control: relay.congestion_control,
 		max_concurrent_bi_streams: None,
 		max_concurrent_uni_streams: None,
@@ -117,15 +151,16 @@ async fn build_quinn_outbound(ctx: Arc<AppContext>, relay: Relay) -> eyre::Resul
 
 	outbound.start_poll().await?;
 
-	Ok(outbound)
+	Ok(Arc::new(outbound) as Arc<dyn Outbound>)
 }
 
 /// Build a `wind-tuic` quiche-backend outbound.
 ///
-/// The quiche client only consumes the `backend.quiche` transport tuning plus
-/// the shared `[tls]`/relay fields; options the file-based boring TLS path
-/// cannot express (`disable_sni`, `disable_native_certs`, client certificates)
-/// are ignored with a warning.
+/// The quiche client consumes the `backend.quiche` transport tuning plus the
+/// shared `[tls]`/relay fields. `[tls] disable_sni`, `[tls]
+/// disable_native_certs`, and the `[tls] certificates` list have no counterpart
+/// in the quiche TLS settings, so they are named in a warning instead of being
+/// ignored silently (they do work on the quinn backend).
 #[cfg(feature = "quiche")]
 async fn build_quiche_outbound(ctx: Arc<AppContext>, relay: Relay) -> eyre::Result<Arc<dyn Outbound>> {
 	use wind_tuic::quiche::{
@@ -139,8 +174,8 @@ async fn build_quiche_outbound(ctx: Arc<AppContext>, relay: Relay) -> eyre::Resu
 
 	if relay.disable_sni || relay.disable_native_certs || !relay.certificates.is_empty() {
 		tracing::warn!(
-			"the quiche backend ignores `disable_sni`, `disable_native_certs`, and client certificates; these are only \
-			 honored by the quinn backend"
+			"the quiche backend cannot honour `[tls] disable_sni`, `[tls] disable_native_certs`, or `[tls] certificates`; \
+			 they only take effect on the quinn backend (the default)"
 		);
 	}
 

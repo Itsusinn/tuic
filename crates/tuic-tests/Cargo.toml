@@ -35,6 +35,13 @@ uuid = "1"
 serde_json = { version = "1", default-features = false, features = ["std"] }
 tokio-util = { version = "0.7", features = ["codec"] }
 
+[dev-dependencies]
+# `tests/tls_options.rs`: a recording `ResolvesServerCert` needs rustls' server
+# and signing traits, and `tempfile`/`rustls-pemfile` cover the certificate
+# plumbing the test builds.
+rustls-pemfile = { version = "2", default-features = false, features = ["std"] }
+tempfile = "3"
+
 # HTTP/3 client for the masquerade e2e test (tests/masquerade.rs).
 reqwest = { version = "0.12", default-features = false, features = ["http3", "rustls-tls"] }
 http = { version = "1" }
