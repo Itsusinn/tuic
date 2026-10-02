@@ -17,6 +17,13 @@
 //! the tests assert on the recorded ClientHello rather than on the returned
 //! `Result`.
 
+// `quinn`/`rcgen` are declared under the 64-bit target cfg in Cargo.toml, so
+// keep this file behind the same predicate as the quiche tests.
+#![cfg(all(
+	target_pointer_width = "64",
+	not(any(target_os = "android", target_os = "freebsd", target_arch = "loongarch64"))
+))]
+
 use std::{
 	sync::{Arc, Mutex},
 	time::Duration,
