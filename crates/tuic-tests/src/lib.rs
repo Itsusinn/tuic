@@ -330,21 +330,29 @@ pub async fn run_udp_echo_server_sized(
 	let echo_task = tokio::spawn(async move {
 		let mut buf = vec![0u8; buf_size];
 		info!("[{} Echo Server] Waiting for packets...", test_name);
-		match timeout(Duration::from_secs(5), echo_server_clone.recv_from(&mut buf)).await {
-			Ok(Ok((n, addr))) => {
-				info!("[{} Echo Server] Received {} bytes from {}", test_name, n, addr);
-				info!("[{} Echo Server] Data: {:?}", test_name, &buf[..n]);
-				if let Err(e) = echo_server_clone.send_to(&buf[..n], addr).await {
-					error!("[{} Echo Server] Failed to send response: {}", test_name, e);
-				} else {
-					info!("[{} Echo Server] Echoed {} bytes back to {}", test_name, n, addr);
+		// Answer every datagram the tests send, not just the first one: the
+		// SOCKS5 helper retransmits when a datagram is lost before the relay
+		// association can carry it, and a one-shot server cannot serve a retry.
+		// Callers abort this task once the case is done.
+		loop {
+			match timeout(Duration::from_secs(5), echo_server_clone.recv_from(&mut buf)).await {
+				Ok(Ok((n, addr))) => {
+					info!("[{} Echo Server] Received {} bytes from {}", test_name, n, addr);
+					info!("[{} Echo Server] Data: {:?}", test_name, &buf[..n]);
+					if let Err(e) = echo_server_clone.send_to(&buf[..n], addr).await {
+						error!("[{} Echo Server] Failed to send response: {}", test_name, e);
+					} else {
+						info!("[{} Echo Server] Echoed {} bytes back to {}", test_name, n, addr);
+					}
 				}
-			}
-			Ok(Err(e)) => {
-				error!("[{} Echo Server] Error receiving: {}", test_name, e);
-			}
-			Err(_) => {
-				error!("[{} Echo Server] Timeout waiting for data (no packets received)", test_name);
+				Ok(Err(e)) => {
+					error!("[{} Echo Server] Error receiving: {}", test_name, e);
+					break;
+				}
+				Err(_) => {
+					error!("[{} Echo Server] Timeout waiting for data (no packets received)", test_name);
+					break;
+				}
 			}
 		}
 	});
@@ -475,41 +483,63 @@ pub async fn test_udp_through_socks5_sized(
 					let target_port = target_addr.port();
 					info!("[{}] Sending to target {}:{}...", test_name, target_ip, target_port);
 
-					match socks.send_to(test_data, (target_ip, target_port)).await {
-						Ok(sent) => {
-							info!("[{}] Successfully sent {} bytes through SOCKS5 proxy", test_name, sent);
-							info!("[{}] Waiting for echo response...", test_name);
+					// UDP carries no delivery guarantee: a datagram can be lost
+					// before the relay association (and the QUIC session behind
+					// it) can carry it. Retransmit within one response deadline
+					// instead of failing on a single lost datagram; the
+					// assertion is unchanged - a payload-identical echo must
+					// arrive before the deadline. The echo servers answer every
+					// datagram, so the retries can be served.
+					const RESPONSE_DEADLINE: Duration = Duration::from_secs(5);
+					const RETRANSMIT_INTERVAL: Duration = Duration::from_millis(500);
+					let deadline = tokio::time::Instant::now() + RESPONSE_DEADLINE;
+					let mut buffer = vec![0u8; buf_size];
+					info!("[{}] Waiting for echo response...", test_name);
 
-							let mut buffer = vec![0u8; buf_size];
-							match timeout(Duration::from_secs(5), socks.recv_from(&mut buffer)).await {
-								Ok(Ok((len, addr))) => {
-									info!("[{}] Received {} bytes from {:?}", test_name, len, addr);
-									info!("[{}] Response data: {:?}", test_name, &buffer[..len]);
+					loop {
+						if tokio::time::Instant::now() >= deadline {
+							error!("[{}] Timeout waiting for response", test_name);
+							break false;
+						}
 
-									if &buffer[..len] == test_data {
-										info!("[{}] ✓ UDP echo test PASSED - data matches!", test_name);
-										true
-									} else {
-										error!("[{}] ✗ UDP echo test FAILED - data mismatch!", test_name);
-										error!("[{}] Expected: {:?}", test_name, test_data);
-										error!("[{}] Got: {:?}", test_name, &buffer[..len]);
-										false
-									}
-								}
-								Ok(Err(e)) => {
-									error!("[{}] Failed to receive response: {}", test_name, e);
-									false
-								}
-								Err(_) => {
-									error!("[{}] Timeout waiting for response", test_name);
+						match socks.send_to(test_data, (target_ip, target_port)).await {
+							Ok(sent) => {
+								info!("[{}] Successfully sent {} bytes through SOCKS5 proxy", test_name, sent);
+							}
+							Err(e) => {
+								error!("[{}] Failed to send data: {}", test_name, e);
+								break false;
+							}
+						}
+
+						let attempt_deadline = deadline.min(tokio::time::Instant::now() + RETRANSMIT_INTERVAL);
+
+						let verdict = match tokio::time::timeout_at(attempt_deadline, socks.recv_from(&mut buffer)).await {
+							Ok(Ok((len, addr))) => {
+								info!("[{}] Received {} bytes from {:?}", test_name, len, addr);
+								info!("[{}] Response data: {:?}", test_name, &buffer[..len]);
+
+								if &buffer[..len] == test_data {
+									info!("[{}] ✓ UDP echo test PASSED - data matches!", test_name);
+									true
+								} else {
+									error!("[{}] ✗ UDP echo test FAILED - data mismatch!", test_name);
+									error!("[{}] Expected: {:?}", test_name, test_data);
+									error!("[{}] Got: {:?}", test_name, &buffer[..len]);
 									false
 								}
 							}
-						}
-						Err(e) => {
-							error!("[{}] Failed to send data: {}", test_name, e);
-							false
-						}
+							Ok(Err(e)) => {
+								error!("[{}] Failed to receive response: {}", test_name, e);
+								false
+							}
+							Err(_) => {
+								// A lost datagram: retransmit until the
+								// deadline.
+								continue;
+							}
+						};
+						break verdict;
 					}
 				}
 				Err(e) => {
