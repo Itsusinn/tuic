@@ -553,7 +553,27 @@ where
 /// * Domain/WildcardDomain ACL rules that previously only matched when DNS-
 ///   resolved to an IP are now converted to domain-level Metacubex rules so
 ///   they can match *before* resolution.
+///
+/// A rule that carries a `hijack` (destination-rewrite) target is converted as
+/// its plain match + outbound only: [`wrule::RuleType`] has no destination-NAT
+/// variant, so the target cannot be represented and is **not** honoured. That
+/// is reported with a warning rather than left silent, because dropping it
+/// changes where the traffic actually goes.
 pub fn acl_to_rules(acl: &[AclRule]) -> Vec<wrule::Rule> {
+	// Report the unrepresentable `hijack` targets once per conversion (not per
+	// rule, and not from `acl_rule_to_rules`, which also runs for a rule whose
+	// address compiles to nothing and therefore drops the rewritten target
+	// along with the rule).
+	let hijacked: Vec<&AclRule> = acl.iter().filter(|r| r.hijack.is_some()).collect();
+	if !hijacked.is_empty() {
+		let targets = hijacked.iter().map(|r| format!("{r:?}")).collect::<Vec<_>>().join("; ");
+		tracing::warn!(
+			"legacy ACL hijack/redirect targets are not supported and will be ignored; {} rule(s) keep their match and \
+			 outbound but lose destination rewriting: {targets}",
+			hijacked.len()
+		);
+	}
+
 	acl.iter().flat_map(acl_rule_to_rules).collect()
 }
 
@@ -769,7 +789,11 @@ fn clone_rule_type(rt: &wrule::RuleType) -> wrule::RuleType {
 
 #[cfg(test)]
 mod tests {
-	use std::net::{Ipv4Addr, Ipv6Addr};
+	use std::{
+		fmt,
+		net::{Ipv4Addr, Ipv6Addr},
+		sync::{Arc, Mutex},
+	};
 
 	use super::*;
 
@@ -1339,6 +1363,97 @@ mod tests {
 		assert_eq!(rule.addr, AclAddress::Ip("8.8.8.8".to_string()));
 		assert_eq!(rule.hijack, Some("10.0.0.1".to_string()));
 		Ok(())
+	}
+
+	/// Minimal `tracing` subscriber that stores every warning message it
+	/// receives, so a test can assert that a conversion reported what it had to
+	/// drop without adding a dev-dependency.
+	struct WarnCapture {
+		warnings: Arc<Mutex<Vec<String>>>,
+	}
+
+	/// Records the `message` field of a warning event.
+	#[derive(Default)]
+	struct MessageField(Option<String>);
+
+	impl tracing::field::Visit for MessageField {
+		fn record_str(&mut self, field: &tracing::field::Field, value: &str) {
+			if field.name() == "message" {
+				self.0 = Some(value.to_string());
+			}
+		}
+
+		fn record_debug(&mut self, field: &tracing::field::Field, value: &dyn fmt::Debug) {
+			if field.name() == "message" {
+				self.0 = Some(format!("{value:?}"));
+			}
+		}
+	}
+
+	impl tracing::Subscriber for WarnCapture {
+		fn enabled(&self, metadata: &tracing::Metadata<'_>) -> bool {
+			*metadata.level() == tracing::Level::WARN
+		}
+
+		fn new_span(&self, _span: &tracing::span::Attributes<'_>) -> tracing::Id {
+			tracing::Id::from_u64(1)
+		}
+
+		fn record(&self, _span: &tracing::Id, _values: &tracing::span::Record<'_>) {}
+
+		fn record_follows_from(&self, _span: &tracing::Id, _follows: &tracing::Id) {}
+
+		fn event(&self, event: &tracing::Event<'_>) {
+			let mut field = MessageField::default();
+			event.record(&mut field);
+			if let (Some(message), Ok(mut warnings)) = (field.0, self.warnings.lock()) {
+				warnings.push(message);
+			}
+		}
+
+		fn enter(&self, _span: &tracing::Id) {}
+
+		fn exit(&self, _span: &tracing::Id) {}
+	}
+
+	/// Run `f`, returning `(its value, the warning messages it produced)`.
+	fn capture_warnings<T>(f: impl FnOnce() -> T) -> (T, Vec<String>) {
+		let warnings = Arc::new(Mutex::new(Vec::new()));
+		let capture = WarnCapture {
+			warnings: Arc::clone(&warnings),
+		};
+		let value = tracing::subscriber::with_default(capture, f);
+		let captured = warnings.lock().map(|w| w.clone()).unwrap_or_default();
+		(value, captured)
+	}
+
+	#[test]
+	fn hijack_target_warns_when_it_cannot_be_converted() {
+		let plain = parse_acl_rule("proxy 1.2.3.4 tcp/443").unwrap();
+		let (plain_rules, plain_warnings) = capture_warnings(|| acl_to_rules(std::slice::from_ref(&plain)));
+		assert_eq!(plain_rules.len(), 1);
+		assert!(
+			plain_warnings.is_empty(),
+			"a rule without a hijack target must not warn: {plain_warnings:?}"
+		);
+
+		let rewrite = parse_acl_rule("redirect 8.8.8.8 tcp/53 10.0.0.1").unwrap();
+		assert_eq!(rewrite.hijack.as_deref(), Some("10.0.0.1"));
+		let (rules, warnings) = capture_warnings(|| acl_to_rules(std::slice::from_ref(&rewrite)));
+
+		// The match + outbound are still lowered, but the rewrite target
+		// cannot be represented in a `wind_core::rule::Rule`, so it must be
+		// reported instead of silently dropped.
+		assert_eq!(rules.len(), 1);
+		assert_eq!(warnings.len(), 1, "expected exactly one warning: {warnings:?}");
+		assert!(
+			warnings[0].contains("hijack"),
+			"warning must name the dropped hijack target: {warnings:?}"
+		);
+		assert!(
+			warnings[0].contains("10.0.0.1"),
+			"warning must quote the offending rule: {warnings:?}"
+		);
 	}
 
 	#[tokio::test]
