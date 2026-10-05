@@ -8,7 +8,7 @@
 //! | GET | `/online` | Per-user online connection counts |
 //! | GET | `/detailed_online` | Per-user online connections with remote addrs |
 //! | GET | `/traffic` | Per-user cumulative traffic (upload/download) |
-//! | GET | `/reset_traffic` | Reset & return per-user traffic deltas |
+//! | POST | `/reset_traffic` | Reset & return per-user traffic deltas |
 
 use std::{collections::HashMap, net::SocketAddr, sync::Arc};
 
@@ -292,7 +292,12 @@ async fn traffic_handler(State(state): State<Arc<RestfulState>>, headers: Header
 	(StatusCode::OK, Json(Value::Object(result)))
 }
 
-/// GET /reset_traffic — reset & return per-user traffic deltas.
+/// POST /reset_traffic — reset & return per-user traffic deltas.
+///
+/// Registered as `POST` because the handler mutates state
+/// (`StatsCollector::reset_all` drains the per-user counters): a `GET` would
+/// let any intermediary, prefetcher, or crawler zero the traffic accounting
+/// without the operator's intent.
 async fn reset_traffic_handler(State(state): State<Arc<RestfulState>>, headers: HeaderMap) -> (StatusCode, Json<Value>) {
 	if !is_authorized(&headers, &state.secret) {
 		return unauthorized();
@@ -338,7 +343,7 @@ pub async fn serve(
 		.route("/online", get(online_handler))
 		.route("/detailed_online", get(detailed_online_handler))
 		.route("/traffic", get(traffic_handler))
-		.route("/reset_traffic", get(reset_traffic_handler))
+		.route("/reset_traffic", post(reset_traffic_handler))
 		.with_state(state);
 
 	let listener = tokio::select! {
@@ -630,7 +635,7 @@ mod tests {
 			.route("/online", axum::routing::get(online_handler))
 			.route("/detailed_online", axum::routing::get(detailed_online_handler))
 			.route("/traffic", axum::routing::get(traffic_handler))
-			.route("/reset_traffic", axum::routing::get(reset_traffic_handler))
+			.route("/reset_traffic", axum::routing::post(reset_traffic_handler))
 			.with_state(state)
 	}
 
@@ -806,7 +811,7 @@ mod tests {
 			.oneshot(
 				Request::builder()
 					.uri("/reset_traffic")
-					.method("GET")
+					.method("POST")
 					.body(Body::empty())
 					.unwrap(),
 			)
@@ -816,6 +821,53 @@ mod tests {
 		assert_eq!(response.status(), StatusCode::OK);
 		let body = axum::body::to_bytes(response.into_body(), 1024).await.unwrap();
 		assert_eq!(&body[..], b"{}");
+	}
+
+	/// `/reset_traffic` drains the traffic counters, so it must not be
+	/// reachable through a safe method: a `GET` (or any other non-`POST`
+	/// method) must be rejected by the router with `405 Method Not
+	/// Allowed`.
+	#[tokio::test]
+	async fn test_reset_traffic_state_change_requires_post() {
+		let state = Arc::new(RestfulState {
+			active: Arc::new(NoopConnections),
+			stats: None,
+			tracker: None,
+			secret: String::new(),
+			users: HashMap::new(),
+		});
+
+		for method in ["GET", "HEAD", "DELETE", "PUT"] {
+			let response = build_router(state.clone())
+				.oneshot(
+					Request::builder()
+						.uri("/reset_traffic")
+						.method(method)
+						.body(Body::empty())
+						.unwrap(),
+				)
+				.await
+				.unwrap();
+
+			assert_eq!(
+				response.status(),
+				StatusCode::METHOD_NOT_ALLOWED,
+				"{method} /reset_traffic must not be routed to the reset handler"
+			);
+		}
+
+		let response = build_router(state)
+			.oneshot(
+				Request::builder()
+					.uri("/reset_traffic")
+					.method("POST")
+					.body(Body::empty())
+					.unwrap(),
+			)
+			.await
+			.unwrap();
+
+		assert_eq!(response.status(), StatusCode::OK);
 	}
 
 	#[tokio::test]
