@@ -101,7 +101,9 @@ pub struct RestfulConfig {
 	pub addr: SocketAddr,
 
 	/// Bearer token secret for endpoint authentication. Empty string means no
-	/// auth required (not recommended if the API is exposed publicly).
+	/// auth required (not recommended if the API is exposed publicly); if the
+	/// API actually binds a non-loopback address while this is empty, the
+	/// server reports that exposure at startup.
 	pub secret: String,
 
 	/// Maximum concurrent connections per user (0 = unlimited).
