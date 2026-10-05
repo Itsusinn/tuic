@@ -743,6 +743,39 @@ impl Config {
 			..Default::default()
 		}
 	}
+
+	/// Reject outbound rules that cannot produce a working handler.
+	///
+	/// A `socks5` rule without a usable `addr` used to be accepted here and
+	/// silently lowered to an empty proxy address (`unwrap_or_default` in the
+	/// adapter), so every connection routed through that outbound failed later
+	/// with an opaque SOCKS5 error instead of the server refusing to start.
+	///
+	/// The reported error names the offending entry of `[outbound]`, with
+	/// `default` standing for `[outbound.default]`.
+	fn validate_outbound_rules(&self) -> eyre::Result<()> {
+		// `[outbound.default]` is always present (it has a built-in default),
+		// so it is validated together with the named rules.
+		let rules = std::iter::once(("default", &self.outbound.default))
+			.chain(self.outbound.named.iter().map(|(name, rule)| (name.as_str(), rule)));
+
+		for (name, rule) in rules {
+			if rule.kind != "socks5" {
+				continue;
+			}
+			match rule.addr.as_deref() {
+				Some(addr) if !addr.trim().is_empty() => {}
+				_ => {
+					eyre::bail!(
+						"outbound rule {name:?} has type \"socks5\" but no usable `addr`; set `addr = \"host:port\"` of the \
+						 SOCKS5 proxy"
+					);
+				}
+			}
+		}
+
+		Ok(())
+	}
 }
 
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -940,6 +973,8 @@ pub async fn parse_config(cli: Cli, env_state: EnvState) -> eyre::Result<Config>
 	let mut config: Config = figmet.extract()?;
 
 	config.migrate();
+
+	config.validate_outbound_rules()?;
 
 	if config.data_dir.to_str() == Some("") {
 		config.data_dir = std::env::current_dir()?
@@ -1186,6 +1221,78 @@ mod tests {
 		assert_eq!(socks5.addr, Some("127.0.0.1:1080".to_string()));
 		assert_eq!(socks5.username, Some("optional".to_string()));
 		assert_eq!(socks5.password, Some("optional".to_string()));
+	}
+
+	#[tokio::test]
+	async fn socks5_outbound_without_an_address_is_rejected_at_parse_time() {
+		// The server must refuse to start instead of silently lowering the
+		// rule to an empty proxy address that fails on every connection.
+		let config = r#"
+data_dir = "__test__socks5_addr_data"
+
+[users]
+"123e4567-e89b-12d3-a456-426614174000" = "password1"
+
+[tls]
+self_sign = true
+
+[outbound.default]
+type = "direct"
+
+[outbound.through_socks5]
+type = "socks5"
+username = "optional"
+password = "optional"
+"#;
+
+		let result = test_parse_config(config, ".toml").await;
+		let _ = tokio::fs::remove_dir_all("__test__socks5_addr_data").await;
+
+		// `Config` intentionally has no `Debug`, so inspect the error instead
+		// of unwrapping the `Result` value.
+		let message = match result {
+			Err(err) => err.to_string(),
+			Ok(_) => panic!("a socks5 outbound without `addr` must fail config parsing"),
+		};
+		assert!(
+			message.contains("socks5") && message.contains("addr"),
+			"the error must name the offending rule field, got: {message}"
+		);
+		assert!(
+			message.contains("through_socks5"),
+			"the error must name the offending rule, got: {message}"
+		);
+	}
+
+	#[tokio::test]
+	async fn empty_socks5_address_is_rejected_at_parse_time() {
+		// An explicitly blank address is as unusable as a missing one, and it
+		// used to reach the SOCKS5 client verbatim.
+		let config = r#"
+data_dir = "__test__socks5_blank_addr_data"
+
+[users]
+"123e4567-e89b-12d3-a456-426614174000" = "password1"
+
+[tls]
+self_sign = true
+
+[outbound.default]
+type = "socks5"
+addr = "   "
+"#;
+
+		let result = test_parse_config(config, ".toml").await;
+		let _ = tokio::fs::remove_dir_all("__test__socks5_blank_addr_data").await;
+
+		let message = match result {
+			Err(err) => err.to_string(),
+			Ok(_) => panic!("a blank socks5 address must fail config parsing"),
+		};
+		assert!(
+			message.contains("socks5") && message.contains("\"default\""),
+			"the error must name the offending rule field, got: {message}"
+		);
 	}
 
 	#[tokio::test]
