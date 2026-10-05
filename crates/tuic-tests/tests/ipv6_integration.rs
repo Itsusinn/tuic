@@ -15,6 +15,17 @@ use tuic_tests::{
 };
 use uuid::Uuid;
 
+/// Outer deadline for the UDP relay half.
+///
+/// It has to outlive what the UDP relay helper does on its own: a 100 ms settle
+/// before the relay starts plus its [`tuic_tests::UDP_RELAY_RESPONSE_DEADLINE`]
+/// window, inside which it retransmits a lost datagram. A tighter outer
+/// deadline aborts the relay while the helper is still retransmitting, so a
+/// slow relay surfaces as this test's opaque "timed out" panic instead of the
+/// helper's own diagnostic. Twice the helper's window also leaves room for the
+/// SOCKS5 UDP association setup.
+const UDP_RELAY_TIMEOUT: Duration = Duration::from_secs(10);
+
 // - Server listening on [::1]:8444 (IPv6 localhost)
 // - Client connecting to [::1]:8444
 // - SOCKS5 proxy on [::1]:1081
@@ -198,7 +209,7 @@ async fn test_ipv6_server_client_integration() -> eyre::Result<()> {
 		ok
 	};
 
-	let udp_ok = timeout(Duration::from_secs(3), udp_test)
+	let udp_ok = timeout(UDP_RELAY_TIMEOUT, udp_test)
 		.await
 		.expect("IPv6 UDP relay test timed out");
 	assert!(udp_ok, "IPv6 UDP relay through SOCKS5/TUIC failed");
@@ -211,4 +222,17 @@ async fn test_ipv6_server_client_integration() -> eyre::Result<()> {
 	info!("[IPv6 Test] ========================================\n");
 
 	Ok(())
+}
+
+/// The outer UDP deadline must stay strictly above the relay helper's own
+/// response window: the helper retransmits a lost datagram for that whole
+/// window, so an outer deadline inside it can only abort a relay that is still
+/// making progress.
+#[test]
+fn the_udp_relay_deadline_outlives_the_helper_response_window() {
+	assert!(
+		UDP_RELAY_TIMEOUT > tuic_tests::UDP_RELAY_RESPONSE_DEADLINE,
+		"outer UDP deadline {UDP_RELAY_TIMEOUT:?} must exceed the relay helper's response window {:?}",
+		tuic_tests::UDP_RELAY_RESPONSE_DEADLINE
+	);
 }

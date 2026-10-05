@@ -539,6 +539,16 @@ pub async fn test_tcp_through_socks5(
 	}
 }
 
+/// Window the UDP relay helper allows for the echoed payload to arrive,
+/// retransmitting the request within it.
+///
+/// A caller that wraps the helper in an outer `timeout` must give it a
+/// **strictly larger** deadline, plus room for whatever it does before calling
+/// the helper. A tighter outer deadline aborts the relay while the helper is
+/// still retransmitting, so a slow relay is reported as an opaque outer
+/// timeout instead of the helper's own diagnostic.
+pub const UDP_RELAY_RESPONSE_DEADLINE: Duration = Duration::from_secs(5);
+
 pub async fn test_udp_through_socks5(
 	socks5_addr: &str,
 	target_addr: std::net::SocketAddr,
@@ -597,9 +607,8 @@ pub async fn test_udp_through_socks5_sized(
 					// assertion is unchanged - a payload-identical echo must
 					// arrive before the deadline. The echo servers answer every
 					// datagram, so the retries can be served.
-					const RESPONSE_DEADLINE: Duration = Duration::from_secs(5);
 					const RETRANSMIT_INTERVAL: Duration = Duration::from_millis(500);
-					let deadline = tokio::time::Instant::now() + RESPONSE_DEADLINE;
+					let deadline = tokio::time::Instant::now() + UDP_RELAY_RESPONSE_DEADLINE;
 					let mut buffer = vec![0u8; buf_size];
 					info!("[{}] Waiting for echo response...", test_name);
 
