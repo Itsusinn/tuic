@@ -9,46 +9,11 @@
 //! in that state and passes once the plugin wires the collector through
 //! `App::set_stats_collector`.
 
-use std::{net::SocketAddr, time::Duration};
+use std::time::Duration;
 
-use tokio::{
-	io::{AsyncReadExt, AsyncWriteExt},
-	net::TcpStream,
-	time::timeout,
-};
 use tracing::info;
-use tuic_tests::{run_tcp_echo_server, test_tcp_through_socks5};
+use tuic_tests::{restful_request, run_tcp_echo_server, test_tcp_through_socks5};
 use uuid::Uuid;
-
-/// Minimal HTTP/1.1 client over a raw TCP stream — enough for the local
-/// RESTful API and avoids pulling an HTTP client into the test crate. Returns
-/// the response body.
-async fn http_request(addr: SocketAddr, method: &str, path: &str, body: Option<&str>) -> String {
-	let mut stream = timeout(Duration::from_secs(5), TcpStream::connect(addr))
-		.await
-		.expect("connect to restful api")
-		.expect("tcp connect");
-	let mut request = format!("{method} {path} HTTP/1.1\r\nHost: {addr}\r\nAccept: application/json\r\nConnection: close\r\n");
-	if let Some(b) = body {
-		request.push_str("Content-Type: application/json\r\n");
-		request.push_str(&format!("Content-Length: {}\r\n", b.len()));
-	}
-	request.push_str("\r\n");
-	if let Some(b) = body {
-		request.push_str(b);
-	}
-	stream.write_all(request.as_bytes()).await.expect("write request");
-	let mut buf = Vec::new();
-	stream.read_to_end(&mut buf).await.expect("read response");
-	let response = String::from_utf8_lossy(&buf);
-	assert!(
-		response.starts_with("HTTP/1.1 200"),
-		"unexpected status in response: {response}"
-	);
-	// Split headers from the body on the first empty line.
-	let body = response.split_once("\r\n\r\n").map(|(_, b)| b).unwrap_or(&response);
-	body.trim().to_string()
-}
 
 /// A quinn-backed `tuic-server` with the RESTful API enabled plus a
 /// `tuic-client`, all bound to OS-assigned ports (no bind/unbind race).
@@ -107,7 +72,7 @@ async fn restful_traffic_reflects_inbound_stats() {
 	//    traffic sampler only records bytes on its (default 60s) tick or on
 	//    close, so closing the connection triggers the final sample that bills
 	//    the echoed bytes.
-	let kick_body = http_request(restful_addr, "POST", "/kick", Some(&format!("[\"{}\"]", pair.uuid))).await;
+	let kick_body = restful_request(restful_addr, "POST", "/kick", Some(&format!("[\"{}\"]", pair.uuid))).await;
 	let kicked: serde_json::Value = serde_json::from_str(&kick_body).expect("valid kick JSON");
 	assert!(
 		kicked["kicked"].as_u64().unwrap_or(0) > 0,
@@ -119,7 +84,7 @@ async fn restful_traffic_reflects_inbound_stats() {
 	//    scheduling jitter.
 	let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
 	let body = loop {
-		let body = http_request(restful_addr, "GET", "/traffic", None).await;
+		let body = restful_request(restful_addr, "GET", "/traffic", None).await;
 		info!("[restful stats test] /traffic response: {body}");
 		let parsed: serde_json::Value = serde_json::from_str(&body).expect("valid JSON body");
 		if let Some(entry) = parsed.get(pair.uuid.to_string()) {
