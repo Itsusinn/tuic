@@ -34,7 +34,6 @@ use wind_core::{
 struct ConnMeta {
 	user: UserId,
 	remote: SocketAddr,
-	token: CancellationToken,
 }
 
 /// Tracks live connections with remote addresses for the detailed_online
@@ -44,6 +43,12 @@ struct ConnMeta {
 /// Registration/deregistration on `ActiveConnections` is handled separately
 /// (wind-tuic wires it internally when `opts.active` is set); this tracker
 /// only adds the remote-address dimension.
+///
+/// It deliberately holds **no** cancellation handle: `ConnectionHooks` never
+/// receives the connection's cancel token, so a tracker-side kick could only
+/// cancel a token of its own making and would report success without closing
+/// anything. Closing connections is [`ActiveConnections`]' job, reachable
+/// through [`KickConnections`] on the RESTful state.
 pub struct ConnectionTracker {
 	inner: DashMap<u64, ConnMeta>,
 }
@@ -62,18 +67,6 @@ impl ConnectionTracker {
 	/// Number of live connections for a given user.
 	pub fn count_for(&self, user: &UserId) -> usize {
 		self.inner.iter().filter(|e| e.value().user == *user).count()
-	}
-
-	/// Cancel every connection belonging to `user`. Returns count kicked.
-	pub fn kick_user(&self, user: &UserId) -> usize {
-		let mut kicked = 0;
-		for entry in self.inner.iter() {
-			if entry.value().user == *user {
-				entry.value().token.cancel();
-				kicked += 1;
-			}
-		}
-		kicked
 	}
 
 	/// Build a map of UUID → Vec<SocketAddr> of live connections.
@@ -107,7 +100,6 @@ impl ConnectionHooks for ConnectionTracker {
 			ConnMeta {
 				user: UserId::new(Vec::new()),
 				remote: info.remote_addr,
-				token: CancellationToken::new(),
 			},
 		);
 		ConnectDecision::Accept
@@ -134,8 +126,10 @@ pub struct RestfulState {
 	pub users: HashMap<Uuid, String>,
 }
 
-/// Object-safe interface for kicking connections, wrapping both
-/// [`ActiveConnections`] and [`ConnectionTracker`].
+/// Object-safe interface for kicking connections. Implemented by
+/// [`ActiveConnections`], which is the only registry wired to the live
+/// connections' cancel tokens, and by [`NoopConnections`] when that registry is
+/// disabled.
 pub trait KickConnections: Send + Sync + 'static {
 	fn kick_user(&self, user: &UserId) -> usize;
 	fn count_for(&self, user: &UserId) -> usize;
@@ -180,24 +174,6 @@ impl KickConnections for NoopConnections {
 
 	fn is_empty(&self) -> bool {
 		true
-	}
-}
-
-impl KickConnections for ConnectionTracker {
-	fn kick_user(&self, user: &UserId) -> usize {
-		self.kick_user(user)
-	}
-
-	fn count_for(&self, user: &UserId) -> usize {
-		self.count_for(user)
-	}
-
-	fn len(&self) -> usize {
-		self.len()
-	}
-
-	fn is_empty(&self) -> bool {
-		self.is_empty()
 	}
 }
 
@@ -395,7 +371,7 @@ pub async fn serve(
 
 #[cfg(test)]
 mod tests {
-	use std::net::SocketAddr;
+	use std::{net::SocketAddr, sync::Mutex};
 
 	use axum::{
 		body::Body,
@@ -486,37 +462,6 @@ mod tests {
 	}
 
 	#[tokio::test]
-	async fn test_tracker_kick_user_cancels_and_counts() {
-		let t = ConnectionTracker::new();
-		let alice = UserId::from("alice");
-		let bob = UserId::from("bob");
-
-		let info1 = make_conn_info(1, "127.0.0.1:1".parse().unwrap());
-		let info2 = make_conn_info(2, "127.0.0.1:2".parse().unwrap());
-		let info3 = make_conn_info(3, "127.0.0.1:3".parse().unwrap());
-
-		t.on_connect(&info1).await;
-		t.on_authenticated(&info1, &alice).await;
-		t.on_connect(&info2).await;
-		t.on_authenticated(&info2, &bob).await;
-		t.on_connect(&info3).await;
-		t.on_authenticated(&info3, &alice).await;
-
-		assert_eq!(t.len(), 3);
-		assert_eq!(t.count_for(&alice), 2);
-		assert_eq!(t.count_for(&bob), 1);
-
-		// kick_user cancels tokens (notifies the connection to shut down)
-		// but entries remain in the tracker until on_disconnect fires.
-		let kicked = t.kick_user(&alice);
-		assert_eq!(kicked, 2);
-		// Entries are still present; they'll be removed on the actual
-		// disconnect.
-		assert_eq!(t.len(), 3);
-		assert_eq!(t.count_for(&bob), 1);
-	}
-
-	#[tokio::test]
 	async fn test_tracker_detailed_online() {
 		let t = ConnectionTracker::new();
 		let alice = Uuid::new_v4();
@@ -545,19 +490,6 @@ mod tests {
 		assert_eq!(detail.get(&bob).unwrap().len(), 1);
 	}
 
-	#[tokio::test]
-	async fn test_tracker_kick_user_token_gets_cancelled() {
-		let t = ConnectionTracker::new();
-		let alice = UserId::from("alice");
-
-		let info = make_conn_info(1, "127.0.0.1:1".parse().unwrap());
-		t.on_connect(&info).await;
-		t.on_authenticated(&info, &alice).await;
-
-		let kicked = t.kick_user(&alice);
-		assert_eq!(kicked, 1);
-	}
-
 	// NoopConnections tests
 
 	#[tokio::test]
@@ -581,14 +513,64 @@ mod tests {
 
 	// KickConnections trait tests
 
+	/// Records every kick and returns a count the caller chooses, so a test can
+	/// tell the injected registry's answer apart from the tracker's own number
+	/// of live entries. `ConnectionTracker` deliberately does not implement
+	/// `KickConnections`: it cannot cancel a live connection (it never receives
+	/// the connection's cancel token), so exposing it as a kick handle would
+	/// make `/kick` report a nonzero count while nothing was closed.
+	struct RecordingKicks {
+		kicked: Mutex<Vec<UserId>>,
+		report: usize,
+	}
+
+	impl KickConnections for RecordingKicks {
+		fn kick_user(&self, user: &UserId) -> usize {
+			self.kicked.lock().unwrap().push(user.clone());
+			self.report
+		}
+
+		fn count_for(&self, _user: &UserId) -> usize {
+			0
+		}
+
+		fn len(&self) -> usize {
+			0
+		}
+
+		fn is_empty(&self) -> bool {
+			true
+		}
+	}
+
 	#[tokio::test]
-	async fn test_tracker_as_kick_connections_delegates() {
-		let t = ConnectionTracker::new();
-		let kc: &dyn KickConnections = &t;
-		assert_eq!(kc.len(), 0);
-		assert!(kc.is_empty());
-		assert_eq!(kc.count_for(&UserId::from("x")), 0);
-		assert_eq!(kc.kick_user(&UserId::from("x")), 0);
+	async fn test_kick_handler_delegates_to_injected_registry() {
+		let target = Uuid::from_u128(0x1234);
+		let registry = Arc::new(RecordingKicks {
+			kicked: Mutex::new(Vec::new()),
+			report: 7,
+		});
+		let state = make_state(registry.clone(), "", HashMap::new());
+		let app = build_router(state);
+
+		let response = app
+			.oneshot(
+				Request::builder()
+					.uri("/kick")
+					.method("POST")
+					.header("content-type", "application/json")
+					.body(Body::from(serde_json::to_string(&vec![target]).unwrap()))
+					.unwrap(),
+			)
+			.await
+			.unwrap();
+
+		assert_eq!(response.status(), StatusCode::OK);
+		let body = axum::body::to_bytes(response.into_body(), 1024).await.unwrap();
+		let v: Value = serde_json::from_slice(&body).unwrap();
+		// The reported count is the registry's, not the tracker's.
+		assert_eq!(v, json!({"kicked": 7}));
+		assert_eq!(registry.kicked.lock().unwrap().as_slice(), [UserId::from(target)]);
 	}
 
 	// Auth tests
