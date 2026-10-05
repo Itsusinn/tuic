@@ -7,6 +7,7 @@ use std::{
 
 use clap::Parser;
 use educe::Educe;
+use eyre::WrapErr;
 use figment::{
 	Figment,
 	providers::{Format, Serialized, Toml, Yaml},
@@ -854,12 +855,20 @@ async fn find_config_in_dir(dir: &PathBuf) -> eyre::Result<PathBuf> {
 	Ok(config_files[0].clone())
 }
 
+/// Serialize the example configuration written by `--init`.
+///
+/// `toml` rejects a few values a [`Config`] can hold — for example a path that
+/// is not valid UTF-8 — so the failure has to be reported instead of panicking
+/// inside the init path.
+fn serialize_example_config(config: &Config) -> eyre::Result<String> {
+	toml::to_string_pretty(config).wrap_err("failed to serialize the example configuration")
+}
+
 pub async fn parse_config(cli: Cli, env_state: EnvState) -> eyre::Result<Config> {
 	if cli.init {
 		warn!("Generating an example configuration to config.toml......");
 
-		let example = Config::full_example();
-		let example = toml::to_string_pretty(&example).unwrap();
+		let example = serialize_example_config(&Config::full_example())?;
 
 		let default_path = std::path::Path::new("config.toml");
 		if tokio::fs::try_exists(default_path).await? {
@@ -2040,5 +2049,49 @@ self_sign = true
 		let parsed_empty = test_parse_config(cfg_empty, ".toml").await.unwrap();
 		assert!(parsed_empty.outbound.default.bind_ipv4.is_empty());
 		assert!(parsed_empty.outbound.default.bind_ipv6.is_empty());
+	}
+
+	/// The example written by `--init` must be loadable by the server itself.
+	#[test]
+	fn example_configuration_serializes_to_loadable_toml() {
+		let config = Config::full_example();
+
+		let text = serialize_example_config(&config).expect("the bundled example must serialize");
+
+		let reparsed: Config = toml::from_str(&text).expect("the generated example must be loadable again");
+
+		assert_eq!(reparsed.server, config.server);
+		assert_eq!(reparsed.users, config.users);
+	}
+
+	/// A value the serializer cannot represent must surface as an error from
+	/// the init path instead of panicking while generating the example.
+	#[test]
+	fn unrepresentable_example_configuration_is_reported_instead_of_panicking() {
+		let config = Config {
+			data_dir: unrepresentable_path(),
+			..Default::default()
+		};
+
+		let err = serialize_example_config(&config).unwrap_err();
+
+		assert!(
+			format!("{err:?}").contains("failed to serialize the example configuration"),
+			"a serializer failure must name the failing step, got: {err:?}"
+		);
+	}
+
+	#[cfg(windows)]
+	fn unrepresentable_path() -> PathBuf {
+		use std::os::windows::ffi::OsStringExt;
+
+		PathBuf::from(std::ffi::OsString::from_wide(&[0xD800]))
+	}
+
+	#[cfg(not(windows))]
+	fn unrepresentable_path() -> PathBuf {
+		use std::os::unix::ffi::OsStringExt;
+
+		PathBuf::from(std::ffi::OsString::from_vec(vec![0xFF]))
 	}
 }
