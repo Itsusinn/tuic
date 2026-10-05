@@ -14,26 +14,35 @@ fn make_test_data(size: usize) -> Vec<u8> {
 	(0..size).map(|i| (i % 251) as u8).collect()
 }
 
+/// Payload size of the fixed-size small-payload case.
+const SMALL_PAYLOAD_SIZE: usize = 512;
+
 #[tokio::test(flavor = "multi_thread")]
 #[traced_test]
 async fn test_tcp_512b_payload() -> eyre::Result<()> {
 	let pair = start_quinn_pair(false).await;
 	let socks5 = pair.socks5_addr();
-	let (echo_task, echo_addr) = run_tcp_echo_server("127.0.0.1:0", "8k").await;
-	tokio::time::sleep(Duration::from_millis(200)).await;
 
-	let data = make_test_data(512);
-	info!("[512b] testing {} byte payload", data.len());
+	// The label is derived from the payload instead of being written out by
+	// hand: a literal here previously announced the echo server as `8k`
+	// while the relay helper got `512b` for the very same payload, so the
+	// two log lines of one test disagreed about what had been exercised.
+	let data = make_test_data(SMALL_PAYLOAD_SIZE);
+	let label = format!("{}b", data.len());
+	info!("[{label}] testing {} byte payload", data.len());
+
+	let (echo_task, echo_addr) = run_tcp_echo_server("127.0.0.1:0", &label).await;
+	tokio::time::sleep(Duration::from_millis(200)).await;
 
 	let ok = timeout(
 		Duration::from_secs(15),
-		test_tcp_through_socks5(&socks5, echo_addr, &data, "512b"),
+		test_tcp_through_socks5(&socks5, echo_addr, &data, &label),
 	)
 	.await
 	.unwrap_or(false);
 
 	echo_task.abort();
-	assert!(ok, "512B TCP echo through TUIC relay must succeed");
+	assert!(ok, "{SMALL_PAYLOAD_SIZE}B TCP echo through TUIC relay must succeed");
 
 	pair.shutdown().await;
 	Ok(())
