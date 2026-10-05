@@ -17,13 +17,13 @@ use std::{
 		Arc,
 		atomic::{AtomicBool, AtomicUsize, Ordering},
 	},
-	time::Duration,
+	time::{Duration, Instant},
 };
 
 use tokio::{
 	io::{AsyncReadExt, AsyncWriteExt},
 	net::TcpListener,
-	sync::watch,
+	sync::{oneshot, watch},
 	time::timeout,
 };
 use tuic_server::{Config, TuicServerPlugin, config::ExperimentalConfig};
@@ -357,6 +357,9 @@ async fn drains_while_active_traffic_flows() {
 	// loop could `break` immediately and the test still passed).
 	let round_trips = Arc::new(AtomicUsize::new(0));
 	let rt = round_trips.clone();
+	// Dropped when the traffic loop ends, so the poll below can tell "still
+	// flowing" from "the connection already broke" without a fixed wait.
+	let (traffic_stop_tx, mut traffic_stop_rx) = oneshot::channel::<()>();
 	let traffic_handle = tokio::spawn(async move {
 		let (mut reader, mut writer) = tokio::io::split(local);
 		let ping = b"hello-from-tuic-keepalive";
@@ -376,10 +379,18 @@ async fn drains_while_active_traffic_flows() {
 				_ => break, // connection broken (expected after cancel)
 			}
 		}
+		drop(traffic_stop_tx);
 	});
 
-	// Let the traffic loop run for a few round-trips.
-	tokio::time::sleep(Duration::from_millis(500)).await;
+	// Let the traffic loop run for a few round-trips.  Poll until the count is
+	// reached instead of sleeping for a fixed slice: a loaded or slow machine
+	// must not turn "not finished yet" into a failure.  Bail out as soon as the
+	// loop is gone, so a broken tunnel still fails fast instead of burning the
+	// whole deadline.
+	let deadline = Instant::now() + Duration::from_secs(10);
+	while Instant::now() < deadline && round_trips.load(Ordering::SeqCst) < 3 && traffic_stop_rx.try_recv().is_err() {
+		tokio::time::sleep(Duration::from_millis(10)).await;
+	}
 
 	// 6. Prove traffic actually flowed through the tunnel: several successful
 	//    ping→echo round-trips must have completed before we cancel (previously
