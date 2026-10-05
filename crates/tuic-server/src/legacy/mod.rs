@@ -5,6 +5,7 @@
 use std::net::{IpAddr, SocketAddr};
 
 use derive_more::Display;
+use eyre::WrapErr;
 use pest::Parser;
 use pest_derive::Parser;
 use serde::{Deserialize, Deserializer, Serialize, de};
@@ -559,7 +560,14 @@ where
 /// variant, so the target cannot be represented and is **not** honoured. That
 /// is reported with a warning rather than left silent, because dropping it
 /// changes where the traffic actually goes.
-pub fn acl_to_rules(acl: &[AclRule]) -> Vec<wrule::Rule> {
+///
+/// # Errors
+///
+/// Returns an error when one of the rules cannot be lowered — see
+/// [`copy_rule_type`]. Reporting it is deliberate: the lowerer used to
+/// substitute a catch-all condition and carry on, which turned a rendering bug
+/// into a silently widened ACL instead of a startup failure.
+pub fn acl_to_rules(acl: &[AclRule]) -> eyre::Result<Vec<wrule::Rule>> {
 	// Report the unrepresentable `hijack` targets once per conversion (not per
 	// rule, and not from `acl_rule_to_rules`, which also runs for a rule whose
 	// address compiles to nothing and therefore drops the rewritten target
@@ -574,11 +582,14 @@ pub fn acl_to_rules(acl: &[AclRule]) -> Vec<wrule::Rule> {
 		);
 	}
 
-	acl.iter().flat_map(acl_rule_to_rules).collect()
+	acl.iter()
+		.map(acl_rule_to_rules)
+		.collect::<eyre::Result<Vec<_>>>()
+		.map(|rules| rules.into_iter().flatten().collect())
 }
 
 /// Convert a single [`AclRule`] into one or more Metacubex rules.
-fn acl_rule_to_rules(acl: &AclRule) -> Vec<wrule::Rule> {
+fn acl_rule_to_rules(acl: &AclRule) -> eyre::Result<Vec<wrule::Rule>> {
 	let target = normalize_outbound(&acl.outbound);
 
 	let addr_rules = address_to_rule_types(&acl.addr);
@@ -588,26 +599,26 @@ fn acl_rule_to_rules(acl: &AclRule) -> Vec<wrule::Rule> {
 	// When there are no port conditions, one rule per address condition.
 	// When there are port conditions, AND(addr, port) for each combination.
 	if port_conds.is_empty() {
-		return addr_rules
+		return Ok(addr_rules
 			.into_iter()
 			.map(|rt| wrule::Rule {
 				rule_type: rt,
 				target: target.clone(),
 				options: Vec::new(),
 			})
-			.collect();
+			.collect());
 	}
 
 	// If address is `Any` (match-all), the conditions are only port-based.
 	if matches!(acl.addr, AclAddress::Any) {
-		return port_conds
+		return Ok(port_conds
 			.into_iter()
 			.map(|rt| wrule::Rule {
 				rule_type: rt,
 				target: target.clone(),
 				options: Vec::new(),
 			})
-			.collect();
+			.collect());
 	}
 
 	// Otherwise: for *each* address rule, AND it with each port condition.
@@ -616,12 +627,12 @@ fn acl_rule_to_rules(acl: &AclRule) -> Vec<wrule::Rule> {
 		for pc in &port_conds {
 			let and_sub = vec![
 				wrule::Rule {
-					rule_type: clone_rule_type(ar),
+					rule_type: copy_rule_type(ar, acl)?,
 					target: String::new(),
 					options: Vec::new(),
 				},
 				wrule::Rule {
-					rule_type: clone_rule_type(pc),
+					rule_type: copy_rule_type(pc, acl)?,
 					target: String::new(),
 					options: Vec::new(),
 				},
@@ -633,7 +644,7 @@ fn acl_rule_to_rules(acl: &AclRule) -> Vec<wrule::Rule> {
 			});
 		}
 	}
-	result
+	Ok(result)
 }
 
 /// Map `"allow"` / `"default"` → `"default"`, keep the rest as-is.
@@ -779,12 +790,28 @@ fn port_entry_to_rule_type(entry: &AclPortEntry) -> wrule::RuleType {
 	}
 }
 
-/// Clone a `RuleType` (needed because `Regex` doesn't derive `Clone`).
-fn clone_rule_type(rt: &wrule::RuleType) -> wrule::RuleType {
-	// Round-trip through Display → parse.  This works for all types that are
-	// produced by the conversion above (no Regex types are generated).
-	let s = format!("{rt},__CLONE");
-	wrule::Rule::parse(&s).map(|r| r.rule_type).unwrap_or(wrule::RuleType::Match)
+/// Duplicate a [`wrule::RuleType`] for a second use as an `AND` conjunct.
+///
+/// `RuleType` deliberately has no `Clone` impl (its regex variants hold a
+/// `Regex`, and it hand-writes `Debug` for the same reason — see
+/// `wind-rule/src/lib.rs`), so the copy goes through the `Display`/`parse`
+/// round trip. Every variant the lowerer produces does round-trip today
+/// (`rule_types_produced_by_the_lowerer_survive_display_parse` pins that), so
+/// this is not a live defect; what it removes is the fail-open answer to it.
+///
+/// The previous implementation returned [`wrule::RuleType::Match`] when the
+/// round trip failed. `Match` is always true while `And` requires every
+/// conjunct, so substituting it would delete that condition from the rule and
+/// widen the ACL — exactly the wrong direction for a failure. The failure is
+/// reported to the caller instead, which surfaces it at startup as a config
+/// error rather than as a silently broader rule at runtime.
+fn copy_rule_type(rt: &wrule::RuleType, acl: &AclRule) -> eyre::Result<wrule::RuleType> {
+	// The `,__CLONE` target is a placeholder for the mandatory target field;
+	// only `rule_type` is read back.
+	let line = format!("{rt},__CLONE");
+	wrule::Rule::parse(&line)
+		.map(|r| r.rule_type)
+		.wrap_err_with(|| format!("legacy ACL rule {acl:?} cannot be lowered: its {rt} condition has no parseable rule form"))
 }
 
 #[cfg(test)]
@@ -800,6 +827,13 @@ mod tests {
 	// Helper functions
 	fn v4(addr: &str, port: u16) -> SocketAddr {
 		SocketAddr::new(IpAddr::V4(addr.parse::<Ipv4Addr>().unwrap()), port)
+	}
+
+	/// Lower an ACL for a test, failing the test if the lowering reports an
+	/// error. Used where the assertion under test is about the resulting rules
+	/// rather than about a lowering failure.
+	fn lower(acl: &[AclRule]) -> Vec<wrule::Rule> {
+		acl_to_rules(acl).unwrap()
 	}
 
 	fn v6(addr: &str, port: u16) -> SocketAddr {
@@ -1430,7 +1464,7 @@ mod tests {
 	#[test]
 	fn hijack_target_warns_when_it_cannot_be_converted() {
 		let plain = parse_acl_rule("proxy 1.2.3.4 tcp/443").unwrap();
-		let (plain_rules, plain_warnings) = capture_warnings(|| acl_to_rules(std::slice::from_ref(&plain)));
+		let (plain_rules, plain_warnings) = capture_warnings(|| lower(std::slice::from_ref(&plain)));
 		assert_eq!(plain_rules.len(), 1);
 		assert!(
 			plain_warnings.is_empty(),
@@ -1439,7 +1473,7 @@ mod tests {
 
 		let rewrite = parse_acl_rule("redirect 8.8.8.8 tcp/53 10.0.0.1").unwrap();
 		assert_eq!(rewrite.hijack.as_deref(), Some("10.0.0.1"));
-		let (rules, warnings) = capture_warnings(|| acl_to_rules(std::slice::from_ref(&rewrite)));
+		let (rules, warnings) = capture_warnings(|| lower(std::slice::from_ref(&rewrite)));
 
 		// The match + outbound are still lowered, but the rewrite target
 		// cannot be represented in a `wind_core::rule::Rule`, so it must be
@@ -1831,7 +1865,7 @@ addr = "private"
 			ports: None,
 			hijack: None,
 		};
-		let rules = acl_rule_to_rules(&acl);
+		let rules = acl_rule_to_rules(&acl).unwrap();
 		assert_eq!(rules.len(), 1);
 		assert_eq!(rules[0].target, "proxy");
 		let ctx = wrule::MatchContext {
@@ -1849,7 +1883,7 @@ addr = "private"
 			ports: None,
 			hijack: None,
 		};
-		let rules = acl_rule_to_rules(&acl);
+		let rules = acl_rule_to_rules(&acl).unwrap();
 		assert_eq!(rules.len(), 1);
 		let ctx = wrule::MatchContext {
 			dst_ip: Some("10.1.2.3".parse().unwrap()),
@@ -1871,7 +1905,7 @@ addr = "private"
 			ports: None,
 			hijack: None,
 		};
-		let rules = acl_rule_to_rules(&acl);
+		let rules = acl_rule_to_rules(&acl).unwrap();
 		assert_eq!(rules.len(), 1);
 		assert!(matches!(rules[0].rule_type, wrule::RuleType::Domain(ref d) if d == "example.com"));
 	}
@@ -1884,7 +1918,7 @@ addr = "private"
 			ports: None,
 			hijack: None,
 		};
-		let rules = acl_rule_to_rules(&acl);
+		let rules = acl_rule_to_rules(&acl).unwrap();
 		assert_eq!(rules.len(), 1);
 		let ctx = wrule::MatchContext {
 			domain: Some("www.google.com"),
@@ -1906,7 +1940,7 @@ addr = "private"
 			ports: None,
 			hijack: None,
 		};
-		let rules = acl_rule_to_rules(&acl);
+		let rules = acl_rule_to_rules(&acl).unwrap();
 		assert_eq!(rules.len(), 2); // 127.0.0.0/8 + ::1/128
 		let ctx = wrule::MatchContext {
 			dst_ip: Some("127.0.0.1".parse().unwrap()),
@@ -1923,7 +1957,7 @@ addr = "private"
 			ports: None,
 			hijack: None,
 		};
-		let rules = acl_rule_to_rules(&acl);
+		let rules = acl_rule_to_rules(&acl).unwrap();
 		assert!(rules.len() >= 6); // multiple RFC 1918 + link-local + loopback
 		// 10.x should match one of them
 		let ctx = wrule::MatchContext {
@@ -1941,7 +1975,7 @@ addr = "private"
 			ports: None,
 			hijack: None,
 		};
-		let rules = acl_rule_to_rules(&acl);
+		let rules = acl_rule_to_rules(&acl).unwrap();
 		assert_eq!(rules.len(), 1);
 		assert!(matches!(rules[0].rule_type, wrule::RuleType::Match));
 	}
@@ -1959,7 +1993,7 @@ addr = "private"
 			}),
 			hijack: None,
 		};
-		let rules = acl_rule_to_rules(&acl);
+		let rules = acl_rule_to_rules(&acl).unwrap();
 		assert_eq!(rules.len(), 1);
 		let ctx = wrule::MatchContext {
 			dst_port: Some(443),
@@ -1986,7 +2020,7 @@ addr = "private"
 			}),
 			hijack: None,
 		};
-		let rules = acl_rule_to_rules(&acl);
+		let rules = acl_rule_to_rules(&acl).unwrap();
 		assert_eq!(rules.len(), 1);
 		let ctx = wrule::MatchContext {
 			dst_port: Some(8500),
@@ -2008,7 +2042,7 @@ addr = "private"
 			}),
 			hijack: None,
 		};
-		let rules = acl_rule_to_rules(&acl);
+		let rules = acl_rule_to_rules(&acl).unwrap();
 		assert_eq!(rules.len(), 1);
 		// TCP 443 → match
 		let ctx_tcp = wrule::MatchContext {
@@ -2039,7 +2073,7 @@ addr = "private"
 			}),
 			hijack: None,
 		};
-		let rules = acl_rule_to_rules(&acl);
+		let rules = acl_rule_to_rules(&acl).unwrap();
 		assert_eq!(rules.len(), 1);
 		assert!(matches!(rules[0].rule_type, wrule::RuleType::And(_)));
 		// 10.1.2.3:80 → match
@@ -2066,7 +2100,7 @@ addr = "private"
 			ports: None,
 			hijack: None,
 		};
-		let rules = acl_rule_to_rules(&acl);
+		let rules = acl_rule_to_rules(&acl).unwrap();
 		assert_eq!(rules[0].target, "default");
 	}
 
@@ -2086,7 +2120,7 @@ addr = "private"
 				hijack: None,
 			},
 		];
-		let rules = acl_to_rules(&acls);
+		let rules = lower(&acls);
 		// Localhost → 2 rules, Domain → 1 rule
 		assert_eq!(rules.len(), 3);
 		assert_eq!(rules[0].target, "reject");
@@ -2104,7 +2138,7 @@ addr = "private"
 			ports: None,
 			hijack: None,
 		};
-		let rules = acl_rule_to_rules(&acl);
+		let rules = acl_rule_to_rules(&acl).unwrap();
 		assert_eq!(rules.len(), 1);
 		let ctx = wrule::MatchContext {
 			domain: Some("sub.example.com"),
@@ -2137,7 +2171,7 @@ addr = "private"
 			}),
 			hijack: None,
 		};
-		let rules = acl_rule_to_rules(&acl);
+		let rules = acl_rule_to_rules(&acl).unwrap();
 		// Each port × cidr → one AND rule per port
 		assert_eq!(rules.len(), 2);
 
@@ -2167,6 +2201,206 @@ addr = "private"
 		assert!(!rules[1].matches(&ctx_no));
 	}
 
+	/// A protocol-qualified port condition lowers to
+	/// `AND(address, AND(NETWORK, DST-PORT))`, and every clause must survive
+	/// lowering with its value intact and still constrain the match.
+	///
+	/// Regression guard for the conjunct copy: the clauses used to be
+	/// duplicated by rendering the `RuleType` and parsing it back, and a parse
+	/// failure was answered with `RuleType::Match`. `Match` is always true and
+	/// `And` requires every conjunct, so such a substitution would delete that
+	/// condition from the rule and widen it. The copy now propagates the
+	/// failure instead (see `copy_rule_type`), so this test pins both halves:
+	/// the clauses keep their values, and they still narrow the match.
+	#[test]
+	fn convert_protocol_port_keeps_address_network_and_port_clauses() {
+		let acl = AclRule {
+			outbound: "proxy".into(),
+			addr: AclAddress::Ip("1.1.1.1".into()),
+			ports: Some(AclPorts {
+				entries: vec![AclPortEntry {
+					protocol: Some(AclProtocol::Tcp),
+					port_spec: AclPortSpec::Single(443),
+				}],
+			}),
+			hijack: None,
+		};
+		let rules = lower(std::slice::from_ref(&acl));
+		assert_eq!(rules.len(), 1);
+
+		let wrule::RuleType::And(outer) = &rules[0].rule_type else {
+			panic!("expected an AND rule, got {:?}", rules[0].rule_type);
+		};
+		let outer_types = outer.iter().map(|c| &c.rule_type).collect::<Vec<_>>();
+		assert_eq!(
+			outer_types.len(),
+			2,
+			"expected AND(address, AND(NETWORK, DST-PORT)): {outer_types:?}"
+		);
+		assert!(
+			matches!(outer_types[0], wrule::RuleType::IpCidr(net) if *net == "1.1.1.1/32".parse().unwrap()),
+			"the address clause must keep its CIDR, got {:?}",
+			outer_types[0]
+		);
+		let wrule::RuleType::And(inner) = outer_types[1] else {
+			panic!("expected the port condition to be an AND, got {:?}", outer_types[1]);
+		};
+		let inner_types = inner.iter().map(|c| &c.rule_type).collect::<Vec<_>>();
+		assert_eq!(inner_types.len(), 2, "expected AND(NETWORK, DST-PORT): {inner_types:?}");
+		assert!(
+			matches!(inner_types[0], wrule::RuleType::Network(NetworkType::Tcp)),
+			"the protocol clause must keep TCP, got {:?}",
+			inner_types[0]
+		);
+		assert!(
+			matches!(inner_types[1], wrule::RuleType::DstPort(443)),
+			"the port clause must keep 443, got {:?}",
+			inner_types[1]
+		);
+
+		// Each clause still constrains the result: a different host, port, or
+		// protocol must not match, and only the exact tuple may.
+		let matched = |dst_ip: &str, dst_port: u16, network: NetworkType| {
+			rules[0].matches(&wrule::MatchContext {
+				dst_ip: Some(dst_ip.parse().unwrap()),
+				dst_port: Some(dst_port),
+				network: Some(network),
+				..Default::default()
+			})
+		};
+		assert!(matched("1.1.1.1", 443, NetworkType::Tcp), "the exact destination must match");
+		assert!(
+			!matched("9.9.9.9", 443, NetworkType::Tcp),
+			"the address clause must still narrow the match"
+		);
+		assert!(
+			!matched("1.1.1.1", 8443, NetworkType::Tcp),
+			"the port clause must still narrow the match"
+		);
+		assert!(
+			!matched("1.1.1.1", 443, NetworkType::Udp),
+			"the protocol clause must still narrow the match"
+		);
+	}
+
+	/// Every `RuleType` the legacy lowerer can hand to `copy_rule_type` must
+	/// survive the `Display`/`parse` round trip it uses to duplicate a clause.
+	///
+	/// This is the reachability evidence for the guard above: while these
+	/// inputs keep round-tripping, the fallback the old implementation used is
+	/// dead code — which is exactly why it went unnoticed — and the assertion
+	/// here turns any future `Display`/parser divergence into a test failure
+	/// instead of a silently widened ACL.
+	#[test]
+	fn rule_types_produced_by_the_lowerer_survive_display_parse() {
+		let produced = [
+			wrule::RuleType::IpCidr("1.1.1.1/32".parse().unwrap()),
+			wrule::RuleType::IpCidr("::1/128".parse().unwrap()),
+			wrule::RuleType::Domain("example.com".into()),
+			wrule::RuleType::DomainSuffix("example.com".into()),
+			wrule::RuleType::DstPort(443),
+			wrule::RuleType::DstPortRange(1000, 2000),
+			wrule::RuleType::Network(NetworkType::Tcp),
+			wrule::RuleType::Network(NetworkType::Udp),
+			wrule::RuleType::Match,
+			// The compound shape a protocol-qualified port condition produces
+			// is itself copied as a clause by the outer lowering step.
+			wrule::RuleType::And(vec![
+				wrule::Rule {
+					rule_type: wrule::RuleType::Network(NetworkType::Tcp),
+					target: String::new(),
+					options: Vec::new(),
+				},
+				wrule::Rule {
+					rule_type: wrule::RuleType::DstPort(443),
+					target: String::new(),
+					options: Vec::new(),
+				},
+			]),
+		];
+
+		for rt in &produced {
+			let acl = AclRule {
+				outbound: "proxy".into(),
+				addr: AclAddress::Any,
+				ports: None,
+				hijack: None,
+			};
+			let copied = copy_rule_type(rt, &acl)
+				.unwrap_or_else(|e| panic!("a clause the lowerer can produce must be copyable: {rt} -> {e}"));
+			// `RuleType` implements neither `Clone` nor `PartialEq`, so the
+			// copy is compared through the same `Display` form it was
+			// round-tripped through.
+			assert_eq!(
+				format!("{copied},__CLONE"),
+				format!("{rt},__CLONE"),
+				"copying {rt} must preserve the clause rather than degrade it to a catch-all"
+			);
+		}
+	}
+
+	#[test]
+	fn uncopyable_clause_is_reported_instead_of_becoming_a_catch_all() {
+		// The parser rejects an empty compound, so this clause has no textual
+		// form to round-trip through.
+		let uncopyable = wrule::RuleType::And(Vec::new());
+		let acl = AclRule {
+			outbound: "proxy".into(),
+			addr: AclAddress::Ip("1.1.1.1".into()),
+			ports: Some(AclPorts {
+				entries: vec![AclPortEntry {
+					protocol: Some(AclProtocol::Tcp),
+					port_spec: AclPortSpec::Single(443),
+				}],
+			}),
+			hijack: None,
+		};
+
+
+		let err = copy_rule_type(&uncopyable, &acl)
+			.expect_err("a clause that cannot be round-tripped must be reported, not substituted");
+		let message = err.to_string();
+		assert!(
+			message.contains("cannot be lowered"),
+			"the error must say what failed: {message}"
+		);
+		assert!(
+			message.contains("1.1.1.1"),
+			"the error must name the offending rule: {message}"
+		);
+
+		// The point of the error: the old fallback answered with `Match`,
+		// which is always true inside an `And`, deleting the clause and
+		// widening the rule. Guard the property directly so a future
+		// "be lenient here" change cannot reinstate it quietly.
+		let catch_all = wrule::RuleType::Match;
+		let widened = wrule::Rule {
+			rule_type: wrule::RuleType::And(vec![
+				wrule::Rule {
+					rule_type: catch_all,
+					target: String::new(),
+					options: Vec::new(),
+				},
+				wrule::Rule {
+					rule_type: wrule::RuleType::DstPort(443),
+					target: String::new(),
+					options: Vec::new(),
+				},
+			]),
+			target: "proxy".into(),
+			options: Vec::new(),
+		};
+		let on_any_host = wrule::MatchContext {
+			dst_ip: Some("203.0.113.9".parse().unwrap()),
+			dst_port: Some(443),
+			..Default::default()
+		};
+		assert!(
+			widened.matches(&on_any_host),
+			"`Match` inside an `And` is always true, which is why substituting it widens the rule"
+		);
+	}
+
 	#[test]
 	fn convert_port_range() {
 		let acl = AclRule {
@@ -2180,7 +2414,7 @@ addr = "private"
 			}),
 			hijack: None,
 		};
-		let rules = acl_rule_to_rules(&acl);
+		let rules = acl_rule_to_rules(&acl).unwrap();
 		assert_eq!(rules.len(), 1);
 
 		let ctx_in = wrule::MatchContext {
@@ -2204,7 +2438,7 @@ addr = "private"
 			ports: None,
 			hijack: None,
 		};
-		let rules = acl_rule_to_rules(&acl);
+		let rules = acl_rule_to_rules(&acl).unwrap();
 		// Private produces 8 CIDR rules
 		assert!(rules.len() >= 8);
 		for rule in &rules {
@@ -2240,7 +2474,7 @@ addr = "private"
 			ports: None,
 			hijack: None,
 		};
-		let rules = acl_to_rules(std::slice::from_ref(&acl));
+		let rules = lower(std::slice::from_ref(&acl));
 		assert!(!rules.is_empty(), "expected at least one rule");
 		let ctx_match = wrule::MatchContext {
 			dst_ip: Some("2001:db8::1".parse().unwrap()),
@@ -2267,7 +2501,7 @@ addr = "private"
 			ports: None,
 			hijack: None,
 		};
-		let rules = acl_to_rules(std::slice::from_ref(&acl));
+		let rules = lower(std::slice::from_ref(&acl));
 		let ctx = wrule::MatchContext {
 			dst_ip: Some("10.0.0.5".parse().unwrap()),
 			..Default::default()
@@ -2291,7 +2525,7 @@ addr = "private"
 			ports: None,
 			hijack: None,
 		};
-		let rules = acl_to_rules(std::slice::from_ref(&acl));
+		let rules = lower(std::slice::from_ref(&acl));
 		assert!(rules.is_empty(), "malformed IP must drop the rule");
 	}
 

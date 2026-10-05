@@ -181,7 +181,7 @@ impl TuicRouter {
 		resolver: Arc<dyn wind_core::Resolver>,
 		geodata: Option<Arc<GeoData>>,
 	) -> eyre::Result<Self> {
-		let converted = acl_to_rules(&cfg.acl);
+		let converted = acl_to_rules(&cfg.acl)?;
 		// The configuration layer already parses every entry into a `Rule`,
 		// but render it back to text and re-parse so this router accepts
 		// exactly the strings the rule grammar defines. `Display` and the
