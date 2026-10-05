@@ -25,6 +25,10 @@ pub struct ServerGuard {
 	pub local_addr: SocketAddr,
 	pub restful_addr: Option<SocketAddr>,
 	pub cancel: CancellationToken,
+	/// The [`App`]'s own token. `Drop` cancels it directly because the bridge
+	/// task that normally forwards `cancel` into it is aborted there, while the
+	/// spawned inbound and RESTful tasks only stop on this token.
+	app_token: CancellationToken,
 	run_task: tokio::task::JoinHandle<eyre::Result<()>>,
 	bridge: tokio::task::JoinHandle<()>,
 }
@@ -45,8 +49,13 @@ impl ServerGuard {
 
 impl Drop for ServerGuard {
 	fn drop(&mut self) {
-		// Last-resort teardown if the caller never calls `shutdown`.
+		// Last-resort teardown if the caller never calls `shutdown`. The app
+		// token has to be fired here rather than through `bridge`: aborting the
+		// bridge below can beat it to `ctx.token.cancel()`, and the spawned
+		// inbound/RESTful tasks keep their sockets bound until that token is
+		// cancelled.
 		self.cancel.cancel();
+		self.app_token.cancel();
 		self.run_task.abort();
 		self.bridge.abort();
 	}
@@ -78,6 +87,7 @@ pub async fn run_with_cancel(cfg: Config, cancel: CancellationToken) -> eyre::Re
 		)
 		.await?;
 	let ctx = app.context().clone();
+	let app_token = ctx.token.clone();
 
 	// Bridge the caller's token into the App's context token: `App::run`
 	// already selects on `ctx.token.cancelled()`, so firing the internal token
@@ -127,6 +137,7 @@ pub async fn run_with_cancel(cfg: Config, cancel: CancellationToken) -> eyre::Re
 		local_addr,
 		restful_addr,
 		cancel,
+		app_token,
 		run_task,
 		bridge,
 	})
