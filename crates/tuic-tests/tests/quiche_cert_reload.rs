@@ -28,7 +28,9 @@ use rustls::{
 	client::danger::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier},
 	pki_types::{CertificateDer, ServerName, UnixTime},
 };
+use tempfile::TempDir;
 use tokio::time::timeout;
+use tokio_util::sync::CancellationToken;
 use wind_core::{
 	AbstractInbound, Dispatcher, FlowContext, Outbound, RouteAction, Router, tcp::AbstractTcpStream, udp::UdpStream,
 };
@@ -41,6 +43,11 @@ const RELOAD_DEADLINE: Duration = Duration::from_secs(5);
 
 /// Pause between two observation attempts, so a failed probe cannot spin.
 const RETRY_INTERVAL: Duration = Duration::from_millis(50);
+
+/// How long the listener may take to stop once its cancellation token fires.
+/// Cancellation winds down the accept loop and every connection handler, so the
+/// only way to exceed this is a listener that cannot be stopped at all.
+const SHUTDOWN_DEADLINE: Duration = Duration::from_secs(10);
 
 // ---- a no-op outbound handler (TLS handshake is all we need) --------------
 
@@ -150,10 +157,13 @@ async fn fetch_served_cert(endpoint: &Endpoint, addr: SocketAddr) -> eyre::Resul
 async fn quiche_certificate_hot_reload() -> eyre::Result<()> {
 	tuic_tests::install_crypto_provider();
 
-	let dir = std::env::temp_dir().join("wind-tuiche-cert-reload");
-	std::fs::create_dir_all(&dir)?;
-	let cert_path = dir.join("cert.pem");
-	let key_path = dir.join("key.pem");
+	// The listener reads the certificate files, so the directory has to outlive
+	// it — but it must not be shared: a fixed name under the system temp dir
+	// makes parallel or successive runs write the same two paths, and nothing
+	// ever removed it. This guard is unique per call and deletes on drop.
+	let dir = TempDir::new()?;
+	let cert_path = dir.path().join("cert.pem");
+	let key_path = dir.path().join("key.pem");
 
 	// Initial certificate A.
 	let (cert_a, key_a) = self_signed();
@@ -161,9 +171,13 @@ async fn quiche_certificate_hot_reload() -> eyre::Result<()> {
 	std::fs::write(&key_path, &key_a)?;
 
 	let (addr_tx, mut addr_rx) = tokio::sync::watch::channel(None::<SocketAddr>);
+	// Drives the shutdown below: cancelling it stops the accept loop, and
+	// `listen` only returns after every connection handler has drained.
+	let cancel = CancellationToken::new();
 	let inbound = TuicheInboundBuilder::new()
 		.listen_addr("127.0.0.1:0".parse().unwrap())
 		.bound_addr(addr_tx)
+		.cancel_token(cancel.clone())
 		.certificate_path(cert_path.to_string_lossy().into_owned())
 		.private_key_path(key_path.to_string_lossy().into_owned())
 		.build()
@@ -172,7 +186,10 @@ async fn quiche_certificate_hot_reload() -> eyre::Result<()> {
 
 	let mut dispatcher = Dispatcher::new(ForwardRouter);
 	dispatcher.add_handler("default", Arc::new(NoopOutbound));
-	tokio::spawn(async move {
+	// Kept out of a bare `tokio::spawn(...)`: the handle is what lets the test
+	// observe the listener actually stopping instead of being torn down
+	// implicitly when the runtime is dropped.
+	let mut listener = tokio::spawn(async move {
 		let _ = inbound.listen(&dispatcher).await;
 	});
 
@@ -244,5 +261,21 @@ async fn quiche_certificate_hot_reload() -> eyre::Result<()> {
 	);
 
 	endpoint.wait_idle().await;
+
+	// The listener must stop because it was asked to, not because the test
+	// runtime is going away. This used to be a detached `tokio::spawn` whose
+	// handle was dropped, so a listener that ignored cancellation would still
+	// let the test pass. The bounded await turns that into a failure, and the
+	// explicit abort on the timeout branch keeps the runtime drop from being
+	// the only thing that ever cleans the task up.
+	cancel.cancel();
+	match timeout(SHUTDOWN_DEADLINE, &mut listener).await {
+		Ok(Ok(())) => {}
+		Ok(Err(err)) => eyre::bail!("the listener task panicked instead of shutting down cleanly: {err}"),
+		Err(_) => {
+			listener.abort();
+			eyre::bail!("the listener was still running {SHUTDOWN_DEADLINE:?} after its cancellation token fired");
+		}
+	}
 	Ok(())
 }
