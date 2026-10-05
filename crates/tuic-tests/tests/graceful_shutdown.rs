@@ -27,6 +27,7 @@ use tokio::{
 	time::timeout,
 };
 use tuic_server::{Config, TuicServerPlugin, config::ExperimentalConfig};
+use tuic_tests::install_crypto_provider;
 use wind_core::{App, FlowContext, Outbound, hooks::Protocol, rule::NetworkType, types::TargetAddr};
 
 // ---------------------------------------------------------------------------
@@ -127,7 +128,7 @@ fn build_minimal_server_config() -> Config {
 /// `App::run()` within a bounded time — no hanging, no timeout-then-SIGKILL.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn idle_server_exits_on_cancel() {
-	let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
+	install_crypto_provider();
 
 	let (ctx, handle, _addr) = start_server(build_minimal_server_config()).await;
 
@@ -149,7 +150,7 @@ async fn idle_server_exits_on_cancel() {
 /// drain all per-connection handlers and the accept loop within a bounded time.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn active_connection_drains_on_cancel() {
-	let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
+	install_crypto_provider();
 
 	// Build a config *with* a known user so a client can authenticate.
 	let uuid = uuid::Uuid::new_v4();
@@ -321,7 +322,7 @@ async fn start_tcp_echo_server() -> (tokio::task::JoinHandle<()>, SocketAddr) {
 /// keep the server alive indefinitely.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn drains_while_active_traffic_flows() {
-	let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
+	install_crypto_provider();
 
 	// 1. Start a local TCP echo server.
 	let (_echo_task, echo_addr) = start_tcp_echo_server().await;
