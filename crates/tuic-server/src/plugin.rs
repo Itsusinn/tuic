@@ -22,7 +22,7 @@ use crate::{
 pub struct TuicServerPlugin {
 	cfg: Config,
 	bound_addr: Option<watch::Sender<Option<SocketAddr>>>,
-	restful_bound_addr: Option<watch::Sender<Option<SocketAddr>>>,
+	restful_bound_addr: Option<restful::RestfulAddrTx>,
 }
 
 impl TuicServerPlugin {
@@ -42,8 +42,9 @@ impl TuicServerPlugin {
 	}
 
 	/// Report the actually-bound RESTful API address (OS-assigned when
-	/// `restful.addr` binds to port 0) through this watch channel.
-	pub fn with_restful_bound_addr(mut self, tx: watch::Sender<Option<SocketAddr>>) -> Self {
+	/// `restful.addr` binds to port 0) through this watch channel, or the bind
+	/// failure that keeps the management API from coming up at all.
+	pub fn with_restful_bound_addr(mut self, tx: restful::RestfulAddrTx) -> Self {
 		self.restful_bound_addr = Some(tx);
 		self
 	}
