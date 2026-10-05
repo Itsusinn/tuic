@@ -278,31 +278,69 @@ impl Plugin<TuicRouter> for TuicServerPlugin {
 						}
 					}
 
-					let quiche_dir = std::env::temp_dir().join("tuic-server-quiche");
-					std::fs::create_dir_all(&quiche_dir)
-						.with_context(|| format!("create quiche temp cert dir {}", quiche_dir.display()))?;
+					// tokio-quiche loads credentials from file
+					// paths, so the private key must be staged
+					// on disk. Use a per-instance directory
+					// that only the server user can enter and
+					// read: a fixed shared path could be
+					// pre-created by another local user, and
+					// concurrent servers would overwrite each
+					// other's certificates.
+					let quiche_dir = quiche_cert_dir();
+					create_private_dir(&quiche_dir)
+						.with_context(|| format!("create quiche cert dir {}", quiche_dir.display()))?;
 					let quiche_cert_path = quiche_dir.join("cert.pem");
 					let quiche_key_path = quiche_dir.join("key.pem");
 
 					if tls_self_sign {
 						let generated = rcgen::generate_simple_self_signed(vec![hostname.clone()])
 							.with_context(|| format!("quiche self-signed cert generation for {hostname}"))?;
-						std::fs::write(&quiche_cert_path, generated.cert.pem())
+						write_private_file(&quiche_cert_path, generated.cert.pem().as_bytes())
 							.with_context(|| format!("write quiche cert.pem to {}", quiche_cert_path.display()))?;
-						std::fs::write(&quiche_key_path, generated.signing_key.serialize_pem())
+						write_private_file(&quiche_key_path, generated.signing_key.serialize_pem().as_bytes())
 							.with_context(|| format!("write quiche key.pem to {}", quiche_key_path.display()))?;
 					} else {
-						std::fs::copy(&cert_path, &quiche_cert_path).with_context(|| {
+						// `std::fs::copy` keeps the source mode
+						// and follows a pre-existing
+						// destination, so read once and write
+						// both files with owner-only modes.
+						let cert_bytes = std::fs::read(&cert_path)
+							.with_context(|| format!("read TLS certificate {}", cert_path.display()))?;
+						write_private_file(&quiche_cert_path, &cert_bytes).with_context(|| {
 							format!(
-								"copy quiche cert from {} to {}",
+								"write quiche cert from {} to {}",
 								cert_path.display(),
 								quiche_cert_path.display()
 							)
 						})?;
-						std::fs::copy(&key_path, &quiche_key_path).with_context(|| {
-							format!("copy quiche key from {} to {}", key_path.display(), quiche_key_path.display())
+						let key_bytes =
+							std::fs::read(&key_path).with_context(|| format!("read TLS private key {}", key_path.display()))?;
+						write_private_file(&quiche_key_path, &key_bytes).with_context(|| {
+							format!(
+								"write quiche key from {} to {}",
+								key_path.display(),
+								quiche_key_path.display()
+							)
 						})?;
 					}
+
+					// The listener hands these paths to
+					// tokio-quiche for its whole lifetime, so
+					// drop the staged key only once shutdown
+					// starts. Best effort: a cleanup failure
+					// must not fail an otherwise clean stop.
+					let cleanup_dir = quiche_dir.clone();
+					let cleanup_token = app.context().token.child_token();
+					app.context().tasks.spawn(async move {
+						cleanup_token.cancelled().await;
+						match std::fs::remove_dir_all(&cleanup_dir) {
+							Ok(()) => {}
+							Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+							Err(e) => {
+								tracing::warn!("failed to remove quiche cert dir {}: {e}", cleanup_dir.display());
+							}
+						}
+					});
 
 					let cert_pem = std::fs::read(&quiche_cert_path)
 						.with_context(|| format!("read quiche cert.pem {}", quiche_cert_path.display()))?;
@@ -405,4 +443,120 @@ fn generate_self_signed(
 	let cert_der = rustls::pki_types::CertificateDer::from(generated.cert);
 	let priv_key = rustls::pki_types::PrivatePkcs8KeyDer::from(generated.signing_key.serialize_der());
 	Ok((vec![cert_der], rustls::pki_types::PrivateKeyDer::Pkcs8(priv_key)))
+}
+
+// Quiche certificate staging (private on-disk key)
+
+/// Directory that holds the PEM files the quiche backend loads at startup.
+///
+/// The name carries a fresh UUID so that two server instances (or two tests in
+/// the same process) never stage their key material at the same path.
+#[cfg(feature = "quiche")]
+fn quiche_cert_dir() -> std::path::PathBuf {
+	std::env::temp_dir().join(format!("tuic-server-quiche-{}", uuid::Uuid::new_v4()))
+}
+
+/// Create `dir` as a directory only its owner can enter (mode `0o700`).
+///
+/// Deliberately non-recursive and non-idempotent: an existing path is refused
+/// instead of being reused, so the caller never adopts a directory it did not
+/// create.
+#[cfg(all(feature = "quiche", unix))]
+fn create_private_dir(dir: &std::path::Path) -> std::io::Result<()> {
+	use std::os::unix::fs::DirBuilderExt;
+
+	std::fs::DirBuilder::new().mode(0o700).create(dir)
+}
+
+/// Create `dir`. Non-Unix hosts have no portable owner-only mode to set, so
+/// this only guarantees the path is new; the platform's temporary directory is
+/// already per-user.
+#[cfg(all(feature = "quiche", not(unix)))]
+fn create_private_dir(dir: &std::path::Path) -> std::io::Result<()> {
+	std::fs::create_dir(dir)
+}
+
+/// Write `contents` to `path` as a new file only its owner can read (mode
+/// `0o600`).
+///
+/// `create_new` refuses to follow an existing file or symlink at `path`, which
+/// keeps a raced-in path from being overwritten through.
+#[cfg(feature = "quiche")]
+fn write_private_file(path: &std::path::Path, contents: &[u8]) -> std::io::Result<()> {
+	use std::io::Write;
+
+	let mut options = std::fs::OpenOptions::new();
+	options.write(true).create_new(true);
+	#[cfg(unix)]
+	{
+		use std::os::unix::fs::OpenOptionsExt;
+		options.mode(0o600);
+	}
+	let mut file = options.open(path)?;
+	file.write_all(contents)
+}
+
+#[cfg(all(test, feature = "quiche"))]
+mod tests {
+	use std::fs;
+
+	use super::*;
+
+	#[test]
+	fn quiche_cert_dir_is_unique_per_instance() {
+		let first = quiche_cert_dir();
+		let second = quiche_cert_dir();
+		assert_ne!(first, second, "each server instance needs its own certificate directory");
+		assert_eq!(first.parent(), Some(std::env::temp_dir().as_path()));
+		assert!(
+			first
+				.file_name()
+				.and_then(|name| name.to_str())
+				.is_some_and(|name| name.starts_with("tuic-server-quiche-")),
+			"unexpected certificate directory name: {}",
+			first.display()
+		);
+	}
+
+	#[test]
+	fn create_private_dir_refuses_an_existing_path() {
+		let root = tempfile::tempdir().unwrap();
+		let dir = root.path().join("certs");
+		create_private_dir(&dir).unwrap();
+		assert!(dir.is_dir());
+
+		let err = create_private_dir(&dir).expect_err("reusing an existing directory must fail");
+		assert_eq!(err.kind(), std::io::ErrorKind::AlreadyExists);
+	}
+
+	#[test]
+	fn write_private_file_refuses_to_clobber_existing_content() {
+		let root = tempfile::tempdir().unwrap();
+		let key = root.path().join("key.pem");
+		write_private_file(&key, b"first").unwrap();
+
+		let err = write_private_file(&key, b"second").expect_err("overwriting key material must fail");
+		assert_eq!(err.kind(), std::io::ErrorKind::AlreadyExists);
+		assert_eq!(fs::read(&key).unwrap(), b"first");
+	}
+
+	#[cfg(unix)]
+	#[test]
+	fn private_dir_and_key_are_owner_only() {
+		use std::os::unix::fs::PermissionsExt;
+
+		let root = tempfile::tempdir().unwrap();
+		let dir = root.path().join("certs");
+		create_private_dir(&dir).unwrap();
+		let dir_mode = dir.metadata().unwrap().permissions().mode() & 0o777;
+		assert_eq!(
+			dir_mode, 0o700,
+			"other users must not be able to enter the certificate directory"
+		);
+
+		let key = dir.join("key.pem");
+		write_private_file(&key, b"secret").unwrap();
+		let key_mode = key.metadata().unwrap().permissions().mode() & 0o777;
+		assert_eq!(key_mode, 0o600, "other users must not be able to read the staged private key");
+	}
 }
