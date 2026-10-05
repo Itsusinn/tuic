@@ -8,7 +8,6 @@ pub mod legacy;
 pub mod log;
 pub mod plugin;
 pub mod restful;
-pub mod tls;
 pub mod utils;
 pub mod wind_adapter;
 
