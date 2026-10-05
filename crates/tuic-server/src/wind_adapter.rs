@@ -14,6 +14,7 @@ use std::{
 };
 
 use async_trait::async_trait;
+use eyre::WrapErr;
 use tracing::Instrument;
 use wind_acl::AclEngine;
 use wind_base::{
@@ -181,11 +182,23 @@ impl TuicRouter {
 		geodata: Option<Arc<GeoData>>,
 	) -> eyre::Result<Self> {
 		let converted = acl_to_rules(&cfg.acl);
+		// The configuration layer already parses every entry into a `Rule`,
+		// but render it back to text and re-parse so this router accepts
+		// exactly the strings the rule grammar defines. `Display` and the
+		// parser share one positional grammar, so the round trip is lossless
+		// for every rule `Rule::parse` accepted (see
+		// `explicit_rules_survive_the_display_parse_round_trip`). A failure
+		// here means the rule grammar and its renderer disagree, which must
+		// stop startup with a diagnostic instead of panicking on a runtime
+		// thread.
 		let explicit: Vec<Rule> = cfg
 			.rules
 			.iter()
-			.map(|r| Rule::parse(&r.to_string()).expect("round-trip rule parse"))
-			.collect();
+			.map(|r| {
+				let line = r.to_string();
+				Rule::parse(&line).wrap_err_with(|| format!("configured routing rule {line:?} cannot be re-parsed"))
+			})
+			.collect::<eyre::Result<_>>()?;
 		let all_rules: Vec<Rule> = converted.into_iter().chain(explicit).collect();
 
 		let acl_engine = if all_rules.is_empty() {
@@ -502,5 +515,58 @@ mod tests {
 
 		let result = load_cert_from_files(&cert_path, &key_path);
 		assert!(result.is_err());
+	}
+
+	/// The explicit rule list is fed to the router through
+	/// `to_string()` → `Rule::parse`, so that round trip is the invariant the
+	/// router depends on. Exercise one representative rule per grammar shape,
+	/// including the shapes whose `Display` output looks suspicious — nested
+	/// compounds and the target-less sub-rules that `parse_compound`
+	/// produces — and require the render/re-parse pair to be lossless.
+	#[test]
+	fn explicit_rules_survive_the_display_parse_round_trip() {
+		let inputs = [
+			"DOMAIN,example.com,reject",
+			"DOMAIN-SUFFIX,example.com,proxy",
+			"DOMAIN-WILDCARD,*.example.com,proxy",
+			"IP-CIDR,10.0.0.0/8,direct",
+			"IP-CIDR6,fc00::/7,direct",
+			"DST-PORT,443,proxy",
+			"SRC-PORT,1000-2000,proxy",
+			"NETWORK,udp,direct",
+			"IP-CIDR,10.0.0.0/8,direct,no-resolve",
+			"MATCH,proxy",
+			"AND,((NETWORK,tcp),(DST-PORT,443)),proxy",
+			"OR,((NETWORK,tcp),(DST-PORT,53)),proxy",
+			"NOT,((NETWORK,udp)),proxy",
+			"SUB-RULE,((NETWORK,tcp)),proxy",
+			// A nested compound: the inner rule carries an empty target
+			// because `parse_compound` strips the placeholder target it
+			// appends to make the sub-rule parsable.
+			"AND,((AND,((NETWORK,tcp),(DST-PORT,443)))),proxy",
+		];
+
+		let mut rules = Vec::new();
+		for line in inputs {
+			let rule = Rule::parse(line).unwrap_or_else(|e| panic!("{line:?} must parse: {e}"));
+			let rendered = rule.to_string();
+			let reparsed = Rule::parse(&rendered).unwrap_or_else(|e| {
+				panic!("Display output of {line:?} ({rendered:?}) must re-parse, otherwise the router cannot accept it: {e}")
+			});
+			assert_eq!(
+				reparsed.to_string(),
+				rendered,
+				"the round trip through Display must be lossless for {line:?}"
+			);
+			rules.push(rule);
+		}
+
+		// The whole list must build a router instead of aborting the server.
+		let cfg = crate::Config {
+			rules,
+			..Default::default()
+		};
+		let router = TuicRouter::new(&cfg, default_resolver(), None).expect("router must build from valid rules");
+		assert!(router.acl_engine.is_some(), "the explicit rules must reach the ACL engine");
 	}
 }
