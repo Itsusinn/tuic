@@ -49,7 +49,10 @@ async fn legacy_acl_compiles_and_matches() {
 	// `reject` is a rejection keyword; `private` expands to RFC1918 + loopback
 	// CIDRs.
 	let acl = parse_multiline_acl_string("reject private\nproxy 1.1.1.1 tcp/443").unwrap();
-	let engine = AclEngine::builder("direct").rules(acl_to_rules(&acl)).build().unwrap();
+	let engine = AclEngine::builder("direct")
+		.rules(acl_to_rules(&acl).unwrap())
+		.build()
+		.unwrap();
 
 	// Private destination → rejected by the first ACL rule.
 	let priv_action = engine.route(&fc(&ipv4("192.168.1.5", 1234), true)).await.unwrap();
@@ -72,7 +75,11 @@ async fn legacy_acl_rules_precede_clash_rules() {
 	let acl = parse_multiline_acl_string("aclwin 1.1.1.1").unwrap();
 	let clash = Rule::parse("IP-CIDR,1.1.1.1/32,clashwin").unwrap();
 
-	let rules: Vec<Rule> = acl_to_rules(&acl).into_iter().chain(std::iter::once(clash)).collect();
+	let rules: Vec<Rule> = acl_to_rules(&acl)
+		.unwrap()
+		.into_iter()
+		.chain(std::iter::once(clash))
+		.collect();
 	let engine = AclEngine::builder("direct").rules(rules).build().unwrap();
 
 	let action = engine.route(&fc(&ipv4("1.1.1.1", 443), true)).await.unwrap();
