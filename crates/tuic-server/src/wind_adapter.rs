@@ -32,6 +32,13 @@ use crate::{
 };
 
 /// Inbound QUIC listener selected by `backend.mode`.
+///
+/// One instance is built per inbound during plugin setup and then owned by the
+/// runtime for the process lifetime, so the enum is never held in bulk. The
+/// stack-size difference between the two backends does not justify the
+/// indirection `clippy::large_enum_variant` proposes, and boxing a variant
+/// would change this public enum's variant types without an ownership benefit.
+#[allow(clippy::large_enum_variant)]
 pub enum ServerInbound {
 	Tuic(wind_tuic::quinn::inbound::TuicInbound),
 	#[cfg(feature = "quiche")]
