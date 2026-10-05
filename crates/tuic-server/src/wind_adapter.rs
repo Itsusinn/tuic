@@ -254,6 +254,11 @@ impl TuicRouter {
 }
 
 /// Load TLS certificate and private key from PEM files.
+///
+/// Both files must actually contain PEM material. `rustls_pemfile` skips bytes
+/// it does not recognize, so a DER-only or mistyped certificate file would
+/// otherwise yield an empty chain that only fails later — inside the TLS
+/// builder, with an error that no longer names the file.
 pub fn load_cert_from_files(
 	cert_path: &std::path::Path,
 	key_path: &std::path::Path,
@@ -263,8 +268,18 @@ pub fn load_cert_from_files(
 )> {
 	let cert_data = std::fs::read(cert_path)?;
 	let key_data = std::fs::read(key_path)?;
-	let certs = rustls_pemfile::certs(&mut cert_data.as_slice()).collect::<Result<Vec<_>, _>>()?;
-	let key = rustls_pemfile::private_key(&mut key_data.as_slice())?.ok_or_else(|| eyre::eyre!("No private key found"))?;
+	let certs = rustls_pemfile::certs(&mut cert_data.as_slice())
+		.collect::<Result<Vec<_>, _>>()
+		.wrap_err_with(|| format!("parse PEM certificates from {}", cert_path.display()))?;
+	if certs.is_empty() {
+		eyre::bail!(
+			"no PEM certificate found in {}; `tls.certificate` must be a PEM file holding the certificate chain",
+			cert_path.display()
+		);
+	}
+	let key = rustls_pemfile::private_key(&mut key_data.as_slice())
+		.wrap_err_with(|| format!("parse the PEM private key from {}", key_path.display()))?
+		.ok_or_else(|| eyre::eyre!("no PEM private key found in {}", key_path.display()))?;
 	Ok((certs, key))
 }
 
@@ -515,6 +530,56 @@ mod tests {
 
 		let result = load_cert_from_files(&cert_path, &key_path);
 		assert!(result.is_err());
+	}
+
+	/// A certificate file that holds no PEM certificate must be rejected by the
+	/// loader itself: the PEM reader silently skips bytes it does not
+	/// recognize, so without an explicit check the caller receives an empty
+	/// chain and only fails much later, with an error that never names the
+	/// file the operator pointed at.
+	#[test]
+	fn certificate_file_without_pem_certificates_is_rejected_with_the_path() {
+		let dir = tempdir().unwrap();
+		let cert_path = dir.path().join("cert.pem");
+		let key_path = dir.path().join("key.pem");
+
+		let key_pem = rcgen::KeyPair::generate().unwrap().serialize_pem();
+		// A valid key next to unusable certificate bytes: the key must not mask
+		// the missing certificate.
+		std::fs::write(&cert_path, b"not a certificate").unwrap();
+		std::fs::write(&key_path, &key_pem).unwrap();
+
+		let message = match load_cert_from_files(&cert_path, &key_path) {
+			Ok((certs, _key)) => format!("the loader accepted a {} certificate chain", certs.len()),
+			Err(err) => err.to_string(),
+		};
+		assert!(
+			message.contains("cert.pem"),
+			"a certificate file without PEM certificates must be rejected with an error naming the file, got: {message}"
+		);
+	}
+
+	/// A truncated or unknown PEM block is a parse error, not a silent miss; it
+	/// must also name the file so a mistyped path is distinguishable from
+	/// corrupt content.
+	#[test]
+	fn malformed_pem_certificate_error_names_the_file() {
+		let dir = tempdir().unwrap();
+		let cert_path = dir.path().join("cert.pem");
+		let key_path = dir.path().join("key.pem");
+
+		let key_pem = rcgen::KeyPair::generate().unwrap().serialize_pem();
+		std::fs::write(&cert_path, b"-----BEGIN GARBAGE-----\nnot a certificate\n").unwrap();
+		std::fs::write(&key_path, &key_pem).unwrap();
+
+		let message = match load_cert_from_files(&cert_path, &key_path) {
+			Ok((certs, _key)) => format!("the loader accepted a {} certificate chain", certs.len()),
+			Err(err) => err.to_string(),
+		};
+		assert!(
+			message.contains("cert.pem"),
+			"a malformed PEM certificate must be reported with the file it came from, got: {message}"
+		);
 	}
 
 	/// The explicit rule list is fed to the router through
