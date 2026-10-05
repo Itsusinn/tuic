@@ -26,14 +26,15 @@ use uuid::Uuid;
 /// SOCKS5 UDP association setup.
 const UDP_RELAY_TIMEOUT: Duration = Duration::from_secs(10);
 
-// - Server listening on [::1]:8444 (IPv6 localhost)
-// - Client connecting to [::1]:8444
-// - SOCKS5 proxy on [::1]:1081
+// - Server bound on [::1]:0 (IPv6 localhost, OS-assigned port)
+// - Client connecting to the server on the port the guard reported
+// - SOCKS5 proxy bound on [::1]:0 (port read back from the client guard)
 // - TCP relay through IPv6
 // - UDP relay through IPv6 (native mode)
 //
-// This addresses the error that occurs when using IPv6 addresses like
-// "[::1]:443"
+// The zero port is the bind request, not the address in use: the OS picks the
+// port and the tests read it back, so this file states no fixed port for either
+// endpoint. The port audit in `port_audit.rs` fails if that stops being true.
 #[tokio::test]
 #[tracing_test::traced_test]
 async fn test_ipv6_server_client_integration() -> eyre::Result<()> {
@@ -50,6 +51,9 @@ async fn test_ipv6_server_client_integration() -> eyre::Result<()> {
 	// Skip (rather than silently pass) when the environment has no IPv6
 	// loopback -- common on constrained CI runners. If [::1] is available we
 	// require the relay to actually work below.
+	//
+	// This test addresses the error that occurs when using IPv6 addresses like
+	// "[::1]:443", where the port delimiter collides with the address syntax.
 	if tokio::net::TcpListener::bind("[::1]:0").await.is_err() {
 		info!("[IPv6 Test] no IPv6 loopback available; skipping");
 		return Ok(());
@@ -236,3 +240,6 @@ fn the_udp_relay_deadline_outlives_the_helper_response_window() {
 		tuic_tests::UDP_RELAY_RESPONSE_DEADLINE
 	);
 }
+
+// The module header is audited by the `port_audit` test in this directory,
+// which fails if this file ever documents a fixed loopback port again.
