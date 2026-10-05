@@ -117,6 +117,32 @@ impl ConnectionHooks for ConnectionTracker {
 	}
 }
 
+/// Outcome reported to the server core once the RESTful task has something to
+/// say about its listen socket.
+///
+/// `Ok(addr)` is the **actually bound** address (the OS-assigned port when
+/// `restful.addr` ends in `:0`); `Err` carries why the socket could never be
+/// bound. Both variants are cheap to clone because the channel hands the value
+/// to every receiver by reference.
+pub type RestfulBindOutcome = Result<SocketAddr, Arc<str>>;
+
+/// Sender half of the channel used by `restful::serve` to report a
+/// [`RestfulBindOutcome`] to the server core.
+///
+/// While the value is `None` the socket is not bound yet; if **all** senders
+/// are dropped with the value still `None`, the task ended without ever
+/// reaching a bind attempt.
+pub type RestfulAddrTx = watch::Sender<Option<RestfulBindOutcome>>;
+
+/// Receiver half of [`RestfulAddrTx`].
+pub type RestfulAddrRx = watch::Receiver<Option<RestfulBindOutcome>>;
+
+/// Create the bind-outcome channel shared between the server core and the
+/// RESTful task.
+pub fn restful_addr_channel() -> (RestfulAddrTx, RestfulAddrRx) {
+	watch::channel(None)
+}
+
 /// Shared state for RESTful handlers.
 pub struct RestfulState {
 	pub active: Arc<dyn KickConnections>,
@@ -332,11 +358,16 @@ async fn reset_traffic_handler(State(state): State<Arc<RestfulState>>, headers: 
 }
 
 /// Build the axum [`Router`] and start serving on the configured address.
+///
+/// Reports the outcome through `bound_addr`: the actually bound address on
+/// success, or the bind failure. The bind failure is published *before* the
+/// error is returned so a caller that is waiting on the channel learns that the
+/// management API is not coming up instead of seeing it silently disappear.
 pub async fn serve(
 	state: Arc<RestfulState>,
 	addr: SocketAddr,
 	cancel: CancellationToken,
-	bound_addr: Option<watch::Sender<Option<SocketAddr>>>,
+	bound_addr: Option<RestfulAddrTx>,
 ) -> eyre::Result<()> {
 	let app = Router::new()
 		.route("/kick", post(kick_handler))
@@ -355,14 +386,18 @@ pub async fn serve(
 				Ok(l) => l,
 				Err(e) => {
 					warn!("RESTful API failed to bind to {addr}: {e}");
+					let reason: Arc<str> = Arc::from(format!("failed to bind RESTful API to {addr}: {e}").as_str());
+					if let Some(tx) = bound_addr.as_ref() {
+						tx.send_replace(Some(Err(reason)));
+					}
 					return Err(eyre::eyre!("failed to bind RESTful API: {e}"));
 				}
 			}
 		}
 	};
 
-	if let Some(tx) = &bound_addr {
-		let _ = tx.send_replace(Some(listener.local_addr()?));
+	if let Some(tx) = bound_addr.as_ref() {
+		let _ = tx.send_replace(Some(Ok(listener.local_addr()?)));
 	}
 
 	warn!("RESTful API server started, listening on {addr}");
@@ -920,5 +955,59 @@ mod tests {
 			.unwrap();
 
 		assert_eq!(response.status(), StatusCode::OK);
+	}
+
+	// Bind-outcome reporting (`serve` → server core)
+
+	#[tokio::test]
+	async fn test_serve_publishes_bind_failure_instead_of_exiting_silently() {
+		// Occupy a port so `serve` cannot bind it.
+		let blocker = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+		let taken = blocker.local_addr().unwrap();
+
+		let state = make_state(Arc::new(NoopConnections), "", HashMap::new());
+		let (tx, mut rx) = restful_addr_channel();
+		let err = serve(state, taken, CancellationToken::new(), Some(tx))
+			.await
+			.expect_err("binding an occupied port must fail");
+		assert!(
+			err.to_string().contains("failed to bind RESTful API"),
+			"unexpected error: {err}"
+		);
+
+		let reported = rx
+			.wait_for(|outcome| outcome.is_some())
+			.await
+			.expect("the failure must be reported on the channel, not only logged");
+		match reported.as_ref() {
+			Some(Err(reason)) => assert!(
+				reason.contains("failed to bind RESTful API"),
+				"unexpected reported reason: {reason}"
+			),
+			other => panic!("the channel must carry the bind failure, got {other:?}"),
+		}
+	}
+
+	#[tokio::test]
+	async fn test_serve_publishes_the_actually_bound_address() {
+		let state = make_state(Arc::new(NoopConnections), "", HashMap::new());
+		let (tx, mut rx) = restful_addr_channel();
+		let cancel = CancellationToken::new();
+		let task = tokio::spawn(serve(state, "127.0.0.1:0".parse().unwrap(), cancel.clone(), Some(tx)));
+
+		let reported = rx
+			.wait_for(|outcome| outcome.is_some())
+			.await
+			.expect("a successful bind must be reported");
+		match reported.as_ref() {
+			Some(Ok(addr)) => {
+				assert_ne!(addr.port(), 0, "the OS-assigned port must be reported, got {addr}");
+				assert!(addr.ip().is_loopback(), "unexpected bind address {addr}");
+			}
+			other => panic!("expected the bound address, got {other:?}"),
+		}
+
+		cancel.cancel();
+		task.await.unwrap().unwrap();
 	}
 }

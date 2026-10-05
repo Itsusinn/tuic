@@ -69,7 +69,7 @@ pub async fn run(cfg: Config) -> eyre::Result<ServerGuard> {
 pub async fn run_with_cancel(cfg: Config, cancel: CancellationToken) -> eyre::Result<ServerGuard> {
 	let restful_enabled = cfg.restful.enabled;
 	let (addr_tx, mut addr_rx) = tokio::sync::watch::channel(None::<SocketAddr>);
-	let (restful_addr_tx, mut restful_addr_rx) = tokio::sync::watch::channel(None::<SocketAddr>);
+	let (restful_addr_tx, mut restful_addr_rx) = restful::restful_addr_channel();
 	let app = App::new()
 		.add_plugin(
 			TuicServerPlugin::new(cfg)
@@ -106,12 +106,18 @@ pub async fn run_with_cancel(cfg: Config, cancel: CancellationToken) -> eyre::Re
 		},
 	};
 
-	// If the RESTful API is enabled, also wait for its bound address (the
-	// RESTful task is spawned during plugin build, so it may already be set).
+	// If the RESTful API is enabled, wait for it to report its socket. The
+	// task publishes the bind failure instead of exiting quietly, so a
+	// management API that cannot listen fails the startup rather than leaving
+	// the operator with an unprotected or missing control plane.
 	let restful_addr = if restful_enabled {
 		match restful_addr_rx.wait_for(|a| a.is_some()).await {
-			Ok(r) => Some(r.expect("wait_for predicate guarantees Some")),
-			Err(_) => None,
+			Ok(borrowed) => match borrowed.as_ref() {
+				Some(Ok(addr)) => Some(*addr),
+				Some(Err(reason)) => return Err(eyre::eyre!("{reason}")),
+				None => return Err(eyre::eyre!("server exited before reporting its RESTful address")),
+			},
+			Err(_) => return Err(eyre::eyre!("server exited before reporting its RESTful address")),
 		}
 	} else {
 		None
