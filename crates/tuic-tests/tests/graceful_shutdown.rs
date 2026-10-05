@@ -320,7 +320,9 @@ async fn start_tcp_echo_server() -> (tokio::task::JoinHandle<()>, SocketAddr) {
 /// When a TUIC client has active, long-lived TCP traffic flowing through the
 /// tunnel, cancelling the server's root token must still drain all connection
 /// handlers and the accept loop within a bounded time — the traffic must not
-/// keep the server alive indefinitely.
+/// keep the server alive indefinitely. The client-side tunnel task this test
+/// drives must drain with it: the test awaits its handle after the server has
+/// stopped rather than leaving it detached.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn drains_while_active_traffic_flows() {
 	install_crypto_provider();
@@ -345,7 +347,7 @@ async fn drains_while_active_traffic_flows() {
 	let target = TargetAddr::IPv4(Ipv4Addr::LOCALHOST, echo_addr.port());
 
 	let c = client.clone();
-	let _tunnel_handle = tokio::spawn(async move {
+	let tunnel_handle = tokio::spawn(async move {
 		let _ = c.handle_tcp(test_ctx(&target), Box::new(remote)).await;
 	});
 
@@ -419,6 +421,17 @@ async fn drains_while_active_traffic_flows() {
 
 	// Clean up: the traffic loop should have exited by now (connection broke).
 	let _ = timeout(Duration::from_secs(2), traffic_handle).await;
+
+	// The tunnel task must be gone too. Its handle used to be dropped without
+	// ever being awaited, so a task that outlived the server would be torn down
+	// implicitly only when the test runtime shut down. The bounded await makes
+	// that an assertion about the shutdown this test exists to check, and fails
+	// instead of hanging if the tunnel keeps running.
+	match timeout(Duration::from_secs(2), tunnel_handle).await {
+		Ok(Ok(())) => {}
+		Ok(Err(e)) => panic!("the TCP tunnel task panicked instead of draining: {e}"),
+		Err(_) => panic!("the TCP tunnel task was still running 2s after the server drained active traffic"),
+	}
 }
 
 // ---------------------------------------------------------------------------
