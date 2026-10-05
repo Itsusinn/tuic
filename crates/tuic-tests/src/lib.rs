@@ -260,23 +260,39 @@ pub async fn run_tcp_echo_server(bind_addr: &str, test_name: &str) -> (tokio::ta
 			Ok(Ok((mut socket, addr))) => {
 				info!("[{} Echo Server] Accepted connection from: {}", test_name, addr);
 				let mut buf = vec![0u8; 1024];
-				match timeout(Duration::from_secs(3), socket.read(&mut buf)).await {
-					Ok(Ok(0)) => {
-						info!("[{} Echo Server] Connection closed by client (received 0 bytes)", test_name);
+				// Echo every chunk until the peer half-closes or the read
+				// deadline elapses. A single `read` would truncate any payload
+				// that does not fit in one buffer or arrives split across TCP
+				// segments, so the caller's `read_exact` would only ever see a
+				// prefix of what it sent.
+				let deadline = std::time::Instant::now() + Duration::from_secs(3);
+				loop {
+					let remaining = deadline.saturating_duration_since(std::time::Instant::now());
+					if remaining.is_zero() {
+						error!("[{} Echo Server] Timeout waiting for data", test_name);
+						break;
 					}
-					Ok(Ok(n)) => {
-						info!("[{} Echo Server] Received {} bytes: {:?}", test_name, n, &buf[..n]);
-						if let Err(e) = socket.write_all(&buf[..n]).await {
-							error!("[{} Echo Server] Failed to send response: {}", test_name, e);
-						} else {
+					match timeout(remaining, socket.read(&mut buf)).await {
+						Ok(Ok(0)) => {
+							info!("[{} Echo Server] Connection closed by client", test_name);
+							break;
+						}
+						Ok(Ok(n)) => {
+							info!("[{} Echo Server] Received {} bytes: {:?}", test_name, n, &buf[..n]);
+							if let Err(e) = socket.write_all(&buf[..n]).await {
+								error!("[{} Echo Server] Failed to send response: {}", test_name, e);
+								break;
+							}
 							info!("[{} Echo Server] Echoed {} bytes back", test_name, n);
 						}
-					}
-					Ok(Err(e)) => {
-						error!("[{} Echo Server] Failed to read: {}", test_name, e);
-					}
-					Err(_) => {
-						error!("[{} Echo Server] Timeout waiting for data", test_name);
+						Ok(Err(e)) => {
+							error!("[{} Echo Server] Failed to read: {}", test_name, e);
+							break;
+						}
+						Err(_) => {
+							error!("[{} Echo Server] Timeout waiting for data", test_name);
+							break;
+						}
 					}
 				}
 			}
@@ -912,4 +928,46 @@ pub async fn udp_fragmentation_case(backend: Backend) {
 
 	client.shutdown().await;
 	server.shutdown().await;
+}
+
+#[cfg(test)]
+mod tests {
+	use std::time::Duration;
+
+	use tokio::{
+		io::{AsyncReadExt, AsyncWriteExt},
+		time::timeout,
+	};
+
+	use super::run_tcp_echo_server;
+
+	/// The echo helper must hand back every byte it received, even when the
+	/// payload is bigger than one receive buffer and arrives in several TCP
+	/// segments. It used to issue exactly one 1024-byte `read` followed by one
+	/// echo, so the peer saw a truncated reply and then EOF.
+	#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+	async fn tcp_echo_server_returns_a_payload_larger_than_one_read() {
+		let (echo_task, echo_addr) = run_tcp_echo_server("127.0.0.1:0", "split-echo").await;
+
+		// 3000 bytes is roughly three times the helper's receive buffer; each
+		// 1500-byte write is itself split by the send/receive boundary so a
+		// single read can never observe the whole payload.
+		let payload: Vec<u8> = (0..3000).map(|i| (i % 251) as u8).collect();
+		let mut stream = tokio::net::TcpStream::connect(echo_addr).await.unwrap();
+		for chunk in payload.chunks(1500) {
+			stream.write_all(chunk).await.unwrap();
+			tokio::time::sleep(Duration::from_millis(50)).await;
+		}
+		// Half-close so the echo server observes EOF instead of waiting for its
+		// read deadline to expire.
+		stream.shutdown().await.unwrap();
+
+		let mut echoed = Vec::new();
+		let read = timeout(Duration::from_secs(5), stream.read_to_end(&mut echoed)).await;
+		echo_task.abort();
+
+		read.expect("the echo must complete before the deadline")
+			.expect("reading the echo must succeed");
+		assert_eq!(echoed, payload, "the echo server must return every byte it received");
+	}
 }
