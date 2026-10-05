@@ -230,6 +230,20 @@ fn constant_time_eq(candidate: &[u8], secret: &[u8]) -> bool {
 	std::hint::black_box(diff) == 0
 }
 
+/// Whether a listener on `addr` with `secret` would answer management requests
+/// from the network without asking for credentials.
+///
+/// An empty secret deliberately disables authentication on every endpoint (see
+/// the documented default of `restful.secret`). That is only safe while the
+/// socket stays on this host, so a wildcard or routable local address turns
+/// `/kick` and `/reset_traffic` into unauthenticated remote controls. The
+/// check uses the **bound** address and treats anything that is not a loopback
+/// address as exposed; an IPv4-mapped loopback address is conservatively
+/// reported too, which is fail-loud rather than fail-open.
+fn unauthenticated_and_exposed(addr: SocketAddr, secret: &str) -> bool {
+	secret.is_empty() && !addr.ip().is_loopback()
+}
+
 fn is_authorized(headers: &HeaderMap, secret: &str) -> bool {
 	if secret.is_empty() {
 		return true;
@@ -400,7 +414,7 @@ pub async fn serve(
 		.route("/detailed_online", get(detailed_online_handler))
 		.route("/traffic", get(traffic_handler))
 		.route("/reset_traffic", post(reset_traffic_handler))
-		.with_state(state);
+		.with_state(Arc::clone(&state));
 
 	let listener = tokio::select! {
 		_ = cancel.cancelled() => {
@@ -421,8 +435,16 @@ pub async fn serve(
 		}
 	};
 
+	let bound = listener.local_addr()?;
 	if let Some(tx) = bound_addr.as_ref() {
-		let _ = tx.send_replace(Some(Ok(listener.local_addr()?)));
+		let _ = tx.send_replace(Some(Ok(bound)));
+	}
+
+	if unauthenticated_and_exposed(bound, &state.secret) {
+		warn!(
+			"RESTful API is listening on {bound} with an empty secret: /kick and /reset_traffic accept unauthenticated \
+			 requests from the network; set restful.secret or bind restful.addr to a loopback address"
+		);
 	}
 
 	warn!("RESTful API server started, listening on {addr}");
@@ -436,7 +458,7 @@ pub async fn serve(
 
 #[cfg(test)]
 mod tests {
-	use std::{net::SocketAddr, sync::Mutex};
+	use std::{fmt, net::SocketAddr, sync::Mutex};
 
 	use axum::{
 		body::Body,
@@ -705,6 +727,34 @@ mod tests {
 		assert!(!constant_time_eq(b"secret", b"secret-longer"));
 		assert!(!constant_time_eq(b"secret-longer", b"secret"));
 		assert!(!constant_time_eq(b"", b"s"));
+	}
+
+	#[test]
+	fn test_empty_secret_is_only_tolerated_on_loopback() {
+		let loopback = ["127.0.0.1:13471".parse().unwrap(), "[::1]:13471".parse().unwrap()];
+		let exposed: [SocketAddr; 3] = [
+			"0.0.0.0:13471".parse().unwrap(),
+			"[::]:13471".parse().unwrap(),
+			"192.0.2.10:13471".parse().unwrap(),
+		];
+
+		for addr in loopback {
+			assert!(
+				!unauthenticated_and_exposed(addr, ""),
+				"loopback listener {addr} with an empty secret must not be reported"
+			);
+			assert!(!unauthenticated_and_exposed(addr, "s3cret"));
+		}
+		for addr in exposed {
+			assert!(
+				unauthenticated_and_exposed(addr, ""),
+				"listener {addr} reachable from the network with an empty secret must be reported"
+			);
+			assert!(
+				!unauthenticated_and_exposed(addr, "s3cret"),
+				"a configured secret must silence the report for {addr}"
+			);
+		}
 	}
 
 	#[tokio::test]
@@ -1061,5 +1111,104 @@ mod tests {
 
 		cancel.cancel();
 		task.await.unwrap().unwrap();
+	}
+
+	// Exposure reporting (empty secret on a non-loopback bind)
+
+	/// Minimal `tracing` subscriber that keeps the message of every warning
+	/// event, so a test can assert what `serve` told the operator without
+	/// adding a dev-dependency.
+	struct WarnCapture {
+		warnings: Arc<Mutex<Vec<String>>>,
+	}
+
+	/// Records the `message` field of an event.
+	#[derive(Default)]
+	struct MessageField(Option<String>);
+
+	impl tracing::field::Visit for MessageField {
+		fn record_str(&mut self, field: &tracing::field::Field, value: &str) {
+			if field.name() == "message" {
+				self.0 = Some(value.to_string());
+			}
+		}
+
+		fn record_debug(&mut self, field: &tracing::field::Field, value: &dyn fmt::Debug) {
+			if field.name() == "message" {
+				self.0 = Some(format!("{value:?}"));
+			}
+		}
+	}
+
+	impl tracing::Subscriber for WarnCapture {
+		fn enabled(&self, metadata: &tracing::Metadata<'_>) -> bool {
+			*metadata.level() == tracing::Level::WARN
+		}
+
+		fn new_span(&self, _span: &tracing::span::Attributes<'_>) -> tracing::Id {
+			tracing::Id::from_u64(1)
+		}
+
+		fn record(&self, _span: &tracing::Id, _values: &tracing::span::Record<'_>) {}
+
+		fn record_follows_from(&self, _span: &tracing::Id, _follows: &tracing::Id) {}
+
+		fn event(&self, event: &tracing::Event<'_>) {
+			let mut field = MessageField::default();
+			event.record(&mut field);
+			if let (Some(message), Ok(mut warnings)) = (field.0, self.warnings.lock()) {
+				warnings.push(message);
+			}
+		}
+
+		fn enter(&self, _span: &tracing::Id) {}
+
+		fn exit(&self, _span: &tracing::Id) {}
+	}
+
+	/// Run `serve` on `addr` with an empty secret while capturing warnings, and
+	/// return everything it logged. The task is cancelled and awaited before
+	/// the value is read, so every warning it produced is in the result.
+	async fn serve_with_captured_warnings(addr: SocketAddr) -> Vec<String> {
+		let warnings = Arc::new(Mutex::new(Vec::new()));
+		let guard = tracing::subscriber::set_default(WarnCapture {
+			warnings: Arc::clone(&warnings),
+		});
+
+		let state = make_state(Arc::new(NoopConnections), "", HashMap::new());
+		let (tx, mut rx) = restful_addr_channel();
+		let cancel = CancellationToken::new();
+		let task = tokio::spawn(serve(state, addr, cancel.clone(), Some(tx)));
+		rx.wait_for(|outcome| outcome.is_some())
+			.await
+			.expect("serve must report its listen socket");
+		cancel.cancel();
+		task.await.unwrap().unwrap();
+
+		drop(guard);
+		warnings.lock().map(|w| w.clone()).unwrap_or_default()
+	}
+
+	#[tokio::test]
+	async fn test_serve_reports_an_unauthenticated_listener_reachable_from_the_network() {
+		// The documented default — a loopback bind with no secret — stays
+		// quiet.
+		let loopback = serve_with_captured_warnings("127.0.0.1:0".parse().unwrap()).await;
+		assert!(
+			!loopback.iter().any(|warning| warning.contains("empty secret")),
+			"a loopback listener must not be reported as exposed: {loopback:?}"
+		);
+
+		// Binding every interface with no secret is the combination an operator
+		// has to hear about. The socket is bound but never contacted.
+		let wildcard = serve_with_captured_warnings("0.0.0.0:0".parse().unwrap()).await;
+		let report = wildcard
+			.iter()
+			.find(|warning| warning.contains("empty secret"))
+			.unwrap_or_else(|| panic!("a wildcard listener with an empty secret must be reported: {wildcard:?}"));
+		assert!(
+			report.contains("0.0.0.0") && report.contains("restful.secret"),
+			"the report must name the bound address and the fix: {report}"
+		);
 	}
 }
