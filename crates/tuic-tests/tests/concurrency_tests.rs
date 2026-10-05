@@ -10,10 +10,20 @@ use fast_socks5::client::{Config, Socks5Stream};
 use tokio::{
 	io::{AsyncReadExt, AsyncWriteExt},
 	net::TcpListener,
+	time::timeout,
 };
 use tracing::info;
 use tracing_test::traced_test;
 use tuic_tests::start_quinn_pair;
+
+/// Upper bound for a single SOCKS5 connect attempt: the TCP handshake plus the
+/// proxy's own connect to the echo server address.
+const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
+/// Upper bound for one request/echo round trip once the stream is established.
+const ECHO_TIMEOUT: Duration = Duration::from_secs(10);
+/// Upper bound for collecting the spawned connection tasks, so a wedged task
+/// cannot hang the whole suite.
+const JOIN_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// Start a multi-connection TCP echo server that handles `count` concurrent
 /// connections, each in its own spawned task.
@@ -64,24 +74,43 @@ async fn test_concurrent_5_tcp_connections() -> eyre::Result<()> {
 		let target = echo_addr;
 		handles.push(tokio::spawn(async move {
 			let label = format!("concur_{i}");
-			match Socks5Stream::connect(
-				socks.parse::<SocketAddr>().unwrap(),
-				target.ip().to_string(),
-				target.port(),
-				Config::default(),
+			let connected = timeout(
+				CONNECT_TIMEOUT,
+				Socks5Stream::connect(
+					socks.parse::<SocketAddr>().unwrap(),
+					target.ip().to_string(),
+					target.port(),
+					Config::default(),
+				),
 			)
-			.await
-			{
-				Ok(mut stream) => {
-					let data = format!("hello {i}").into_bytes();
-					if stream.write_all(&data).await.is_err() {
-						return false;
-					}
-					let mut buf = vec![0u8; data.len()];
-					stream.read_exact(&mut buf).await.is_ok() && buf == data
-				}
-				Err(e) => {
+			.await;
+			let mut stream = match connected {
+				Ok(Ok(stream)) => stream,
+				Ok(Err(e)) => {
 					info!("[{label}] SOCKS5 connect failed: {e}");
+					return false;
+				}
+				Err(_) => {
+					info!("[{label}] SOCKS5 connect timed out after {CONNECT_TIMEOUT:?}");
+					return false;
+				}
+			};
+
+			let data = format!("hello {i}").into_bytes();
+			let exchange = async {
+				stream.write_all(&data).await.ok()?;
+				let mut buf = vec![0u8; data.len()];
+				stream.read_exact(&mut buf).await.ok()?;
+				Some(buf == data)
+			};
+			match timeout(ECHO_TIMEOUT, exchange).await {
+				Ok(Some(echoed)) => echoed,
+				Ok(None) => {
+					info!("[{label}] the echo exchange failed before it completed");
+					false
+				}
+				Err(_) => {
+					info!("[{label}] the echo exchange timed out after {ECHO_TIMEOUT:?}");
 					false
 				}
 			}
@@ -89,9 +118,15 @@ async fn test_concurrent_5_tcp_connections() -> eyre::Result<()> {
 	}
 
 	let mut ok = 0;
-	for h in handles {
-		if h.await.unwrap_or(false) {
-			ok += 1;
+	for mut h in handles {
+		match timeout(JOIN_TIMEOUT, &mut h).await {
+			Ok(Ok(true)) => ok += 1,
+			Ok(Ok(false)) => {}
+			Ok(Err(e)) => info!("[concur] connection task failed: {e}"),
+			Err(_) => {
+				info!("[concur] connection task did not finish within {JOIN_TIMEOUT:?}");
+				h.abort();
+			}
 		}
 	}
 	echo_task.abort();
