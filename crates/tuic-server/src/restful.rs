@@ -205,6 +205,31 @@ impl KickConnections for NoopConnections {
 
 // Auth helper
 
+/// Compare a caller-supplied token against the configured secret without
+/// revealing, through execution time, where the two first differ.
+///
+/// `==` on byte strings is free to stop at the first mismatching byte, so the
+/// response latency of an unauthenticated request would depend on the length of
+/// the shared prefix between the guess and the secret — enough to recover the
+/// secret byte by byte. This loop instead folds every byte into one accumulator
+/// and inspects it only at the end.
+///
+/// Lengths are compared up front and are **not** hidden: the token is
+/// attacker-supplied, so its length is the attacker's own input, and this
+/// matches the slice semantics of `subtle`'s `ConstantTimeEq`. The result goes
+/// through `black_box` so the optimizer cannot rewrite the loop back into an
+/// early-exiting `memcmp`.
+fn constant_time_eq(candidate: &[u8], secret: &[u8]) -> bool {
+	if candidate.len() != secret.len() {
+		return false;
+	}
+	let mut diff = 0u8;
+	for (candidate_byte, secret_byte) in candidate.iter().zip(secret.iter()) {
+		diff |= candidate_byte ^ secret_byte;
+	}
+	std::hint::black_box(diff) == 0
+}
+
 fn is_authorized(headers: &HeaderMap, secret: &str) -> bool {
 	if secret.is_empty() {
 		return true;
@@ -213,7 +238,7 @@ fn is_authorized(headers: &HeaderMap, secret: &str) -> bool {
 		return false;
 	};
 	if let Some(token) = auth.strip_prefix("Bearer ") {
-		token == secret
+		constant_time_eq(token.as_bytes(), secret.as_bytes())
 	} else {
 		false
 	}
@@ -653,6 +678,33 @@ mod tests {
 		let mut headers = HeaderMap::new();
 		headers.insert("authorization", "Bearer ".parse().unwrap());
 		assert!(!is_authorized(&headers, "my-secret-token"));
+	}
+
+	#[test]
+	fn test_auth_rejects_equal_length_near_misses() {
+		// Same length as the secret, differing only in the first / last byte:
+		// the two cases a prefix-timing attack steers towards. Both must be
+		// rejected, and the rejection must not come from the prefix check.
+		for guess in ["Bearer Xy-secret-token", "Bearer my-secret-tokeX"] {
+			let mut headers = HeaderMap::new();
+			headers.insert("authorization", guess.parse().unwrap());
+			assert_eq!(guess.len() - "Bearer ".len(), "my-secret-token".len());
+			assert!(!is_authorized(&headers, "my-secret-token"), "accepted {guess}");
+		}
+		assert!(constant_time_eq(b"my-secret-token", b"my-secret-token"));
+	}
+
+	#[test]
+	fn test_constant_time_eq_accepts_only_identical_byte_strings() {
+		assert!(constant_time_eq(b"", b""));
+		assert!(constant_time_eq(b"\x00\xff", b"\x00\xff"));
+		// Equal length, single differing byte at either end.
+		assert!(!constant_time_eq(b"secret", b"xecret"));
+		assert!(!constant_time_eq(b"secret", b"secreu"));
+		// One is a prefix of the other.
+		assert!(!constant_time_eq(b"secret", b"secret-longer"));
+		assert!(!constant_time_eq(b"secret-longer", b"secret"));
+		assert!(!constant_time_eq(b"", b"s"));
 	}
 
 	#[tokio::test]
