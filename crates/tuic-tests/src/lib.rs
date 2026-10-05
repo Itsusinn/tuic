@@ -1,4 +1,10 @@
-use std::{collections::HashMap, net::SocketAddr, path::PathBuf, sync::Arc, time::Duration};
+use std::{
+	collections::HashMap,
+	net::SocketAddr,
+	path::{Path, PathBuf},
+	sync::Arc,
+	time::Duration,
+};
 
 use tokio::time::timeout;
 use tracing::{error, info};
@@ -163,6 +169,72 @@ impl Backend {
 	}
 }
 
+/// A per-test server data directory that creates itself and removes itself when
+/// dropped.
+///
+/// Every integration case writes a freshly minted self-signed certificate into
+/// the server's `data_dir`, so the directory has to be unique per case. The
+/// same property means it must also be cleaned up: without an owner that
+/// deletes it, every run leaves one directory behind per case, forever.
+///
+/// The guard owns both ends of the lifecycle. `tuic_server::run` takes a
+/// `Config` and never calls `parse_config`, so the only thing that would
+/// otherwise create the directory is the server itself, and nothing at all
+/// removes it. Creating it here also makes the leak checkable by looking at the
+/// filesystem instead of trusting an implementation detail.
+///
+/// Removal happens on `Drop`, which every exit path reaches — including the
+/// panics used as assertion failures, because the tests are compiled with
+/// unwinding. A caller that wants the directory gone before the guard's scope
+/// ends can call [`TempDataDir::cleanup`]. Removal is best-effort: a failure is
+/// logged rather than raised, since panicking from `Drop` during an unwinding
+/// test would abort the whole binary and hide the original failure.
+pub struct TempDataDir {
+	path: PathBuf,
+}
+
+impl TempDataDir {
+	/// Create a unique directory under the system temp dir, named
+	/// `<prefix>-<uuid>`, and return a guard that owns it.
+	pub fn new(prefix: &str) -> Self {
+		Self::with_base(&std::env::temp_dir(), prefix)
+	}
+
+	/// Create a unique directory under `base`, named `<prefix>-<uuid>`.
+	///
+	/// Tests that assert on the on-disk lifecycle pass their own empty `base`
+	/// directory, so the assertion cannot observe artifacts left by cases
+	/// running in parallel threads or by earlier runs.
+	pub fn with_base(base: &Path, prefix: &str) -> Self {
+		let path = base.join(format!("{prefix}-{}", Uuid::new_v4()));
+		if let Err(e) = std::fs::create_dir_all(&path) {
+			panic!("failed to create test data dir {}: {e}", path.display());
+		}
+		Self { path }
+	}
+
+	/// The directory path, for handing to a server config.
+	pub fn path(&self) -> &Path {
+		&self.path
+	}
+
+	/// Remove the directory now. Removing an already-removed or never-created
+	/// directory is not an error.
+	pub fn cleanup(&self) {
+		if let Err(e) = std::fs::remove_dir_all(&self.path) {
+			if e.kind() != std::io::ErrorKind::NotFound {
+				error!("failed to remove test data dir {}: {e}", self.path.display());
+			}
+		}
+	}
+}
+
+impl Drop for TempDataDir {
+	fn drop(&mut self) {
+		self.cleanup();
+	}
+}
+
 /// A running `tuic-server` + `tuic-client` pair for integration tests.
 ///
 /// Both processes bind to port `0` — the OS assigns a free port atomically, so
@@ -172,6 +244,9 @@ impl Backend {
 pub struct TestPair {
 	server: tuic_server::ServerGuard,
 	client: tuic_client::ClientGuard,
+	/// Declared last so it outlives both guards and removes the directory only
+	/// after the two processes driving it have been torn down.
+	temp_data_dir: TempDataDir,
 }
 
 impl TestPair {
@@ -188,14 +263,16 @@ impl TestPair {
 		let uuid = Uuid::new_v4();
 		let password = "test_password";
 		// Unique per-test data dir: the server binds to `:0`, so its actual
-		// port isn't known until startup returns.
-		let data_dir = std::env::temp_dir().join(format!("wind-tuic-test-{}", Uuid::new_v4()));
+		// port isn't known until startup returns. The guard also removes the
+		// directory, so it must be declared before the guards whose processes
+		// still need the certificate files.
+		let data_dir = TempDataDir::new("wind-tuic-test");
 
 		let server_addr: SocketAddr = "127.0.0.1:0".parse().unwrap();
 		let label = format!("{}+{}", server_backend.label(), client_backend.label());
 		let scfg = match server_backend {
-			Backend::Quinn => quinn_server_config(server_addr, data_dir, uuid, password, zero_rtt),
-			Backend::Quiche => quiche_server_config(server_addr, data_dir, uuid, password, zero_rtt),
+			Backend::Quinn => quinn_server_config(server_addr, data_dir.path().to_path_buf(), uuid, password, zero_rtt),
+			Backend::Quiche => quiche_server_config(server_addr, data_dir.path().to_path_buf(), uuid, password, zero_rtt),
 		};
 
 		let server = tuic_server::run(scfg)
@@ -207,12 +284,21 @@ impl TestPair {
 			.await
 			.unwrap_or_else(|e| panic!("[{label} test] tuic-client failed to start: {e:#}"));
 
-		TestPair { server, client }
+		TestPair {
+			server,
+			client,
+			temp_data_dir: data_dir,
+		}
 	}
 
 	/// The server's actually-bound QUIC address.
 	pub fn server_addr(&self) -> SocketAddr {
 		self.server.local_addr
+	}
+
+	/// The per-test server data directory, kept alive for the pair's lifetime.
+	pub fn data_dir(&self) -> &Path {
+		self.temp_data_dir.path()
 	}
 
 	/// The client's SOCKS5 address as `"host:port"` — the format the relay
@@ -825,12 +911,14 @@ pub async fn reconnect_case(backend: Backend) {
 
 	let uuid = Uuid::new_v4();
 	let password = "test_password";
-	let data_dir = std::env::temp_dir().join(format!("wind-tuic-reconnect-{}", Uuid::new_v4()));
+	// Declared before the server guard so it drops after it: the guard removes
+	// the directory only once the server holding the certificate has stopped.
+	let data_dir = TempDataDir::new("wind-tuic-reconnect");
 
 	let server_addr: SocketAddr = "127.0.0.1:0".parse().unwrap();
 	let mut scfg = match backend {
-		Backend::Quinn => quinn_server_config(server_addr, data_dir, uuid, password, false),
-		Backend::Quiche => quiche_server_config(server_addr, data_dir, uuid, password, false),
+		Backend::Quinn => quinn_server_config(server_addr, data_dir.path().to_path_buf(), uuid, password, false),
+		Backend::Quiche => quiche_server_config(server_addr, data_dir.path().to_path_buf(), uuid, password, false),
 	};
 	scfg.restful.enabled = true;
 	scfg.restful.addr = "127.0.0.1:0".parse().unwrap();
@@ -892,12 +980,14 @@ pub async fn udp_fragmentation_case(backend: Backend) {
 
 	let uuid = Uuid::new_v4();
 	let password = "test_password";
-	let data_dir = std::env::temp_dir().join(format!("wind-tuic-udpfrag-{}", Uuid::new_v4()));
+	// Declared before the server guard so it drops after it: the guard removes
+	// the directory only once the server holding the certificate has stopped.
+	let data_dir = TempDataDir::new("wind-tuic-udpfrag");
 
 	let server_addr: SocketAddr = "127.0.0.1:0".parse().unwrap();
 	let scfg = match backend {
-		Backend::Quinn => quinn_server_config(server_addr, data_dir, uuid, password, false),
-		Backend::Quiche => quiche_server_config(server_addr, data_dir, uuid, password, false),
+		Backend::Quinn => quinn_server_config(server_addr, data_dir.path().to_path_buf(), uuid, password, false),
+		Backend::Quiche => quiche_server_config(server_addr, data_dir.path().to_path_buf(), uuid, password, false),
 	};
 	let server = tuic_server::run(scfg)
 		.await
@@ -932,14 +1022,25 @@ pub async fn udp_fragmentation_case(backend: Backend) {
 
 #[cfg(test)]
 mod tests {
-	use std::time::Duration;
+	use std::{path::Path, time::Duration};
 
 	use tokio::{
 		io::{AsyncReadExt, AsyncWriteExt},
 		time::timeout,
 	};
 
-	use super::run_tcp_echo_server;
+	use super::{Backend, TempDataDir, TestPair, run_tcp_echo_server};
+
+	/// Count the entries of a directory. Used to prove that a data directory
+	/// comes and goes, so the caller passes a directory it owns exclusively.
+	fn count_entries(dir: &Path) -> usize {
+		std::fs::read_dir(dir).expect("the directory must be readable").count()
+	}
+
+	/// Write a file into `dir` so it cannot be mistaken for an empty directory.
+	fn seed(dir: &Path) {
+		std::fs::write(dir.join("seed.txt"), b"seed").expect("writing into the data dir must succeed");
+	}
 
 	/// The echo helper must hand back every byte it received, even when the
 	/// payload is bigger than one receive buffer and arrives in several TCP
@@ -969,5 +1070,60 @@ mod tests {
 		read.expect("the echo must complete before the deadline")
 			.expect("reading the echo must succeed");
 		assert_eq!(echoed, payload, "the echo server must return every byte it received");
+	}
+
+	/// The per-case server data directory has to be removed again, in both the
+	/// normal `Drop` path and after an explicit `cleanup`. It used to be a bare
+	/// `PathBuf` under the system temp dir with nothing owning its removal, so
+	/// every case leaked one directory (with a generated self-signed
+	/// certificate in it) on every run.
+	///
+	/// Each half of the test runs under its own empty parent directory, so the
+	/// assertion cannot observe a data directory created by another case in a
+	/// parallel thread or left behind by an earlier run.
+	#[test]
+	fn a_temp_data_dir_is_deleted_when_its_guard_is_dropped() {
+		let base = TempDataDir::new("wind-tuic-test-guard-base");
+		let base_path = base.path().to_path_buf();
+
+		{
+			let guard = TempDataDir::with_base(&base_path, "case");
+			let path = guard.path().to_path_buf();
+			seed(&path);
+			assert!(path.is_dir(), "{} must exist while the guard is alive", path.display());
+			assert_eq!(count_entries(&base_path), 1, "the guard must own exactly one directory");
+			drop(guard);
+			assert!(!path.exists(), "{} must be gone once the guard is dropped", path.display());
+			assert_eq!(count_entries(&base_path), 0, "dropping the guard must remove its directory");
+		}
+
+		{
+			let guard = TempDataDir::with_base(&base_path, "case");
+			let path = guard.path().to_path_buf();
+			seed(&path);
+			guard.cleanup();
+			assert!(
+				!path.exists(),
+				"{} must be gone right after an explicit cleanup",
+				path.display()
+			);
+			drop(guard);
+			assert!(!path.exists(), "{} must stay gone after cleanup", path.display());
+			assert_eq!(count_entries(&base_path), 0, "an explicit cleanup must remove it");
+		}
+	}
+
+	/// End-to-end shape of the same bug: a whole pair's data directory exists
+	/// while the pair runs and is gone once the pair has been shut down.
+	/// `shutdown` consumes the pair, so its remaining field is released there
+	/// rather than at the end of a scope.
+	#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+	async fn a_started_pair_leaves_no_data_dir_behind() {
+		let pair = TestPair::start(Backend::Quinn, false).await;
+		let data_dir = pair.data_dir().to_path_buf();
+		seed(&data_dir);
+		assert!(data_dir.is_dir(), "{} must exist while the pair runs", data_dir.display());
+		pair.shutdown().await;
+		assert!(!data_dir.exists(), "{} must be gone after shutdown", data_dir.display());
 	}
 }
