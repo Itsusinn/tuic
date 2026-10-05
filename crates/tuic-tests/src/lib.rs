@@ -500,8 +500,13 @@ pub async fn test_tcp_through_socks5(
 			}
 
 			info!("[{}] Data sent successfully", test_name);
-			tokio::time::sleep(Duration::from_millis(500)).await;
 
+			// Await the echo under the deadline below instead of sleeping
+			// first: `read_exact` already waits for the payload to
+			// arrive (or fails on timeout), so a fixed pre-read
+			// sleep only added that delay to every successful case
+			// without making a slow response any more likely to
+			// arrive in time.
 			let mut buffer = vec![0u8; test_data.len()];
 			match timeout(Duration::from_secs(3), stream.read_exact(&mut buffer)).await {
 				Ok(Ok(_)) => {
