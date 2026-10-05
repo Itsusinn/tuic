@@ -5,6 +5,7 @@
 
 use std::{net::SocketAddr, sync::Arc};
 
+use eyre::WrapErr;
 use tokio::sync::watch;
 use wind_base::LazyOutbound;
 use wind_core::{App, AppContext, InboundHooks, Outbound, Plugin};
@@ -254,6 +255,8 @@ impl Plugin<ClientRouter> for TuicClientPlugin {
 		let ctx = app.context().clone();
 		let relay = self.cfg.relay;
 		let lazy = relay.lazy;
+		// Kept for the error context below: `relay` is moved into the factory.
+		let relay_server = format!("{}:{}", relay.server.0, relay.server.1);
 
 		let handler: Arc<dyn Outbound> = if lazy {
 			// Lazy mode: defer QUIC connection until first traffic.
@@ -262,10 +265,16 @@ impl Plugin<ClientRouter> for TuicClientPlugin {
 				async move { build_outbound(setup_ctx, relay).await },
 			)))
 		} else {
-			// Eager mode: establish the QUIC connection immediately.
-			build_outbound(ctx.clone(), relay)
-				.await
-				.expect("TUIC outbound setup failed in eager mode")
+			// Eager mode: establish the QUIC connection immediately, and report
+			// a failure as a startup error. `build` already returns a `Result`,
+			// so panicking here would abort this task instead of failing the
+			// caller with the reason the relay could not be reached.
+			build_outbound(ctx.clone(), relay).await.wrap_err_with(|| {
+				format!(
+					"TUIC outbound setup failed in eager mode (`relay.lazy = false`, server {})",
+					relay_server
+				)
+			})?
 		};
 
 		let app = app.add_outbound("default", handler);
@@ -378,6 +387,59 @@ mod tests {
 		assert!(
 			message.contains(&listen.to_string()),
 			"the failure must name the conflicting address {listen}, got: {message}"
+		);
+	}
+
+	/// A config in eager mode (`relay.lazy = false`) whose relay setup cannot
+	/// succeed, so the outbound build has to fail.
+	fn eager_config_that_cannot_be_set_up() -> crate::Config {
+		let mut cfg = crate::Config::default();
+		cfg.relay.lazy = false;
+		cfg.relay.server = ("127.0.0.1".to_string(), 4433);
+		// A `[tls] certificates` entry that does not exist: the failure happens
+		// while the QUIC endpoint is being prepared, i.e. inside the eager
+		// outbound build, and it is immediate rather than dependent on network
+		// timing. The relay address above is only named in the error context —
+		// it is never dialed, because the certificate is read first.
+		cfg.relay.certificates = vec![std::path::PathBuf::from("no-such-ca-certificate.pem")];
+		cfg.local.server = "127.0.0.1:0".parse().expect("parse the SOCKS5 listen address");
+		cfg
+	}
+
+	/// Eager mode must surface a failed outbound build as a startup error
+	/// carrying the reason. It used to `expect(...)` inside the plugin build,
+	/// which unwound the build instead of telling the caller why the relay
+	/// could not be set up.
+	#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+	async fn eager_relay_setup_failure_is_reported_as_a_startup_error() {
+		let result = tokio::time::timeout(
+			Duration::from_secs(30),
+			App::new().add_plugin(TuicClientPlugin::new(eager_config_that_cannot_be_set_up())),
+		)
+		.await
+		.expect("building the plugin must not hang while the eager relay setup fails");
+
+		let err = result
+			.err()
+			.expect("building the plugin must fail when the eager relay connection cannot be established");
+		// `Report`'s `Display` only renders the outermost context, so the
+		// assertions below walk the whole chain: the context must be added
+		// *without* swallowing the underlying reason.
+		let message = std::iter::once(err.to_string())
+			.chain(err.chain().skip(1).map(ToString::to_string))
+			.collect::<Vec<_>>()
+			.join(": ");
+		assert!(
+			message.contains("eager mode"),
+			"the failure must say that the eager connection could not be set up, got: {message}"
+		);
+		assert!(
+			message.contains("127.0.0.1:4433"),
+			"the failure must name the relay address, got: {message}"
+		);
+		assert!(
+			message.contains("no-such-ca-certificate.pem"),
+			"the failure must keep the underlying reason, got: {message}"
 		);
 	}
 }
