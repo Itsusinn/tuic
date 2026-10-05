@@ -24,6 +24,9 @@ const ECHO_TIMEOUT: Duration = Duration::from_secs(10);
 /// Upper bound for collecting the spawned connection tasks, so a wedged task
 /// cannot hang the whole suite.
 const JOIN_TIMEOUT: Duration = Duration::from_secs(30);
+/// Upper bound for one echoed connection: the peer may connect and then go
+/// silent, and the per-connection task must not stay alive forever.
+const ECHO_DEADLINE: Duration = Duration::from_secs(3);
 
 /// Start a multi-connection TCP echo server that handles `count` concurrent
 /// connections, each in its own spawned task.
@@ -41,9 +44,29 @@ async fn run_multi_echo(addr: &str, count: usize) -> (tokio::task::JoinHandle<()
 					info!("[multi-echo] connection {accepted}/{count} from {peer}");
 					tokio::spawn(async move {
 						let mut buf = vec![0u8; 65536];
-						if let Ok(n) = socket.read(&mut buf).await {
-							if n > 0 {
-								let _ = socket.write_all(&buf[..n]).await;
+						// Echo every chunk until the peer half-closes or the
+						// deadline elapses: one `read` + `write_all` truncates
+						// payloads that arrive split across TCP segments,
+						// because the socket closes right after that echo.
+						let deadline = std::time::Instant::now() + ECHO_DEADLINE;
+						loop {
+							let remaining = deadline.saturating_duration_since(std::time::Instant::now());
+							match timeout(remaining, socket.read(&mut buf)).await {
+								Ok(Ok(0)) => break,
+								Ok(Ok(n)) => {
+									if let Err(e) = socket.write_all(&buf[..n]).await {
+										info!("[multi-echo] failed to echo {n} bytes back: {e}");
+										break;
+									}
+								}
+								Ok(Err(e)) => {
+									info!("[multi-echo] read error: {e}");
+									break;
+								}
+								Err(_) => {
+									info!("[multi-echo] connection idle past the echo deadline");
+									break;
+								}
 							}
 						}
 					});
@@ -134,4 +157,34 @@ async fn test_concurrent_5_tcp_connections() -> eyre::Result<()> {
 
 	pair.shutdown().await;
 	Ok(())
+}
+
+/// The multi-echo helper must hand back every byte a peer sent, even when the
+/// payload arrives in more than one TCP segment. It used to issue a single
+/// `read` followed by a single echo and then drop the socket, so a peer that
+/// wrote twice only ever saw the first chunk come back.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn multi_echo_returns_a_payload_split_across_reads() {
+	let (echo_task, echo_addr) = run_multi_echo("127.0.0.1:0", 1).await;
+
+	// Two writes separated by more than a loopback round trip: the first
+	// `read` can never observe the second chunk, and the second write must not
+	// race a socket that the helper closes after echoing only the first one.
+	let payload: Vec<u8> = (0..3000).map(|i| (i % 251) as u8).collect();
+	let mut stream = tokio::net::TcpStream::connect(echo_addr).await.unwrap();
+	for chunk in payload.chunks(1500) {
+		stream.write_all(chunk).await.unwrap();
+		tokio::time::sleep(Duration::from_millis(50)).await;
+	}
+	// Half-close so the echo handler observes EOF instead of waiting for its
+	// own read deadline to expire.
+	stream.shutdown().await.unwrap();
+
+	let mut echoed = Vec::new();
+	let read = timeout(Duration::from_secs(5), stream.read_to_end(&mut echoed)).await;
+	echo_task.abort();
+
+	read.expect("the echo must complete before the deadline")
+		.expect("reading the echo must succeed");
+	assert_eq!(echoed, payload, "the multi-echo server must return every byte it received");
 }
