@@ -447,7 +447,10 @@ pub async fn serve(
 		);
 	}
 
-	warn!("RESTful API server started, listening on {addr}");
+	// Log the socket the OS actually gave us, not the configured one: with
+	// `restful.addr = "...:0"` the configured port is 0 and tells the operator
+	// nothing about where the management API listens.
+	warn!("RESTful API server started, listening on {bound}");
 	axum::serve(listener, app)
 		.with_graceful_shutdown(async move { cancel.cancelled().await })
 		.await
@@ -1167,9 +1170,10 @@ mod tests {
 	}
 
 	/// Run `serve` on `addr` with an empty secret while capturing warnings, and
-	/// return everything it logged. The task is cancelled and awaited before
-	/// the value is read, so every warning it produced is in the result.
-	async fn serve_with_captured_warnings(addr: SocketAddr) -> Vec<String> {
+	/// return everything it logged plus the address it actually bound. The task
+	/// is cancelled and awaited before the log is read, so every warning it
+	/// produced is in the result.
+	async fn serve_with_captured_warnings(addr: SocketAddr) -> (Vec<String>, SocketAddr) {
 		let warnings = Arc::new(Mutex::new(Vec::new()));
 		let guard = tracing::subscriber::set_default(WarnCapture {
 			warnings: Arc::clone(&warnings),
@@ -1179,21 +1183,27 @@ mod tests {
 		let (tx, mut rx) = restful_addr_channel();
 		let cancel = CancellationToken::new();
 		let task = tokio::spawn(serve(state, addr, cancel.clone(), Some(tx)));
-		rx.wait_for(|outcome| outcome.is_some())
+		let reported = rx
+			.wait_for(|outcome| outcome.is_some())
 			.await
 			.expect("serve must report its listen socket");
+		let bound = match reported.as_ref() {
+			Some(Ok(bound)) => *bound,
+			other => panic!("expected a successful bind, got {other:?}"),
+		};
 		cancel.cancel();
 		task.await.unwrap().unwrap();
 
 		drop(guard);
-		warnings.lock().map(|w| w.clone()).unwrap_or_default()
+		let warnings = warnings.lock().map(|w| w.clone()).unwrap_or_default();
+		(warnings, bound)
 	}
 
 	#[tokio::test]
 	async fn test_serve_reports_an_unauthenticated_listener_reachable_from_the_network() {
 		// The documented default — a loopback bind with no secret — stays
 		// quiet.
-		let loopback = serve_with_captured_warnings("127.0.0.1:0".parse().unwrap()).await;
+		let (loopback, _) = serve_with_captured_warnings("127.0.0.1:0".parse().unwrap()).await;
 		assert!(
 			!loopback.iter().any(|warning| warning.contains("empty secret")),
 			"a loopback listener must not be reported as exposed: {loopback:?}"
@@ -1201,7 +1211,7 @@ mod tests {
 
 		// Binding every interface with no secret is the combination an operator
 		// has to hear about. The socket is bound but never contacted.
-		let wildcard = serve_with_captured_warnings("0.0.0.0:0".parse().unwrap()).await;
+		let (wildcard, _) = serve_with_captured_warnings("0.0.0.0:0".parse().unwrap()).await;
 		let report = wildcard
 			.iter()
 			.find(|warning| warning.contains("empty secret"))
@@ -1209,6 +1219,24 @@ mod tests {
 		assert!(
 			report.contains("0.0.0.0") && report.contains("restful.secret"),
 			"the report must name the bound address and the fix: {report}"
+		);
+	}
+
+	#[tokio::test]
+	async fn test_startup_log_reports_the_actually_bound_address() {
+		// `restful.addr` may ask for port 0; the operator has to be told the
+		// port the OS picked, otherwise a working management API looks
+		// unreachable (the configured port is literally 0).
+		let (warnings, bound) = serve_with_captured_warnings("127.0.0.1:0".parse().unwrap()).await;
+		assert_ne!(bound.port(), 0, "the OS must assign a real port");
+
+		let started = warnings
+			.iter()
+			.find(|warning| warning.contains("RESTful API server started"))
+			.unwrap_or_else(|| panic!("serve must log that it started: {warnings:?}"));
+		assert!(
+			started.contains(&bound.to_string()),
+			"the startup log must name the bound address {bound}: {started}"
 		);
 	}
 }
