@@ -23,6 +23,7 @@ use std::{
 use tokio::{
 	io::{AsyncReadExt, AsyncWriteExt},
 	net::TcpListener,
+	sync::watch,
 	time::timeout,
 };
 use tuic_server::{Config, TuicServerPlugin, config::ExperimentalConfig};
@@ -46,21 +47,66 @@ fn test_ctx(target: &TargetAddr) -> FlowContext {
 	}
 }
 
-/// Obtain a free UDP port without holding the socket, so the server can bind
-/// it immediately afterwards.
-fn free_udp_addr() -> SocketAddr {
-	let s = std::net::UdpSocket::bind("127.0.0.1:0").expect("bind free port");
-	let a = s.local_addr().expect("local addr");
-	drop(s);
-	a
+/// Loopback address with an OS-assigned port: the server binds it and reports
+/// the real port back through [`start_server`].
+fn any_loopback_addr() -> SocketAddr {
+	SocketAddr::from((Ipv4Addr::LOCALHOST, 0))
+}
+
+/// Start a server on an OS-assigned loopback port and wait until the inbound
+/// reports the address it actually bound.
+///
+/// The address is taken from the server itself rather than from a probe socket
+/// that is bound and closed before the server starts: a probed port is not
+/// reserved, so another process (or a parallel test) can take it in the window
+/// between the probe and the server's own bind, and the server then fails to
+/// start for a reason unrelated to what the test is checking.
+async fn start_server(
+	cfg: Config,
+) -> (
+	Arc<wind_core::AppContext>,
+	tokio::task::JoinHandle<eyre::Result<()>>,
+	SocketAddr,
+) {
+	let (addr_tx, mut addr_rx) = watch::channel(None::<SocketAddr>);
+	let app = App::new()
+		.add_plugin(TuicServerPlugin::new(cfg).with_bound_addr(addr_tx))
+		.await
+		.expect("plugin build");
+
+	let ctx = app.context().clone();
+	let mut handle = tokio::spawn(async move { app.run().await });
+
+	// Either the inbound reports its socket, or the server gives up first —
+	// in which case the test must fail with that reason, not sit on a
+	// configured address that was never bound. The wait is bounded so a server
+	// that neither binds nor exits fails the test instead of hanging it.
+	let addr = timeout(Duration::from_secs(10), async {
+		tokio::select! {
+			reported = addr_rx.wait_for(|a| a.is_some()) => reported
+				.expect("the address channel closed before the server reported its bound address")
+				.expect("wait_for predicate guarantees a bound address"),
+			exited = &mut handle => match exited {
+				Ok(Ok(())) => panic!("server exited before reporting its bound address"),
+				Ok(Err(e)) => panic!("server failed before reporting its bound address: {e:#}"),
+				Err(e) => panic!("server task panicked: {e}"),
+			},
+		}
+	})
+	.await
+	.expect("the server neither reported its bound address nor exited within 10s");
+	assert_ne!(addr.port(), 0, "the server must report the OS-assigned port, got {addr}");
+	assert!(addr.ip().is_loopback(), "the test server must stay on loopback, got {addr}");
+
+	(ctx, handle, addr)
 }
 
 /// Minimal server config suitable for a cancel-only test — self-signed TLS,
 /// empty user list (no client can authenticate, but the inbound starts and
 /// enters its accept loop), and a direct default outbound.
-fn build_minimal_server_config(server_addr: SocketAddr) -> Config {
+fn build_minimal_server_config() -> Config {
 	Config {
-		server: server_addr,
+		server: any_loopback_addr(),
 		users: HashMap::new(),
 		tls: tuic_server::config::TlsConfig {
 			self_sign: true,
@@ -83,16 +129,7 @@ fn build_minimal_server_config(server_addr: SocketAddr) -> Config {
 async fn idle_server_exits_on_cancel() {
 	let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
 
-	let addr = free_udp_addr();
-	let cfg = build_minimal_server_config(addr);
-
-	let app = App::new().add_plugin(TuicServerPlugin::new(cfg)).await.expect("plugin build");
-
-	let ctx = app.context().clone();
-	let handle = tokio::spawn(async move { app.run().await });
-
-	// Give the server a moment to bind and start accepting.
-	tokio::time::sleep(Duration::from_millis(300)).await;
+	let (ctx, handle, _addr) = start_server(build_minimal_server_config()).await;
 
 	// Trigger graceful shutdown via the cancel token (no OS signal).
 	ctx.token.cancel();
@@ -114,8 +151,6 @@ async fn idle_server_exits_on_cancel() {
 async fn active_connection_drains_on_cancel() {
 	let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
 
-	let addr = free_udp_addr();
-
 	// Build a config *with* a known user so a client can authenticate.
 	let uuid = uuid::Uuid::new_v4();
 	let password = "test-password";
@@ -123,7 +158,7 @@ async fn active_connection_drains_on_cancel() {
 	users.insert(uuid, password.to_string());
 
 	let cfg = Config {
-		server: addr,
+		server: any_loopback_addr(),
 		users,
 		tls: tuic_server::config::TlsConfig {
 			self_sign: true,
@@ -135,13 +170,7 @@ async fn active_connection_drains_on_cancel() {
 		..Default::default()
 	};
 
-	let app = App::new().add_plugin(TuicServerPlugin::new(cfg)).await.expect("plugin build");
-
-	let ctx = app.context().clone();
-	let handle = tokio::spawn(async move { app.run().await });
-
-	// Let the server bind.
-	tokio::time::sleep(Duration::from_millis(300)).await;
+	let (ctx, handle, addr) = start_server(cfg).await;
 
 	// Connect a TUIC client to ensure the server spawns a per-connection
 	// handler tracked in ctx.tasks.
@@ -198,11 +227,11 @@ async fn active_connection_drains_on_cancel() {
 // ---------------------------------------------------------------------------
 
 /// Build a server config with a known user (for client authentication).
-fn build_server_config_with_user(addr: SocketAddr, uuid: uuid::Uuid, password: &str) -> Config {
+fn build_server_config_with_user(uuid: uuid::Uuid, password: &str) -> Config {
 	let mut users = HashMap::new();
 	users.insert(uuid, password.to_string());
 	Config {
-		server: addr,
+		server: any_loopback_addr(),
 		users,
 		tls: tuic_server::config::TlsConfig {
 			self_sign: true,
@@ -298,16 +327,11 @@ async fn drains_while_active_traffic_flows() {
 	let (_echo_task, echo_addr) = start_tcp_echo_server().await;
 
 	// 2. Build and start the TUIC server.
-	let server_addr = free_udp_addr();
 	let uuid = uuid::Uuid::new_v4();
 	let password = "test-pass";
-	let cfg = build_server_config_with_user(server_addr, uuid, password);
+	let cfg = build_server_config_with_user(uuid, password);
 
-	let app = App::new().add_plugin(TuicServerPlugin::new(cfg)).await.expect("plugin build");
-
-	let ctx = app.context().clone();
-	let app_handle = tokio::spawn(async move { app.run().await });
-	tokio::time::sleep(Duration::from_millis(300)).await;
+	let (ctx, app_handle, server_addr) = start_server(cfg).await;
 
 	// 3. Connect a TUIC client.
 	let client = connect_tuic_client(server_addr, uuid, password).await;
