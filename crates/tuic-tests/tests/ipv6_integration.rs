@@ -1,18 +1,11 @@
 //! IPv6 end-to-end integration test.
 
-#![allow(unused_imports)]
-
-use std::{
-	net::{IpAddr, Ipv4Addr, Ipv6Addr},
-	time::Duration,
-};
+use std::time::Duration;
 
 use tokio::time::timeout;
-use tracing::{error, info};
+use tracing::info;
 use tuic_server::config::ExperimentalConfig;
-use tuic_tests::{
-	run_socks5_server, run_tcp_echo_server, run_udp_echo_server, test_tcp_through_socks5, test_udp_through_socks5,
-};
+use tuic_tests::{run_tcp_echo_server, run_udp_echo_server, test_tcp_through_socks5, test_udp_through_socks5};
 use uuid::Uuid;
 
 /// Outer deadline for the UDP relay half.
@@ -243,3 +236,19 @@ fn the_udp_relay_deadline_outlives_the_helper_response_window() {
 
 // The module header is audited by the `port_audit` test in this directory,
 // which fails if this file ever documents a fixed loopback port again.
+
+/// A crate-level allowance for unused imports would let a removed call site
+/// leave a dead `use` behind with no diagnostic at all, which is how the
+/// imports in this file previously drifted out of date; the compiler only keeps
+/// reporting them while such an allowance is absent. The audit is textual
+/// because no build of this file can observe an attribute that would silence
+/// it.
+#[test]
+fn the_file_does_not_mute_unused_import_warnings() {
+	const SOURCE: &str = include_str!("ipv6_integration.rs");
+	const FORBIDDEN: &str = concat!("allow", "(unused_imports)");
+	assert!(
+		!SOURCE.contains(FORBIDDEN),
+		"ipv6_integration.rs must drop its dead imports instead of muting the warnings about them"
+	);
+}
