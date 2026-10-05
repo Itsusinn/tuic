@@ -16,7 +16,11 @@
 	not(any(target_os = "android", target_os = "freebsd", target_arch = "loongarch64"))
 ))]
 
-use std::{net::SocketAddr, sync::Arc, time::Duration};
+use std::{
+	net::SocketAddr,
+	sync::Arc,
+	time::{Duration, Instant},
+};
 
 use quinn::Endpoint;
 use rustls::{
@@ -24,10 +28,19 @@ use rustls::{
 	client::danger::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier},
 	pki_types::{CertificateDer, ServerName, UnixTime},
 };
+use tokio::time::timeout;
 use wind_core::{
 	AbstractInbound, Dispatcher, FlowContext, Outbound, RouteAction, Router, tcp::AbstractTcpStream, udp::UdpStream,
 };
 use wind_tuic::quiche::TuicheInboundBuilder;
+
+/// How long the listener may take to serve the rotated certificate. The swap
+/// itself is an in-process atomic store, so this only has to cover the time to
+/// observe a handshake — it is a failure budget, not an expected wait.
+const RELOAD_DEADLINE: Duration = Duration::from_secs(5);
+
+/// Pause between two observation attempts, so a failed probe cannot spin.
+const RETRY_INTERVAL: Duration = Duration::from_millis(50);
 
 // ---- a no-op outbound handler (TLS handshake is all we need) --------------
 
@@ -108,6 +121,18 @@ fn self_signed() -> (String, String) {
 	(c.cert.pem(), c.signing_key.serialize_pem())
 }
 
+/// The leaf certificate of a PEM bundle, in DER — the same encoding
+/// `peer_identity()` hands back, so a served certificate can be compared
+/// against the exact cert that was pushed into the store.
+fn leaf_der(cert_pem: &str) -> Vec<u8> {
+	rustls_pemfile::certs(&mut cert_pem.as_bytes())
+		.next()
+		.expect("certificate PEM must contain at least one certificate")
+		.expect("certificate PEM must parse")
+		.as_ref()
+		.to_vec()
+}
+
 /// Connect to `addr`, complete the handshake, and return the served leaf
 /// certificate (DER).
 async fn fetch_served_cert(endpoint: &Endpoint, addr: SocketAddr) -> eyre::Result<Vec<u8>> {
@@ -175,14 +200,47 @@ async fn quiche_certificate_hot_reload() -> eyre::Result<()> {
 
 	// 2) Rotate to a different certificate B and reconnect.
 	let (cert_b, key_b) = self_signed();
-	store.update(cert_b.as_bytes(), key_b.as_bytes())?;
-	// Small settle so the next handshake observes the swap.
-	tokio::time::sleep(Duration::from_millis(200)).await;
-	let served_b = fetch_served_cert(&endpoint, listen).await?;
-
+	let expected_b = leaf_der(&cert_b);
 	assert_ne!(
-		served_a, served_b,
-		"served certificate did not change after CertStore::update — hot reload failed"
+		served_a, expected_b,
+		"the two generated certificates must differ, otherwise this test proves nothing"
+	);
+	store.update(cert_b.as_bytes(), key_b.as_bytes())?;
+
+	// The swap is an in-process `ArcSwap::store`, so it is visible to the very
+	// next handshake. Poll instead of sleeping a fixed slice: a probe may fail
+	// transiently, and only the rotated leaf arriving within the budget proves
+	// the running listener picked the rotation up with no restart. A listener
+	// that keeps serving the old leaf exhausts the budget and fails.
+	let deadline = Instant::now() + RELOAD_DEADLINE;
+	let mut served_b = None;
+	while served_b.is_none() {
+		let remaining = deadline.saturating_duration_since(Instant::now());
+		if remaining.is_zero() {
+			break;
+		}
+		match timeout(remaining, fetch_served_cert(&endpoint, listen)).await {
+			Ok(Ok(leaf)) if leaf == expected_b => served_b = Some(leaf),
+			Ok(Ok(_)) => tokio::time::sleep(RETRY_INTERVAL).await,
+			Ok(Err(err)) => {
+				tracing::debug!("cert reload probe failed, retrying: {err}");
+				tokio::time::sleep(RETRY_INTERVAL).await;
+			}
+			Err(_) => break,
+		}
+	}
+	let served_b = served_b.ok_or_else(|| {
+		eyre::eyre!(
+			"the served certificate did not become the rotated leaf within {RELOAD_DEADLINE:?} of CertStore::update — hot \
+			 reload failed"
+		)
+	})?;
+
+	// Redundant with the poll's exit condition, but kept as the explicit
+	// contract of this test: the listener must serve exactly the rotated leaf.
+	assert_eq!(
+		served_b, expected_b,
+		"the certificate served after CertStore::update is not the rotated leaf"
 	);
 
 	endpoint.wait_idle().await;
