@@ -1,17 +1,10 @@
 //! SOCKS5-proxy-configuration integration test.
 
-#![allow(unused_imports)]
-
-use std::{
-	net::{IpAddr, Ipv4Addr, Ipv6Addr},
-	time::Duration,
-};
+use std::time::Duration;
 
 use tracing::info;
 use tuic_server::config::ExperimentalConfig;
-use tuic_tests::{
-	run_socks5_server, run_tcp_echo_server, run_udp_echo_server, test_tcp_through_socks5, test_udp_through_socks5,
-};
+use tuic_tests::{run_socks5_server, run_tcp_echo_server, test_tcp_through_socks5};
 use uuid::Uuid;
 
 // Integration test for SOCKS5 proxy configuration with TUIC client
@@ -142,4 +135,21 @@ async fn test_client_proxy_configuration() -> eyre::Result<()> {
 	server.shutdown().await;
 
 	Ok(())
+}
+
+/// A crate-level allowance for unused imports would let a removed call site
+/// leave a dead `use` behind with no diagnostic at all, which is how the
+/// imports in this file previously drifted out of date; the compiler only keeps
+/// reporting them while such an allowance is absent. The audit is textual
+/// because no build of this file can observe an attribute that would silence
+/// it, and `cargo clippy` exits successfully even while reporting unused
+/// imports.
+#[test]
+fn the_file_does_not_mute_unused_import_warnings() {
+	const SOURCE: &str = include_str!("proxy_config.rs");
+	const FORBIDDEN: &str = concat!("allow", "(unused_imports)");
+	assert!(
+		!SOURCE.contains(FORBIDDEN),
+		"proxy_config.rs must drop its dead imports instead of muting the warnings about them"
+	);
 }
