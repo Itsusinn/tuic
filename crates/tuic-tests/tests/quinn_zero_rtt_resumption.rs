@@ -30,17 +30,31 @@
 	not(any(target_os = "android", target_os = "freebsd", target_arch = "loongarch64"))
 ))]
 
-use std::{net::SocketAddr, sync::Arc, time::Duration};
+use std::{
+	net::SocketAddr,
+	sync::{
+		Arc,
+		atomic::{AtomicUsize, Ordering},
+	},
+	time::{Duration, Instant},
+};
 
+use quinn::crypto::rustls::QuicClientConfig;
 use rcgen::generate_simple_self_signed;
-use rustls::pki_types::PrivateKeyDer;
+use rustls::{
+	client::{ClientSessionStore, Tls12ClientSessionValue, Tls13ClientSessionValue},
+	pki_types::{PrivateKeyDer, ServerName},
+};
 use tokio::time::timeout;
 use tokio_util::sync::CancellationToken;
 use tuic_tests::install_crypto_provider;
-use wind_quic::{
-	config::{ClientTlsConfig, TransportConfig},
-	quinn::QuinnClient,
-};
+use wind_quic::config::ClientTlsConfig;
+
+/// How long the first connection may take to leave a usable resumption ticket
+/// in the client's TLS session cache before the test gives up on it.
+const TICKET_DEADLINE: Duration = Duration::from_secs(5);
+/// Polling granularity while waiting for that ticket.
+const TICKET_POLL_INTERVAL: Duration = Duration::from_millis(5);
 
 #[tokio::test]
 #[tracing_test::traced_test]
@@ -125,24 +139,41 @@ async fn quinn_zero_rtt_resumption_accepts_early_data() -> eyre::Result<()> {
 	});
 
 	// A *persistent* client endpoint/config so the session ticket obtained by
-	// the first connection survives into the second one.
+	// the first connection survives into the second one. The config is mapped
+	// from the same `wind-quic` `ClientTlsConfig` the real client uses, but
+	// with a session store the test can observe: `into_0rtt()` only succeeds
+	// once rustls has actually cached a TLS 1.3 ticket, and quinn reports the
+	// first handshake as complete *before* that ticket arrives.
 	let client_tls = ClientTlsConfig {
 		server_name: "localhost".to_string(),
 		verify_certificate: false,
 		alpn: vec![b"h3".to_vec()],
 		enable_early_data: true,
 	};
-	let client = QuinnClient::new(&client_tls, &TransportConfig::default()).await?;
+	let tickets = TicketStore::new();
+	let client_endpoint = quinn::Endpoint::client("127.0.0.1:0".parse()?)?;
+	client_endpoint.set_default_client_config(quinn::ClientConfig::new(Arc::new(QuicClientConfig::try_from(
+		client_crypto(&client_tls, tickets.clone())?,
+	)?)));
 
 	// 1) First connection: full 1-RTT handshake; server sends a session ticket.
-	let conn1 = client.connect(server_addr).await?;
-	// Give the NewSessionTicket time to arrive and be cached by rustls.
-	tokio::time::sleep(Duration::from_millis(500)).await;
-	conn1.inner().close(0u32.into(), b"first connection done");
-	tokio::time::sleep(Duration::from_millis(100)).await;
+	let conn1 = client_endpoint.connect(server_addr, "localhost")?.await?;
+	// The NewSessionTicket is a post-handshake message, so it is processed
+	// after `connect()` reports the handshake as complete; wait (bounded) until
+	// rustls has cached it instead of guessing a settle time.
+	let wait_started = Instant::now();
+	while tickets.cached() == 0 {
+		if wait_started.elapsed() >= TICKET_DEADLINE {
+			return Err(eyre::eyre!(
+				"client did not cache a TLS 1.3 resumption ticket within {TICKET_DEADLINE:?} of the first connection"
+			));
+		}
+		tokio::time::sleep(TICKET_POLL_INTERVAL).await;
+	}
+	conn1.close(0u32.into(), b"first connection done");
 
 	// 2) Second connection must attempt 0-RTT (resumable session cached).
-	let connecting = client.connecting(server_addr)?;
+	let connecting = client_endpoint.connect(server_addr, "localhost")?;
 	let conn2 = connecting.into_0rtt().map_err(|_| {
 		eyre::eyre!(
 			"client did not attempt 0-RTT on reconnect: no resumable session ticket was cached from the first connection"
@@ -181,4 +212,123 @@ async fn quinn_zero_rtt_resumption_accepts_early_data() -> eyre::Result<()> {
 	cancel.cancel();
 	let _ = timeout(Duration::from_secs(10), &mut server).await;
 	Ok(())
+}
+
+/// A rustls session store that additionally reports how many TLS 1.3 tickets
+/// it holds, so the test can wait for the resumption precondition instead of
+/// sleeping.
+///
+/// Note the capacity: `ClientSessionMemoryCache` derives its server-slot count
+/// from this number, and a value of 8 or less collapses to a single slot that
+/// is evicted by the very insertion that fills it.
+#[derive(Debug)]
+struct TicketStore {
+	cache: rustls::client::ClientSessionMemoryCache,
+	tickets: AtomicUsize,
+}
+
+impl TicketStore {
+	fn new() -> Arc<Self> {
+		Arc::new(Self {
+			cache: rustls::client::ClientSessionMemoryCache::new(64),
+			tickets: AtomicUsize::new(0),
+		})
+	}
+
+	fn cached(&self) -> usize {
+		self.tickets.load(Ordering::SeqCst)
+	}
+}
+
+impl ClientSessionStore for TicketStore {
+	fn set_kx_hint(&self, server_name: ServerName<'static>, group: rustls::NamedGroup) {
+		ClientSessionStore::set_kx_hint(&self.cache, server_name, group);
+	}
+
+	fn kx_hint(&self, server_name: &ServerName<'_>) -> Option<rustls::NamedGroup> {
+		ClientSessionStore::kx_hint(&self.cache, server_name)
+	}
+
+	fn set_tls12_session(&self, server_name: ServerName<'static>, value: Tls12ClientSessionValue) {
+		ClientSessionStore::set_tls12_session(&self.cache, server_name, value);
+	}
+
+	fn tls12_session(&self, server_name: &ServerName<'_>) -> Option<Tls12ClientSessionValue> {
+		ClientSessionStore::tls12_session(&self.cache, server_name)
+	}
+
+	fn remove_tls12_session(&self, server_name: &ServerName<'static>) {
+		ClientSessionStore::remove_tls12_session(&self.cache, server_name);
+	}
+
+	fn insert_tls13_ticket(&self, server_name: ServerName<'static>, value: Tls13ClientSessionValue) {
+		self.tickets.fetch_add(1, Ordering::SeqCst);
+		ClientSessionStore::insert_tls13_ticket(&self.cache, server_name, value);
+	}
+
+	fn take_tls13_ticket(&self, server_name: &ServerName<'_>) -> Option<Tls13ClientSessionValue> {
+		// The concrete cache insists on a `'static` name, so hand it an owned
+		// copy (this runs once per connection attempt).
+		let owned: ServerName<'static> = server_name.to_owned();
+		ClientSessionStore::take_tls13_ticket(&self.cache, &owned)
+	}
+}
+
+/// Builds the client `rustls::ClientConfig` the way `wind-quic` does for
+/// `verify_certificate = false`, with the observable session store attached.
+/// Only the tests build their own client config; production code keeps using
+/// `wind_quic`'s `QuinnClient`.
+fn client_crypto(cfg: &ClientTlsConfig, tickets: Arc<TicketStore>) -> eyre::Result<rustls::ClientConfig> {
+	let provider = rustls::crypto::CryptoProvider::get_default()
+		.ok_or_else(|| eyre::eyre!("no default crypto provider installed"))?
+		.clone();
+	let mut crypto = rustls::ClientConfig::builder()
+		.dangerous()
+		.with_custom_certificate_verifier(Arc::new(SkipServerVerification(provider)))
+		.with_no_client_auth();
+	crypto.alpn_protocols = cfg.alpn.clone();
+	crypto.enable_early_data = cfg.enable_early_data;
+	crypto.resumption = rustls::client::Resumption::store(tickets);
+	Ok(crypto)
+}
+
+/// Accepts any server certificate. The test server uses a throwaway
+/// self-signed certificate, which is why `ClientTlsConfig` is built with
+/// `verify_certificate = false` here.
+#[derive(Debug)]
+struct SkipServerVerification(Arc<rustls::crypto::CryptoProvider>);
+
+impl rustls::client::danger::ServerCertVerifier for SkipServerVerification {
+	fn verify_server_cert(
+		&self,
+		_end_entity: &rustls::pki_types::CertificateDer<'_>,
+		_intermediates: &[rustls::pki_types::CertificateDer<'_>],
+		_server_name: &ServerName<'_>,
+		_ocsp: &[u8],
+		_now: rustls::pki_types::UnixTime,
+	) -> Result<rustls::client::danger::ServerCertVerified, rustls::Error> {
+		Ok(rustls::client::danger::ServerCertVerified::assertion())
+	}
+
+	fn verify_tls12_signature(
+		&self,
+		message: &[u8],
+		cert: &rustls::pki_types::CertificateDer<'_>,
+		dss: &rustls::DigitallySignedStruct,
+	) -> Result<rustls::client::danger::HandshakeSignatureValid, rustls::Error> {
+		rustls::crypto::verify_tls12_signature(message, cert, dss, &self.0.signature_verification_algorithms)
+	}
+
+	fn verify_tls13_signature(
+		&self,
+		message: &[u8],
+		cert: &rustls::pki_types::CertificateDer<'_>,
+		dss: &rustls::DigitallySignedStruct,
+	) -> Result<rustls::client::danger::HandshakeSignatureValid, rustls::Error> {
+		rustls::crypto::verify_tls13_signature(message, cert, dss, &self.0.signature_verification_algorithms)
+	}
+
+	fn supported_verify_schemes(&self) -> Vec<rustls::SignatureScheme> {
+		self.0.signature_verification_algorithms.supported_schemes()
+	}
 }
