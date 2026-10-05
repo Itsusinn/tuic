@@ -14,6 +14,7 @@ use wind_tuic::quinn::inbound::{TuicInbound, TuicInboundOpts};
 
 use crate::{
 	Config,
+	config::GeoDataConfig,
 	restful::{self, ConnectionTracker},
 	wind_adapter::{self, ServerInbound, TuicRouter, load_cert_from_files},
 };
@@ -67,8 +68,9 @@ impl Plugin<TuicRouter> for TuicServerPlugin {
 			}
 		};
 
-		// Geo data (blocking io: decode + mmap)
-		let geodata = load_geodata_blocking(&cfg);
+		// Geo data (blocking io: decode + mmap), off the runtime worker threads
+		// so a large database cannot stall every other task sharing them.
+		let geodata = load_geodata_blocking(cfg.geodata.clone(), cfg.data_dir.clone()).await;
 
 		// Router
 		let router = wind_adapter::TuicRouter::new(&cfg, resolver.clone(), geodata.clone())?;
@@ -405,28 +407,51 @@ impl Plugin<TuicRouter> for TuicServerPlugin {
 
 // Geo-data loading (blocking)
 
-fn load_geodata_blocking(cfg: &Config) -> Option<Arc<wind_geodata::GeoData>> {
-	if !cfg.geodata.is_enabled() {
+/// Decode the configured GeoIP/GeoSite databases and open the resulting cache.
+///
+/// Decoding and re-serialising a full `geosite.dat`/`geoip.dat` pair is
+/// CPU-bound and takes hundreds of milliseconds, so the work runs on the
+/// blocking pool instead of the async runtime: `Plugin::build` is awaited from
+/// a runtime worker thread, and occupying it would stall every other task
+/// scheduled on that thread (including the sockets of an already-running
+/// server during a config reload).
+///
+/// Failing to load the databases is not fatal: the caller keeps running
+/// without geodata, and geo rules simply cannot match. That is reported by the
+/// warnings below.
+async fn load_geodata_blocking(cfg: GeoDataConfig, data_dir: std::path::PathBuf) -> Option<Arc<wind_geodata::GeoData>> {
+	if !cfg.is_enabled() {
 		return None;
 	}
-	let geosite_path = cfg.geodata.geosite.as_ref().unwrap();
-	let geoip_path = cfg.geodata.geoip.as_ref().unwrap();
+	let geosite_path = cfg.geosite?;
+	let geoip_path = cfg.geoip?;
 
-	let geosite_bytes = std::fs::read(geosite_path).ok()?;
-	let geoip_bytes = std::fs::read(geoip_path).ok()?;
+	let loaded = tokio::task::spawn_blocking(move || {
+		let geosite_bytes = std::fs::read(&geosite_path).ok()?;
+		let geoip_bytes = std::fs::read(&geoip_path).ok()?;
 
-	let cache_path = cfg.data_dir.join("geodata.cache");
-	match wind_geodata::GeoData::build_and_open(&geosite_bytes, &geoip_bytes, &cache_path) {
-		Ok(geo) => {
-			tracing::info!(
-				"[geodata] loaded geosite ({}) + geoip ({})",
-				geosite_path.display(),
-				geoip_path.display()
-			);
-			Some(Arc::new(geo))
+		let cache_path = data_dir.join("geodata.cache");
+		match wind_geodata::GeoData::build_and_open(&geosite_bytes, &geoip_bytes, &cache_path) {
+			Ok(geo) => {
+				tracing::info!(
+					"[geodata] loaded geosite ({}) + geoip ({})",
+					geosite_path.display(),
+					geoip_path.display()
+				);
+				Some(Arc::new(geo))
+			}
+			Err(e) => {
+				tracing::warn!("[geodata] failed to build cache: {e}");
+				None
+			}
 		}
+	})
+	.await;
+
+	match loaded {
+		Ok(geodata) => geodata,
 		Err(e) => {
-			tracing::warn!("[geodata] failed to build cache: {e}");
+			tracing::warn!("[geodata] loading task failed to run to completion: {e}");
 			None
 		}
 	}
@@ -559,5 +584,159 @@ mod tests {
 		write_private_file(&key, b"secret").unwrap();
 		let key_mode = key.metadata().unwrap().permissions().mode() & 0o777;
 		assert_eq!(key_mode, 0o600, "other users must not be able to read the staged private key");
+	}
+}
+
+/// Regression guard for the geodata load: it must not occupy the async runtime
+/// worker thread the build future is polled on.
+///
+/// `Plugin::build` is awaited from a runtime worker thread, so decoding a large
+/// GeoIP/GeoSite pair inline would stall every other task scheduled on that
+/// thread. The test proves the work really ran somewhere else by capturing the
+/// thread that emits the loader's success event: it must not be the thread that
+/// called `load_geodata_blocking`.
+#[cfg(test)]
+mod geodata_load_tests {
+	use std::sync::OnceLock;
+
+	use geosite_rs::{Cidr, GeoIp, GeoIpList, GeoSiteList, encode_geoip, encode_geosite};
+	use tokio::runtime::{Builder, Runtime};
+
+	use super::*;
+	use crate::config::GeoDataConfig;
+
+	const EVENT_TARGET: &str = "tuic_server::plugin";
+
+	/// The thread that emitted the loader's "loaded geosite" event, recorded by
+	/// the process-wide capture subscriber below.
+	static LOADED_ON_THREAD: OnceLock<std::thread::ThreadId> = OnceLock::new();
+	static CAPTURE: OnceLock<()> = OnceLock::new();
+
+	/// Records the thread of the geodata event without pulling in a
+	/// `tracing-subscriber` dev-dependency (the capture must be global: the
+	/// event is emitted from a blocking-pool thread, where a thread-local
+	/// subscriber would not be visible).
+	struct LoadThreadCapture;
+
+	impl tracing::Subscriber for LoadThreadCapture {
+		fn enabled(&self, metadata: &tracing::Metadata<'_>) -> bool {
+			metadata.target() == EVENT_TARGET && metadata.fields().field("message").is_some()
+		}
+
+		fn new_span(&self, _span: &tracing::span::Attributes<'_>) -> tracing::Id {
+			tracing::Id::from_u64(1)
+		}
+
+		fn record(&self, _span: &tracing::Id, _values: &tracing::span::Record<'_>) {}
+
+		fn record_follows_from(&self, _span: &tracing::Id, _follows: &tracing::Id) {}
+
+		fn event(&self, event: &tracing::Event<'_>) {
+			if event.metadata().level() == &tracing::Level::INFO {
+				let _ = LOADED_ON_THREAD.set(std::thread::current().id());
+			}
+		}
+
+		fn enter(&self, _span: &tracing::Id) {}
+
+		fn exit(&self, _span: &tracing::Id) {}
+
+		fn register_callsite(&self, _metadata: &'static tracing::Metadata<'static>) -> tracing::subscriber::Interest {
+			tracing::subscriber::Interest::always()
+		}
+
+		fn max_level_hint(&self) -> Option<tracing::level_filters::LevelFilter> {
+			Some(tracing::level_filters::LevelFilter::INFO)
+		}
+	}
+
+	/// Install the capture subscriber once for the whole test binary.
+	fn capture_geodata_events() {
+		CAPTURE.get_or_init(|| {
+			tracing::subscriber::set_global_default(LoadThreadCapture).expect("no other subscriber is installed");
+		});
+	}
+
+	/// Write a synthetic GeoIP/GeoSite pair large enough that an inline decode
+	/// is measurable, and return the configuration pointing at it.
+	fn write_fixture(dir: &std::path::Path) -> GeoDataConfig {
+		let mut entries = 40_000;
+		loop {
+			let geoip = GeoIpList {
+				entry: vec![GeoIp {
+					country_code: "CN".to_string(),
+					cidr: (0..entries)
+						.map(|i| Cidr {
+							ip: vec![10, ((i >> 16) & 0xff) as u8, ((i >> 8) & 0xff) as u8, (i & 0xff) as u8],
+							prefix: 32,
+						})
+						.collect(),
+					..Default::default()
+				}],
+			};
+			let geosite = GeoSiteList { entry: vec![] };
+			let geosite_path = dir.join(format!("geosite-{entries}.dat"));
+			let geoip_path = dir.join(format!("geoip-{entries}.dat"));
+			std::fs::write(&geosite_path, encode_geosite(geosite)).unwrap();
+			std::fs::write(&geoip_path, encode_geoip(geoip)).unwrap();
+
+			let cfg = GeoDataConfig {
+				geosite: Some(geosite_path),
+				geoip: Some(geoip_path),
+			};
+			let decode = std::time::Instant::now();
+			let loaded = load_geodata_inline(&cfg, dir);
+			if decode.elapsed() >= std::time::Duration::from_millis(300) || entries >= 640_000 {
+				assert!(loaded, "the synthetic database must load at all");
+				return cfg;
+			}
+			entries *= 2;
+		}
+	}
+
+	/// One inline decode, used only to size the fixture. It never runs on a
+	/// runtime.
+	fn load_geodata_inline(cfg: &GeoDataConfig, cache_dir: &std::path::Path) -> bool {
+		let geosite = std::fs::read(cfg.geosite.as_ref().unwrap()).unwrap();
+		let geoip = std::fs::read(cfg.geoip.as_ref().unwrap()).unwrap();
+		wind_geodata::GeoData::build_and_open(&geosite, &geoip, &cache_dir.join("sizing.cache")).is_ok()
+	}
+
+	fn current_thread_runtime() -> Runtime {
+		Builder::new_current_thread().enable_all().build().unwrap()
+	}
+
+	#[test]
+	fn geodata_is_decoded_off_the_runtime_thread() {
+		capture_geodata_events();
+		let dir = tempfile::tempdir().unwrap();
+		let cache_dir = dir.path().to_path_buf();
+		let cfg = write_fixture(&cache_dir);
+
+		// A current-thread runtime is the strictest case: the build future and
+		// every other task share exactly one thread, and an inline decode would
+		// hold it for the whole size of the database.
+		let (geodata, caller_thread) = current_thread_runtime().block_on(async move {
+			let caller_thread = std::thread::current().id();
+			let loaded = tokio::time::timeout(std::time::Duration::from_secs(60), load_geodata_blocking(cfg, cache_dir))
+				.await
+				.expect("loading the geodata must not run forever");
+			(loaded, caller_thread)
+		});
+
+		let geodata = geodata.expect("the fixture geodata must load through the async loader");
+		assert!(geodata.geoip_lookup()("CN", "10.0.0.1".parse().unwrap()));
+		assert!(
+			dir.path().join("geodata.cache").is_file(),
+			"the loader must publish its cache in the configured data dir"
+		);
+
+		let decode_thread = LOADED_ON_THREAD
+			.get()
+			.expect("the loader must report the databases it loaded");
+		assert_ne!(
+			*decode_thread, caller_thread,
+			"the geodata must be decoded on a blocking thread, not on the runtime thread that awaits the build future"
+		);
 	}
 }
