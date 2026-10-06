@@ -1,0 +1,120 @@
+name: CodSpeed
+
+on:
+  push:
+    branches:
+      - "main"
+      - "next"
+    tags:
+      - "v*"
+  pull_request:
+    types:
+      - opened
+      - synchronize
+      - reopened
+      - labeled
+      - unlabeled
+  # `workflow_dispatch` allows CodSpeed to trigger backtest performance
+  # analysis in order to generate initial data.
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write # for OpenID Connect authentication with CodSpeed
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  # In-process benchmarks (TUIC wire codecs, UDP fragment reassembly, legacy
+  # ACL parsing, configuration parsing). These are the cases that can run under
+  # CodSpeed's Valgrind instrumentation.
+  codspeed:
+    name: Run benchmarks (${{ matrix.instrument }})
+    runs-on: ubuntu-latest
+    strategy:
+      # Report both instruments even if one runner has an issue.
+      fail-fast: false
+      matrix:
+        instrument: [simulation, memory]
+    steps: &codspeed-steps
+      - uses: actions/checkout@v7
+        with:
+          # The workspace `[patch.crates-io]` entries point at
+          # `crates/wind/forks/quiche/{datagram-socket,tokio-quiche}`, which is
+          # a nested submodule of the Wind submodule, so the checkout has to be
+          # recursive or those path dependencies do not resolve.
+          submodules: recursive
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: stable
+
+      - name: Setup Rust cache
+        uses: Itsusinn/rust-cache@master
+
+      - name: Install cargo-codspeed
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-codspeed
+
+      # TUIC_CONFIG_FORMAT/RUSTC_BOOTSTRAP and `--cfg reqwest_unstable` come
+      # from the committed `.cargo/config.toml`, which cargo applies here too.
+      - name: Build benchmarks — ${{ matrix.instrument }} mode
+        run: cargo codspeed build --workspace -m ${{ matrix.instrument }}
+
+      - name: Run the benchmarks (${{ matrix.instrument }})
+        uses: CodSpeedHQ/action@v5
+        with:
+          mode: ${{ matrix.instrument }}
+          run: cargo codspeed run --workspace
+
+  # End-to-end relay benchmarks on the self-hosted walltime runner: a real
+  # `tuic-server` + `tuic-client` pair relaying TCP and UDP through a loopback
+  # SOCKS5 proxy, for both QUIC backends. `TUIC_BENCH_E2E=all` is what admits
+  # them; the Valgrind-instrumented job above leaves it unset on purpose.
+  codspeed-walltime:
+    name: Run benchmarks (walltime)
+    runs-on: codspeed-macro
+    if: |
+      (github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'walltime')) ||
+      (github.event_name == 'push' && startsWith(github.ref_name, 'v'))
+    env:
+      TUIC_BENCH_E2E: all
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          # Nested Wind fork needed by the workspace `[patch.crates-io]` paths;
+          # see the comment on the in-process job above.
+          submodules: recursive
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: stable
+
+      - name: Setup Rust cache
+        uses: Itsusinn/rust-cache@master
+
+      - name: Install cargo-codspeed
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-codspeed
+
+      # `--features quiche` is required: `bench_e2e_quiche` compiles out
+      # without it, so the walltime job would silently report only the quinn
+      # backend while claiming both.
+      - name: Build benchmarks — walltime mode
+        run: cargo codspeed build -m walltime -p tuic-tests --features quiche
+
+      - name: Run the benchmarks (walltime)
+        uses: CodSpeedHQ/action@v5
+        with:
+          mode: walltime
+          run: cargo codspeed run -p tuic-tests --features quiche

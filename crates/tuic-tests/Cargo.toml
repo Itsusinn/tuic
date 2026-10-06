@@ -12,6 +12,11 @@ publish = false
 default = ["aws-lc-rs"]
 ring = ["wind-tuic/ring", "rustls/ring", "tuic-client/ring", "tuic-server/ring"]
 aws-lc-rs = ["wind-tuic/aws-lc-rs", "dep:aws-lc-rs", "rustls/aws-lc-rs", "tuic-client/aws-lc-rs", "tuic-server/aws-lc-rs"]
+# Mirrors the opt-in tokio-quiche backend of `tuic-server`/`tuic-client`; the
+# two crates and `wind-tuic` already enable it per target below, so this
+# feature only forwards it to the benchmark harness, which uses it to gate the
+# quiche end-to-end bench cases.
+quiche = ["wind-tuic/quiche"]
 
 [dependencies]
 wind-core = { path = "../wind/crates/wind-core" }
@@ -36,6 +41,11 @@ serde_json = { version = "1", default-features = false, features = ["std"] }
 tokio-util = { version = "0.7", features = ["codec"] }
 
 [dev-dependencies]
+# `benches/codspeed.rs`: the CodSpeed-facing harness. The crate is the
+# `codspeed-criterion-compat` mirror of `criterion`, so `cargo bench` and
+# `cargo codspeed run` execute the same benchmark functions.
+criterion = { version = "5.0.2", package = "codspeed-criterion-compat" }
+
 # `tests/tls_options.rs`: a recording `ResolvesServerCert` needs rustls' server
 # and signing traits, and `tempfile`/`rustls-pemfile` cover the certificate
 # plumbing the test builds.
@@ -51,6 +61,10 @@ http = { version = "1" }
 # masquerade e2e test); declare it so it isn't flagged as an unknown cfg.
 [lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = ['cfg(reqwest_unstable)'] }
+
+[[bench]]
+name = "codspeed"
+harness = false
 
 # The quiche e2e tests only run where the vendored BoringSSL toolchain is
 # available and cross-emulated socket tests are practical. Android needs an NDK

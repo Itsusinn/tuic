@@ -26,6 +26,7 @@ The root `Cargo.toml` excludes Wind with `exclude = ["crates/wind"]`, while all 
 2. Determine whether the change belongs in the TUIC application layer or the shared Wind implementation. Protocol encoding, generic QUIC backends, and shared routing, DNS, or ACL behavior usually belong in the top-level `../wind/` repository, not in the `tuic/crates/wind/` submodule checkout.
 3. Search for existing migrations, compatibility aliases, test fixtures, and helpers before adding another implementation.
 4. On a fresh clone, run `git submodule update --init --recursive` only when the task requires Wind sources.
+5. Do not modify this repository's `README.md` files unless the user explicitly asks for a README change. A README edit is a separately reviewed deliverable, so a code, CI, or test change must not carry one along; if the work changes user-visible behavior that the README documents, report the needed README update in the final summary instead of making it.
 
 ## Essential commands
 
@@ -72,7 +73,7 @@ When changing configuration behavior:
 - Reuse the existing defaults, Serde aliases, and migration layer in the relevant `src/config.rs`.
 - Add the smallest useful inline unit tests and add fixtures under `tests/config/` when needed.
 - Verify modern-format serialization round trips and at least one relevant legacy input.
-- Update the corresponding crate `README.md`; update the root `README.md` as well when top-level user-visible behavior changes.
+- Update the corresponding crate `README.md`, and the root `README.md` as well when top-level user-visible behavior changes, but only once a README change has been explicitly requested (see "Before making changes").
 - Never place real UUIDs, passwords, tokens, certificates, private keys, domains, or production endpoints in fixtures or documentation.
 
 ## Testing strategy
