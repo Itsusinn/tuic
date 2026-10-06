@@ -7,10 +7,13 @@
 //! handshake, first-byte classification (`0x05` vs not), the `h3::quic`
 //! adapter, the `h3` server, and the reqwest reverse proxy to the upstream.
 //!
-//! Runs with the default build; reqwest's experimental HTTP/3 stack needs the
-//! `--cfg reqwest_unstable` flag, which the workspace `.cargo/config.toml`
-//! sets.
-#![cfg(all(reqwest_unstable, target_pointer_width = "64"))]
+//! Opt-in: needs both the `masquerade-test` feature (which enables the reqwest
+//! HTTP/3 client this probes with) and `--cfg reqwest_unstable` (without which
+//! that client does not compile at all). The workspace supplies the cfg from
+//! `.cargo/config.toml`, but the CodSpeed build replaces the workspace
+//! rustflags, so the dependency stays off the default path — see the
+//! `masquerade-test` feature in `Cargo.toml`.
+#![cfg(all(feature = "masquerade-test", reqwest_unstable, target_pointer_width = "64"))]
 
 use std::{collections::HashMap, net::SocketAddr, time::Duration};
 
