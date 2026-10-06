@@ -17,6 +17,20 @@ aws-lc-rs = ["wind-tuic/aws-lc-rs", "dep:aws-lc-rs", "rustls/aws-lc-rs", "tuic-c
 # feature only forwards it to the benchmark harness, which uses it to gate the
 # quiche end-to-end bench cases.
 quiche = ["wind-tuic/quiche"]
+# The HTTP/3 masquerade e2e test (`tests/masquerade.rs`) and the reqwest HTTP/3
+# client it probes with, off by default.
+#
+# reqwest's `http3` feature is *unconditionally unstable*: it carries a
+# `compile_error!` unless the crate is built with `--cfg reqwest_unstable`, and
+# that cfg reaches the dependency graph only through rustflags. The workspace
+# sets it in `.cargo/config.toml [build] rustflags`, but `cargo codspeed build`
+# overrides the workspace rustflags with its own `CARGO_ENCODED_RUSTFLAGS`, so
+# any build of this crate that pulls reqwest's `http3` in fails there (the
+# benchmark target builds this crate's whole dev-dependency graph). Gating it
+# behind a feature keeps the default and the CodSpeed build free of it; a build
+# that wants the test must enable this feature *and* supply the cfg, e.g.
+# `RUSTFLAGS='--cfg reqwest_unstable' cargo test -p tuic-tests --features masquerade-test`.
+masquerade-test = ["dep:reqwest", "dep:http"]
 
 [dependencies]
 wind-core = { path = "../wind/crates/wind-core" }
@@ -40,6 +54,13 @@ uuid = "1"
 serde_json = { version = "1", default-features = false, features = ["std"] }
 tokio-util = { version = "0.7", features = ["codec"] }
 
+# HTTP/3 client for the masquerade e2e test (tests/masquerade.rs), behind the
+# `masquerade-test` feature; see that feature's comment for why it cannot be an
+# unconditional dependency (and why it cannot live in `[dev-dependencies]`,
+# which cargo forbids from being optional).
+reqwest = { version = "0.12", default-features = false, features = ["http3", "rustls-tls"], optional = true }
+http = { version = "1", optional = true }
+
 [dev-dependencies]
 # `benches/codspeed.rs`: the CodSpeed-facing harness. The crate is the
 # `codspeed-criterion-compat` mirror of `criterion`, so `cargo bench` and
@@ -52,13 +73,9 @@ criterion = { version = "5.0.2", package = "codspeed-criterion-compat" }
 rustls-pemfile = { version = "2", default-features = false, features = ["std"] }
 tempfile = "3"
 
-# HTTP/3 client for the masquerade e2e test (tests/masquerade.rs).
-reqwest = { version = "0.12", default-features = false, features = ["http3", "rustls-tls"] }
-http = { version = "1" }
-
 # `reqwest_unstable` is a rustc cfg (set in the workspace `.cargo/config.toml`)
-# that gates reqwest's HTTP/3 client (now an unconditional dependency for the
-# masquerade e2e test); declare it so it isn't flagged as an unknown cfg.
+# that gates reqwest's experimental HTTP/3 client; declare it so a build that
+# sets it isn't flagged as an unknown cfg.
 [lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = ['cfg(reqwest_unstable)'] }
 
