@@ -14,8 +14,9 @@ use wind_tuic::quinn::outbound::{ReconnectConfig, TuicOutbound, TuicOutboundOpts
 
 use crate::{
 	config::{BackendMode, Relay},
+	tcp_forward::BoundTcpForwardInbound,
 	tls::{TlsConfigError, build_client_config},
-	tunnel::{TunnelTcpInbound, TunnelUdpInbound},
+	tunnel::TunnelUdpInbound,
 };
 
 /// Simple router: everything goes to the TUIC outbound.
@@ -253,6 +254,24 @@ impl TuicClientPlugin {
 impl Plugin<ClientRouter> for TuicClientPlugin {
 	async fn build(self, app: App<ClientRouter>) -> eyre::Result<App<ClientRouter>> {
 		let ctx = app.context().clone();
+		let local = self.cfg.local;
+		// Bind every forwarder before eager relay setup can start background
+		// tasks. These owned inbounds release their sockets if any later bind
+		// or relay setup fails, and reserve the ports continuously on success.
+		let mut tcp_inbounds = Vec::new();
+		for entry in local.tcp_forward {
+			let listen = entry.listen;
+			let inbound = BoundTcpForwardInbound::bind(listen, entry.remote, ctx.token.clone())
+				.wrap_err_with(|| format!("failed to bind the TCP forward listener {listen}"))?;
+			tcp_inbounds.push(inbound);
+		}
+		let mut udp_inbounds = Vec::new();
+		for entry in local.udp_forward {
+			let listen = entry.listen;
+			let inbound = TunnelUdpInbound::new(listen, entry.remote, entry.timeout, ctx.token.clone())
+				.wrap_err_with(|| format!("failed to bind the UDP forward listener {listen}"))?;
+			udp_inbounds.push(inbound);
+		}
 		let relay = self.cfg.relay;
 		let lazy = relay.lazy;
 		// Kept for the error context below: `relay` is moved into the factory.
@@ -281,7 +300,6 @@ impl Plugin<ClientRouter> for TuicClientPlugin {
 		let app = app.set_router(ClientRouter);
 
 		// SOCKS5 inbound
-		let local = self.cfg.local;
 		let auth = match (&local.username, &local.password) {
 			(Some(u), Some(p)) => AuthMode::Password {
 				username: String::from_utf8_lossy(u).into_owned(),
@@ -308,31 +326,12 @@ impl Plugin<ClientRouter> for TuicClientPlugin {
 
 		// TCP tunnel inbounds
 		let mut app = app;
-		for entry in local.tcp_forward {
-			let listen = entry.listen;
-			let remote = entry.remote;
-			app = app.add_inbound_with(move |_: InboundHooks, ctx: Arc<AppContext>| {
-				TunnelTcpInbound::new(listen, remote, ctx.token.clone())
-			});
+		for inbound in tcp_inbounds {
+			app = app.add_inbound_with(move |_: InboundHooks, _: Arc<AppContext>| inbound);
 		}
 
 		// UDP tunnel inbounds
-		//
-		// The forwarder socket is bound here, while `build` can still return an
-		// error, and the bound inbound is then moved into the factory.
-		// `App::add_inbound_with` only accepts an infallible factory and
-		// `App::run` merely logs a `listen` failure, so binding inside the
-		// factory turned a taken port into a panic in the run task — or, with
-		// the panic removed, into a forwarder that silently never starts.
-		// Binding here reports the conflict as a startup error, and handing the
-		// already-bound socket over keeps the port continuously reserved
-		// instead of unbinding and rebinding it.
-		for entry in local.udp_forward {
-			let listen = entry.listen;
-			let remote = entry.remote;
-			let timeout = entry.timeout;
-			let inbound = TunnelUdpInbound::new(listen, remote, timeout, ctx.token.clone())
-				.map_err(|e| eyre::Report::new(e).wrap_err(format!("failed to bind the UDP forward listener {listen}")))?;
+		for inbound in udp_inbounds {
 			app = app.add_inbound_with(move |_: InboundHooks, _: Arc<AppContext>| inbound);
 		}
 

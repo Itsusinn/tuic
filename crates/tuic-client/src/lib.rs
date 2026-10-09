@@ -15,6 +15,7 @@ use runtime::Runtime;
 
 pub mod config;
 pub mod plugin;
+mod tcp_forward;
 pub mod tls;
 pub mod tunnel;
 pub mod utils;
