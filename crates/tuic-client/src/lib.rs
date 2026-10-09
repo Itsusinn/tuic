@@ -18,6 +18,7 @@ pub mod plugin;
 mod tcp_forward;
 pub mod tls;
 pub mod tunnel;
+mod upstream_proxy;
 pub mod utils;
 
 pub use config::Config;
