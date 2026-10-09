@@ -81,11 +81,17 @@ impl Plugin<TuicRouter> for TuicServerPlugin {
 		let stream_timeout = cfg.stream_timeout;
 		let app = app.add_outbound(
 			"default",
-			wind_adapter::make_outbound_action(&cfg.outbound.default, resolver.clone(), stream_timeout),
+			wind_adapter::make_guarded_outbound_action(
+				&cfg.outbound.default,
+				resolver.clone(),
+				stream_timeout,
+				&cfg.experimental,
+			),
 		);
 		let mut app = app;
 		for (name, rule) in std::mem::take(&mut cfg.outbound.named) {
-			let handler = wind_adapter::make_outbound_action(&rule, resolver.clone(), stream_timeout);
+			let handler =
+				wind_adapter::make_guarded_outbound_action(&rule, resolver.clone(), stream_timeout, &cfg.experimental);
 			app = app.add_outbound(name, handler);
 		}
 
