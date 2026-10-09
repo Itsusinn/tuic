@@ -3,10 +3,15 @@
 //! The client is assembled via [`TuicClientPlugin`], which implements
 //! [`wind_core::Plugin`] and can be used with [`wind_core::App`].
 
-use std::{net::SocketAddr, time::Duration};
+use std::net::SocketAddr;
 
 use tokio_util::sync::CancellationToken;
 use wind_core::App;
+
+#[path = "../../runtime.rs"]
+mod runtime;
+
+use runtime::Runtime;
 
 pub mod config;
 pub mod plugin;
@@ -23,38 +28,22 @@ pub use plugin::TuicClientPlugin;
 pub struct ClientGuard {
 	pub socks5_addr: SocketAddr,
 	pub cancel: CancellationToken,
-	/// The [`App`]'s own token. `Drop` cancels it directly because the bridge
-	/// task that normally forwards `cancel` into it is aborted there, while the
-	/// spawned inbound tasks only stop on this token.
-	app_token: CancellationToken,
-	run_task: tokio::task::JoinHandle<eyre::Result<()>>,
-	bridge: tokio::task::JoinHandle<()>,
+	runtime: Runtime,
 }
 
 impl ClientGuard {
 	/// Cancel the client and wait (bounded) for it to drain.
 	pub async fn shutdown(mut self) {
 		self.cancel.cancel();
-		if tokio::time::timeout(Duration::from_secs(10), &mut self.run_task)
-			.await
-			.is_err()
-		{
-			self.run_task.abort();
-		}
-		self.bridge.abort();
+		self.runtime.shutdown().await;
 	}
 }
 
 impl Drop for ClientGuard {
 	fn drop(&mut self) {
-		// Last-resort teardown if the caller never calls `shutdown`. The app
-		// token has to be fired here rather than through `bridge`: aborting the
-		// bridge below can beat it to `ctx.token.cancel()`, and the spawned
-		// inbound tasks keep their sockets bound until that token is cancelled.
 		self.cancel.cancel();
-		self.app_token.cancel();
-		self.run_task.abort();
-		self.bridge.abort();
+		// Runtime's Drop also cancels the internal token and aborts its
+		// handles.
 	}
 }
 
@@ -73,44 +62,28 @@ pub async fn run(cfg: Config) -> eyre::Result<ClientGuard> {
 /// bind/unbind race.
 pub async fn run_with_cancel(cfg: Config, cancel: CancellationToken) -> eyre::Result<ClientGuard> {
 	let (addr_tx, mut addr_rx) = tokio::sync::watch::channel(None::<SocketAddr>);
-	let app = App::new()
-		.add_plugin(TuicClientPlugin::new(cfg).with_bound_addr(addr_tx))
-		.await?;
-	let ctx = app.context().clone();
-	let app_token = ctx.token.clone();
+	let app = App::new();
+	let app_token = app.context().token.clone();
+	let mut runtime = Runtime::new(app.context().clone(), cancel.clone());
+	let startup = async {
+		let app = tokio::select! {
+			result = app.add_plugin(TuicClientPlugin::new(cfg).with_bound_addr(addr_tx)) => result?,
+			_ = app_token.cancelled() => return Err(eyre::eyre!("client startup cancelled")),
+		};
+		runtime.start(async move { app.run().await });
+		runtime.bound_address(&mut addr_rx, "client SOCKS5 inbound").await
+	}
+	.await;
 
-	// Bridge the caller's token into the App's context token: `App::run`
-	// already selects on `ctx.token.cancelled()`, so firing the internal token
-	// unwinds it exactly like a shutdown signal.
-	let bridge = tokio::spawn({
-		let cancel = cancel.clone();
-		async move {
-			cancel.cancelled().await;
-			ctx.token.cancel();
+	match startup {
+		Ok(socks5_addr) => Ok(ClientGuard {
+			socks5_addr,
+			cancel,
+			runtime,
+		}),
+		Err(error) => {
+			runtime.shutdown().await;
+			Err(error)
 		}
-	});
-
-	let mut run_task = tokio::spawn(async move { app.run().await });
-
-	// Wait for the SOCKS5 inbound to report its bound address, or for the
-	// client to exit early (a real failure worth surfacing).
-	let socks5_addr = tokio::select! {
-		res = addr_rx.wait_for(|a| a.is_some()) => match res {
-			Ok(r) => r.expect("wait_for predicate guarantees Some"),
-			Err(_) => return Err(eyre::eyre!("client exited before reporting its SOCKS5 address")),
-		},
-		res = &mut run_task => match res {
-			Ok(Ok(())) => return Err(eyre::eyre!("client exited before reporting its SOCKS5 address")),
-			Ok(Err(e)) => return Err(e),
-			Err(e) => return Err(eyre::eyre!("client task panicked: {e}")),
-		},
-	};
-
-	Ok(ClientGuard {
-		socks5_addr,
-		cancel,
-		app_token,
-		run_task,
-		bridge,
-	})
+	}
 }
