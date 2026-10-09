@@ -17,6 +17,7 @@ use crate::{
 	tcp_forward::BoundTcpForwardInbound,
 	tls::{TlsConfigError, build_client_config},
 	tunnel::TunnelUdpInbound,
+	upstream_proxy::ProxyBridge,
 };
 
 /// Simple router: everything goes to the TUIC outbound.
@@ -71,10 +72,20 @@ async fn resolve_peer(relay: &Relay) -> eyre::Result<(SocketAddr, String)> {
 
 /// Build the outbound selected by `backend.mode`.
 async fn build_outbound(ctx: Arc<AppContext>, relay: Relay) -> eyre::Result<Arc<dyn Outbound>> {
+	validate_proxy_backend(&relay)?;
 	match relay.backend_mode {
 		BackendMode::Quinn => build_quinn_outbound(ctx, relay).await,
 		BackendMode::Quiche => build_quiche_outbound(ctx, relay).await,
 	}
+}
+
+fn validate_proxy_backend(relay: &Relay) -> eyre::Result<()> {
+	if relay.proxy.is_some() && relay.backend_mode == BackendMode::Quiche {
+		return Err(eyre::eyre!(
+			"upstream SOCKS5 proxy requires backend.mode = \"quinn\"; the quiche backend does not support it"
+		));
+	}
+	Ok(())
 }
 
 /// Install the process-wide rustls crypto provider exactly once. Mirrors
@@ -122,8 +133,12 @@ pub async fn build_quinn_outbound(ctx: Arc<AppContext>, relay: Relay) -> eyre::R
 		err => eyre::Report::new(err),
 	})?;
 
+	let proxy_bridge = match relay.proxy.clone() {
+		Some(proxy) => Some(ProxyBridge::new(&ctx, proxy, server_addr, relay.timeout, reconnect.clone()).await?),
+		None => None,
+	};
 	let opts = TuicOutboundOpts {
-		peer_addr: server_addr,
+		peer_addr: proxy_bridge.as_ref().map_or(server_addr, |bridge| bridge.peer_addr),
 		peer_resolver: None,
 		sni,
 		auth: (relay.uuid, password),
@@ -146,14 +161,25 @@ pub async fn build_quinn_outbound(ctx: Arc<AppContext>, relay: Relay) -> eyre::R
 		stream_receive_window: Some(u64::from(relay.receive_window)),
 		max_idle_time: None,
 		udp_relay_mode: relay.udp_relay_mode,
-		socket_factory: None,
+		socket_factory: proxy_bridge.as_ref().map(|bridge| bridge.socket_factory.clone()),
 	};
 
-	let outbound: TuicOutbound = TuicOutbound::new(ctx, opts).await?;
+	let outbound = match &proxy_bridge {
+		Some(bridge) => tokio::select! {
+			_ = bridge.ctx.token.cancelled() => return Err(eyre::eyre!("proxied TUIC setup cancelled")),
+			result = tokio::time::timeout(relay.timeout, TuicOutbound::new(bridge.ctx.clone(), opts)) => {
+				result.wrap_err("proxied TUIC handshake timed out")??
+			}
+		},
+		None => TuicOutbound::new(ctx, opts).await?,
+	};
 
 	outbound.start_poll().await?;
 
-	Ok(Arc::new(outbound) as Arc<dyn Outbound>)
+	Ok(match proxy_bridge {
+		Some(bridge) => bridge.wrap(outbound),
+		None => Arc::new(outbound) as Arc<dyn Outbound>,
+	})
 }
 
 /// Build a `wind-tuic` quiche-backend outbound.
@@ -253,6 +279,9 @@ impl TuicClientPlugin {
 
 impl Plugin<ClientRouter> for TuicClientPlugin {
 	async fn build(self, app: App<ClientRouter>) -> eyre::Result<App<ClientRouter>> {
+		// Reject an unsupported proxy even in lazy mode, before any listener
+		// is bound or a factory can accidentally dial the relay directly.
+		validate_proxy_backend(&self.cfg.relay)?;
 		let ctx = app.context().clone();
 		let local = self.cfg.local;
 		// Bind every forwarder before eager relay setup can start background
