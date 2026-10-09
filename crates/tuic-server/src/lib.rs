@@ -13,12 +13,17 @@ pub mod restful;
 pub mod utils;
 pub mod wind_adapter;
 
-use std::{net::SocketAddr, time::Duration};
+use std::net::SocketAddr;
 
 pub use config::{Cli, Config, Control};
 pub use plugin::TuicServerPlugin;
 use tokio_util::sync::CancellationToken;
 use wind_core::App;
+
+#[path = "../../runtime.rs"]
+mod runtime;
+
+use runtime::Runtime;
 
 /// Handle to a running TUIC server: the OS-assigned bound address (useful when
 /// `config.server` binds to port `0`) plus the cancellation token for graceful
@@ -27,39 +32,22 @@ pub struct ServerGuard {
 	pub local_addr: SocketAddr,
 	pub restful_addr: Option<SocketAddr>,
 	pub cancel: CancellationToken,
-	/// The [`App`]'s own token. `Drop` cancels it directly because the bridge
-	/// task that normally forwards `cancel` into it is aborted there, while the
-	/// spawned inbound and RESTful tasks only stop on this token.
-	app_token: CancellationToken,
-	run_task: tokio::task::JoinHandle<eyre::Result<()>>,
-	bridge: tokio::task::JoinHandle<()>,
+	runtime: Runtime,
 }
 
 impl ServerGuard {
 	/// Cancel the server and wait (bounded) for it to drain.
 	pub async fn shutdown(mut self) {
 		self.cancel.cancel();
-		if tokio::time::timeout(Duration::from_secs(10), &mut self.run_task)
-			.await
-			.is_err()
-		{
-			self.run_task.abort();
-		}
-		self.bridge.abort();
+		self.runtime.shutdown().await;
 	}
 }
 
 impl Drop for ServerGuard {
 	fn drop(&mut self) {
-		// Last-resort teardown if the caller never calls `shutdown`. The app
-		// token has to be fired here rather than through `bridge`: aborting the
-		// bridge below can beat it to `ctx.token.cancel()`, and the spawned
-		// inbound/RESTful tasks keep their sockets bound until that token is
-		// cancelled.
 		self.cancel.cancel();
-		self.app_token.cancel();
-		self.run_task.abort();
-		self.bridge.abort();
+		// Runtime's Drop also cancels the internal token and aborts its
+		// handles.
 	}
 }
 
@@ -81,66 +69,47 @@ pub async fn run_with_cancel(cfg: Config, cancel: CancellationToken) -> eyre::Re
 	let restful_enabled = cfg.restful.enabled;
 	let (addr_tx, mut addr_rx) = tokio::sync::watch::channel(None::<SocketAddr>);
 	let (restful_addr_tx, mut restful_addr_rx) = restful::restful_addr_channel();
-	let app = App::new()
-		.add_plugin(
-			TuicServerPlugin::new(cfg)
-				.with_bound_addr(addr_tx)
-				.with_restful_bound_addr(restful_addr_tx),
-		)
-		.await?;
-	let ctx = app.context().clone();
-	let app_token = ctx.token.clone();
+	let app = App::new();
+	let app_token = app.context().token.clone();
+	let mut runtime = Runtime::new(app.context().clone(), cancel.clone());
+	let startup = async {
+		let app = tokio::select! {
+			result = app.add_plugin(
+				TuicServerPlugin::new(cfg)
+					.with_bound_addr(addr_tx)
+					.with_restful_bound_addr(restful_addr_tx),
+			) => result?,
+			_ = app_token.cancelled() => return Err(eyre::eyre!("server startup cancelled")),
+		};
+		runtime.start(async move { app.run().await });
+		let local_addr = runtime.bound_address(&mut addr_rx, "server TUIC inbound").await?;
 
-	// Bridge the caller's token into the App's context token: `App::run`
-	// already selects on `ctx.token.cancelled()`, so firing the internal token
-	// unwinds it exactly like a shutdown signal.
-	let bridge = tokio::spawn({
-		let cancel = cancel.clone();
-		async move {
-			cancel.cancelled().await;
-			ctx.token.cancel();
+		// An enabled management API must publish its socket or bind failure
+		// before startup succeeds. Cancellation also ends this handshake.
+		let restful_addr = if restful_enabled {
+			Some(
+				runtime
+					.bound_address(&mut restful_addr_rx, "server RESTful API")
+					.await?
+					.map_err(|reason| eyre::eyre!("{reason}"))?,
+			)
+		} else {
+			None
+		};
+		Ok((local_addr, restful_addr))
+	}
+	.await;
+
+	match startup {
+		Ok((local_addr, restful_addr)) => Ok(ServerGuard {
+			local_addr,
+			restful_addr,
+			cancel,
+			runtime,
+		}),
+		Err(error) => {
+			runtime.shutdown().await;
+			Err(error)
 		}
-	});
-
-	let mut run_task = tokio::spawn(async move { app.run().await });
-
-	// Wait for the inbound to report its bound address, or for the server to
-	// exit early (a real failure worth surfacing).
-	let local_addr = tokio::select! {
-		res = addr_rx.wait_for(|a| a.is_some()) => match res {
-			Ok(r) => r.expect("wait_for predicate guarantees Some"),
-			Err(_) => return Err(eyre::eyre!("server exited before reporting its bound address")),
-		},
-		res = &mut run_task => match res {
-			Ok(Ok(())) => return Err(eyre::eyre!("server exited before reporting its bound address")),
-			Ok(Err(e)) => return Err(e),
-			Err(e) => return Err(eyre::eyre!("server task panicked: {e}")),
-		},
-	};
-
-	// If the RESTful API is enabled, wait for it to report its socket. The
-	// task publishes the bind failure instead of exiting quietly, so a
-	// management API that cannot listen fails the startup rather than leaving
-	// the operator with an unprotected or missing control plane.
-	let restful_addr = if restful_enabled {
-		match restful_addr_rx.wait_for(|a| a.is_some()).await {
-			Ok(borrowed) => match borrowed.as_ref() {
-				Some(Ok(addr)) => Some(*addr),
-				Some(Err(reason)) => return Err(eyre::eyre!("{reason}")),
-				None => return Err(eyre::eyre!("server exited before reporting its RESTful address")),
-			},
-			Err(_) => return Err(eyre::eyre!("server exited before reporting its RESTful address")),
-		}
-	} else {
-		None
-	};
-
-	Ok(ServerGuard {
-		local_addr,
-		restful_addr,
-		cancel,
-		app_token,
-		run_task,
-		bridge,
-	})
+	}
 }
