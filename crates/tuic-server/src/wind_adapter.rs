@@ -22,12 +22,13 @@ use wind_base::{
 	load_balance::{LoadBalanceOpts, LoadBalanceOutbound, LoadBalanceStrategy},
 	resolve::resolve_target,
 };
-use wind_core::{AbstractInbound, Dispatcher, FlowContext, Outbound, RouteAction, Router, rule::Rule, utils::is_private_ip};
+use wind_core::{AbstractInbound, Dispatcher, FlowContext, Outbound, RouteAction, Router, rule::Rule};
 use wind_geodata::GeoData;
 use wind_socks::action::{SocksOutbound, SocksOutboundOpts};
 
 use crate::{
 	config::{ExperimentalConfig, OutboundRule},
+	destination_guard::{GuardedOutbound, check_destination},
 	legacy::acl_to_rules,
 };
 
@@ -58,6 +59,9 @@ impl<R: Router> AbstractInbound<R> for ServerInbound {
 
 /// Build an [`Outbound`] for a single configured outbound rule.
 ///
+/// Server registration uses [`make_guarded_outbound_action`] to also apply the
+/// configured destination restrictions.
+///
 /// When `bind_ipv4` + `bind_ipv6` together contain **more than one** address
 /// (and `kind == "direct"`), the addresses are wrapped in a
 /// [`LoadBalanceOutbound`] with round-robin strategy so connections are
@@ -85,6 +89,29 @@ pub fn make_outbound_action(
 			build_direct_or_lb(rule, resolver, stream_timeout)
 		}
 	}
+}
+
+/// Build an outbound that enforces server restrictions on the address actually
+/// used for TCP and on every UDP packet, including later session destinations.
+/// Routing still sees the original domain name before this boundary.
+pub fn make_guarded_outbound_action(
+	rule: &OutboundRule,
+	resolver: Arc<dyn wind_core::Resolver>,
+	stream_timeout: Duration,
+	restrictions: &ExperimentalConfig,
+) -> Arc<dyn Outbound> {
+	let inner = make_outbound_action(rule, resolver.clone(), stream_timeout);
+	if !restrictions.drop_loopback && !restrictions.drop_private {
+		return inner;
+	}
+	Arc::new(GuardedOutbound {
+		inner,
+		resolver,
+		// SOCKS5 has no local IP preference; enable local DNS only when the
+		// destination restrictions require a checked address for the proxy.
+		ip_mode: if rule.kind == "socks5" { None } else { rule.ip_mode },
+		restrictions: restrictions.clone(),
+	})
 }
 
 /// Build either a single [`DirectOutbound`] or a [`LoadBalanceOutbound`]
@@ -242,13 +269,9 @@ impl TuicRouter {
 
 		if need_resolve {
 			let resolved = resolve_target(&ctx.target, self.resolver.as_ref()).await?;
-			if self.experimental.drop_loopback && resolved.ip().is_loopback() {
-				tracing::debug!(resolved = %resolved, "dropping loopback connection");
-				return Ok(RouteAction::Reject(format!("loopback address rejected: {}", resolved)));
-			}
-			if self.experimental.drop_private && is_private_ip(&resolved.ip()) {
-				tracing::debug!(resolved = %resolved, "dropping private-range connection");
-				return Ok(RouteAction::Reject(format!("private address rejected: {}", resolved)));
+			if let Err(error) = check_destination(resolved, &self.experimental) {
+				tracing::debug!(resolved = %resolved, %error, "dropping connection");
+				return Ok(RouteAction::Reject(error.to_string()));
 			}
 		}
 

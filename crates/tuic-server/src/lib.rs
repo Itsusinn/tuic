@@ -5,6 +5,7 @@
 
 pub mod config;
 mod connection_limit;
+mod destination_guard;
 pub mod legacy;
 pub mod log;
 pub mod plugin;
