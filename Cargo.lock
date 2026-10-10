@@ -5998,6 +5998,7 @@ version = "0.2.0"
 dependencies = [
  "arc-swap",
  "async-trait",
+ "bytes",
  "eyre",
  "fast-socks5",
  "futures-util",
