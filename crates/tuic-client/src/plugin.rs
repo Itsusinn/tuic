@@ -7,14 +7,13 @@ use std::{net::SocketAddr, sync::Arc};
 
 use eyre::WrapErr;
 use tokio::sync::watch;
-use wind_base::LazyOutbound;
+use wind_base::{LazyOutbound, tunnel::TunnelTcpInbound};
 use wind_core::{App, AppContext, InboundHooks, Outbound, Plugin};
 use wind_socks::inbound::{AuthMode, SocksInbound, SocksInboundOpt};
 use wind_tuic::quinn::outbound::{ReconnectConfig, TuicOutbound, TuicOutboundOpts};
 
 use crate::{
 	config::{BackendMode, Relay},
-	tcp_forward::BoundTcpForwardInbound,
 	tls::{TlsConfigError, build_client_config},
 	tunnel::TunnelUdpInbound,
 	upstream_proxy::ProxyChain,
@@ -294,7 +293,7 @@ impl Plugin<ClientRouter> for TuicClientPlugin {
 		let mut tcp_inbounds = Vec::new();
 		for entry in local.tcp_forward {
 			let listen = entry.listen;
-			let inbound = BoundTcpForwardInbound::bind(listen, entry.remote, ctx.token.clone())
+			let inbound = TunnelTcpInbound::bind(listen, entry.remote, ctx.token.clone())
 				.wrap_err_with(|| format!("failed to bind the TCP forward listener {listen}"))?;
 			tcp_inbounds.push(inbound);
 		}
