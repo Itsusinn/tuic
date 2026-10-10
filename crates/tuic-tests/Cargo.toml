@@ -33,11 +33,11 @@ quiche = ["wind-tuic/quiche"]
 masquerade-test = ["dep:reqwest", "dep:http"]
 
 [dependencies]
-wind-core = { path = "../wind/crates/wind-core" }
-wind-quic = { path = "../wind/crates/wind-quic", default-features = false, features = ["quinn"] }
+wind-core = { git = "https://github.com/rust-proxy/wind", rev = "12fbf7a690a4f20be6c9c593addf42a670cfc1a5" }
+wind-quic = { git = "https://github.com/rust-proxy/wind", rev = "12fbf7a690a4f20be6c9c593addf42a670cfc1a5", default-features = false, features = ["quinn"] }
 tuic-client = { path = "../tuic-client", default-features = false }
 tuic-server = { path = "../tuic-server", default-features = false }
-wind-tuic = { path = "../wind/crates/wind-tuic", default-features = false, features = ["server", "client", "quinn", "masquerade"] }
+wind-tuic = { git = "https://github.com/rust-proxy/wind", rev = "12fbf7a690a4f20be6c9c593addf42a670cfc1a5", default-features = false, features = ["server", "client", "quinn", "masquerade"] }
 
 bytes = "1"
 json5 = { version = "1.3" }
@@ -91,6 +91,6 @@ harness = false
 [target.'cfg(all(target_pointer_width = "64", not(any(target_os = "android", target_os = "freebsd", target_arch = "loongarch64"))))'.dependencies]
 tuic-server = { path = "../tuic-server", default-features = false, features = ["quiche"] }
 tuic-client = { path = "../tuic-client", default-features = false, features = ["quiche"] }
-wind-tuic = { path = "../wind/crates/wind-tuic", default-features = false, features = ["quiche"] }
+wind-tuic = { git = "https://github.com/rust-proxy/wind", rev = "12fbf7a690a4f20be6c9c593addf42a670cfc1a5", default-features = false, features = ["quiche"] }
 quinn = { workspace = true, default-features = false, features = ["runtime-tokio", "rustls-aws-lc-rs"] }
 rcgen = { version = "0.14", default-features = false, features = ["crypto", "pem", "aws_lc_rs"] }

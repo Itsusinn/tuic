@@ -1,6 +1,5 @@
 [workspace]
 members = ["crates/*"]
-exclude = ["crates/wind"]
 resolver = "2"
 
 [workspace.package]
@@ -18,9 +17,16 @@ quinn = { branch = "bbrv3", git = "https://github.com/Tipuch/quinn.git", default
 quinn-proto = { branch = "bbrv3", git = "https://github.com/Tipuch/quinn.git", default-features = false }
 quinn-congestions = { git = "https://github.com/proxy-rs/quinn-congestions.git", default-features = false}
 
+# Patch into the Wind quiche fork instead of the crates.io releases:
+# `datagram-socket` fixes the musl build with libc >= 0.2.169, and
+# `tokio-quiche` carries the 32-bit fix plus the `quiche_internal` feature that
+# `wind-quic` enables. `[patch]` is only honored in the root workspace manifest,
+# so it cannot be inherited from the Wind Git dependency and must be repeated
+# here. Keep this `rev` in sync with the `forks/quiche` submodule commit recorded
+# by the Wind revision pinned in the `wind-*` dependencies of the member crates.
 [patch.crates-io]
-datagram-socket = { path = "crates/wind/forks/quiche/datagram-socket" }
-tokio-quiche = { path = "crates/wind/forks/quiche/tokio-quiche" }
+datagram-socket = { git = "https://github.com/rust-proxy/quiche", rev = "ed27ae7d3418c627bec8d2ec4d88945618edeb92" }
+tokio-quiche = { git = "https://github.com/rust-proxy/quiche", rev = "ed27ae7d3418c627bec8d2ec4d88945618edeb92" }
 
 [workspace.lints.clippy]
 unwrap_used = "deny"

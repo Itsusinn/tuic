@@ -44,12 +44,6 @@ jobs:
         instrument: [simulation, memory]
     steps: &codspeed-steps
       - uses: actions/checkout@v7
-        with:
-          # The workspace `[patch.crates-io]` entries point at
-          # `crates/wind/forks/quiche/{datagram-socket,tokio-quiche}`, which is
-          # a nested submodule of the Wind submodule, so the checkout has to be
-          # recursive or those path dependencies do not resolve.
-          submodules: recursive
 
       - name: Setup Rust toolchain
         uses: dtolnay/rust-toolchain@master
@@ -89,10 +83,6 @@ jobs:
       TUIC_BENCH_E2E: all
     steps:
       - uses: actions/checkout@v7
-        with:
-          # Nested Wind fork needed by the workspace `[patch.crates-io]` paths;
-          # see the comment on the in-process job above.
-          submodules: recursive
 
       - name: Setup Rust toolchain
         uses: dtolnay/rust-toolchain@master
