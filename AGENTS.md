@@ -2,9 +2,9 @@
 
 ## Scope and instruction precedence
 
-This file applies to the `tuic/` repository. More specific `AGENTS.md` or `CLAUDE.md` files override it within their subtrees. When working under the `crates/wind/` submodule, follow that repository's own instructions. Before starting a task, read the relevant `README.md`, `LLM.md`, crate manifests, and tests.
+This file applies to the `tuic/` repository. More specific `AGENTS.md` or `CLAUDE.md` files override it within their subtrees. Before starting a task, read the relevant `README.md`, `LLM.md`, crate manifests, and tests.
 
-`tuic/` is an independent Git repository and Cargo workspace. Run Git, Cargo, and validation commands from this directory unless a command explicitly targets the `crates/wind/` submodule.
+`tuic/` is an independent Git repository and Cargo workspace. Run Git, Cargo, and validation commands from this directory.
 
 ## Project overview
 
@@ -15,17 +15,17 @@ TUIC is a low-latency QUIC proxy implementation with standalone server and clien
 | `crates/tuic-server/` | TUIC server, TLS/ACME, ACL and Clash rules, outbounds, masquerade, and the RESTful management API |
 | `crates/tuic-client/` | TUIC client, local SOCKS5, TCP/UDP forwarding, and upstream proxy support |
 | `crates/tuic-tests/` | Cross-client/server protocol, reconnect, 0-RTT, UDP fragmentation, masquerade, and shutdown integration tests |
-| `crates/wind/` | Independent Git submodule containing the shared proxy framework and TUIC/QUIC implementation; not a member of the root workspace |
+| `wind` (Git dependency) | Shared proxy framework and TUIC/QUIC implementation, fetched by Cargo from `https://github.com/rust-proxy/wind` at a pinned `rev`; not a workspace member |
 | `.github/` | Build targets, container configuration, and release workflows |
 
-The root `Cargo.toml` excludes Wind with `exclude = ["crates/wind"]`, while all three root crates consume Wind crates through path dependencies. Do not treat the root workspace and the Wind workspace as one Cargo workspace.
+All three root crates consume Wind through Git dependencies pinned to an exact `rev`, and the root `Cargo.toml` pins `datagram-socket`/`tokio-quiche` to the matching `rust-proxy/quiche` commit in `[patch.crates-io]`. Do not treat the fetched Wind workspace as part of this Cargo workspace.
 
 ## Before making changes
 
 1. Run `git status --short`. Preserve unrelated changes and never clean or reset the user's worktree.
-2. Determine whether the change belongs in the TUIC application layer or the shared Wind implementation. Protocol encoding, generic QUIC backends, and shared routing, DNS, or ACL behavior usually belong in the top-level `../wind/` repository, not in the `tuic/crates/wind/` submodule checkout.
+2. Determine whether the change belongs in the TUIC application layer or the shared Wind implementation. Protocol encoding, generic QUIC backends, and shared routing, DNS, or ACL behavior usually belong in the top-level `../wind/` repository, not in this repository.
 3. Search for existing migrations, compatibility aliases, test fixtures, and helpers before adding another implementation.
-4. On a fresh clone, run `git submodule update --init --recursive` only when the task requires Wind sources.
+4. Wind sources are fetched by Cargo, so there is no submodule to initialize. To inspect or edit Wind locally, use the sibling top-level `../wind/` checkout.
 5. Do not modify this repository's `README.md` files unless the user explicitly asks for a README change. A README edit is a separately reviewed deliverable, so a code, CI, or test change must not carry one along; if the work changes user-visible behavior that the README documents, report the needed README update in the final summary instead of making it.
 
 ## Essential commands
@@ -85,12 +85,11 @@ When changing configuration behavior:
 - Changes to 0-RTT, reconnect behavior, fragmentation, certificate reload, masquerade, or graceful shutdown require the corresponding named integration tests; a successful package compilation alone is insufficient.
 - If IPv6, Quiche, cross-compilation, or platform-gated tests cannot run on the current host or toolchain, report what ran and what remains unverified. Do not remove conditional compilation merely to force a test to execute.
 
-## Wind submodule
+## Wind dependency
 
-- `crates/wind/` is an independent repository. Check its `git status --short` and follow `crates/wind/AGENTS.md` plus any deeper instructions.
-- Do not develop Wind changes inside `tuic/crates/wind/`. Make shared implementation changes in the sibling top-level `../wind/` repository. During local development, follow the parent repository guide to point TUIC's Wind path dependencies temporarily at that checkout.
-- Restore temporary path rewiring before committing TUIC changes. Update this repository's submodule pointer only when the user explicitly asks to adopt a new Wind commit, after receiving approval to commit and push Wind itself.
-- Do not mistake uncommitted submodule changes for parent-repository changes, and do not leave an unintended dirty submodule or pointer update.
+- Wind is consumed as a Git dependency pinned to an exact `rev`. The root `Cargo.toml` also pins `datagram-socket`/`tokio-quiche` in `[patch.crates-io]` to the `rust-proxy/quiche` commit that Wind records for its own `forks/quiche` submodule. There is no `crates/wind` checkout in this repository.
+- Do not develop Wind changes here. Make shared implementation changes in the sibling top-level `../wind/` repository. To test an unreleased Wind change locally, temporarily replace the `git`/`rev` keys with `path = "../wind/crates/..."`, then restore the pinned Git form before committing TUIC changes.
+- Upgrading Wind means editing the pinned `rev` in every `wind-*` entry together with the `rust-proxy/quiche` revision in `[patch.crates-io]`, and refreshing `Cargo.lock` in the same commit.
 
 ## CI, release, and security
 

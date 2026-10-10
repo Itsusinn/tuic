@@ -8,3 +8,10 @@ rustflags = ["--cfg", "reqwest_unstable"]
 
 [env]
 RUSTC_BOOTSTRAP = { value = "1" }
+
+[net]
+# Fetch the Wind and quiche fork Git dependencies with the `git` CLI instead of
+# libgit2. The quiche fork carries a very large number of remote branches and
+# its history is tens of MB, which libgit2 fetches slowly; breeze already uses
+# the CLI fetcher for the same dependencies.
+git-fetch-with-cli = true

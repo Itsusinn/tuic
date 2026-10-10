@@ -1,3 +1,0 @@
-[submodule "crates/wind"]
-	path = crates/wind
-	url = https://github.com/rust-proxy/wind.git

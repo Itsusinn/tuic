@@ -13,10 +13,10 @@ TUIC 协议的完整定义见[中文规范](https://rust-proxy.github.io/wind/tu
 
 ## 从源码构建
 
-需要 Rust `1.85.0` 或更高版本、Git，以及目标平台所需的本地构建工具。仓库包含 Git submodule，克隆时请一并初始化：
+需要 Rust `1.85.0` 或更高版本、Git，以及目标平台所需的本地构建工具。Wind 框架通过固定 `rev` 的 Git 依赖引入，Cargo 会在首次构建时自行拉取源码，无需初始化子模块：
 
 ```console
-git clone --recurse-submodules https://github.com/Itsusinn/tuic.git
+git clone https://github.com/Itsusinn/tuic.git
 cd tuic
 cargo build --release --package tuic-server --package tuic-client
 ```
@@ -34,7 +34,7 @@ cargo test --workspace
 - `tuic-server`：服务端程序、TLS、路由、出站与管理 API
 - `tuic-client`：客户端程序、本地 SOCKS5 与端口转发
 - `tuic-tests`：协议与端到端集成测试
-- `wind`：通过 Git submodule 引入的网络代理框架与 TUIC 协议实现
+- `wind`：通过固定 `rev` 的 Git 依赖引入的网络代理框架与 TUIC 协议实现
 
 欢迎提交 Issue 和 Pull Request。请从 `main` 分支派生改动并向 `main` 提交；`next` 等开发分支可能发生历史重写。使用 AI 辅助的贡献还须遵循 [LLM.md](LLM.md) 中的披露要求。
 
