@@ -5444,7 +5444,6 @@ dependencies = [
  "rustls-native-certs",
  "rustls-pemfile",
  "serde",
- "socket2 0.6.5",
  "tempfile",
  "thiserror 2.0.20",
  "tikv-jemallocator",
