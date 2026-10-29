@@ -10,7 +10,7 @@ use tokio::sync::watch;
 use wind_base::{LazyOutbound, tunnel::TunnelTcpInbound};
 use wind_core::{App, AppContext, InboundHooks, Outbound, Plugin, Resolver, SystemResolver};
 use wind_socks::inbound::{AuthMode, SocksInbound, SocksInboundOpt};
-use wind_tuic::quinn::outbound::{PeerResolver, ReconnectConfig, TuicOutbound, TuicOutboundOpts};
+use wind_tuic::quinn::outbound::{PeerResolver, QuinnTransportOptions, ReconnectConfig, TuicOutbound, TuicOutboundOpts};
 
 use crate::{
 	config::{BackendMode, Relay},
@@ -155,6 +155,12 @@ async fn build_quinn_outbound_inner(ctx: Arc<AppContext>, relay: Relay) -> eyre:
 		err => eyre::Report::new(err),
 	})?;
 
+	let transport = QuinnTransportOptions {
+		initial_mtu: Some(relay.initial_mtu),
+		min_mtu: Some(relay.min_mtu),
+		gso: Some(relay.gso),
+		pmtu: Some(relay.pmtu),
+	};
 	let opts = TuicOutboundOpts {
 		peer_addr: server_addr,
 		peer_resolver: peer_resolver(&relay),
@@ -185,11 +191,11 @@ async fn build_quinn_outbound_inner(ctx: Arc<AppContext>, relay: Relay) -> eyre:
 	let outbound = match &proxy_chain {
 		Some(chain) => tokio::select! {
 			_ = chain.ctx.token.cancelled() => return Err(eyre::eyre!("proxied TUIC setup cancelled")),
-			result = tokio::time::timeout(relay.timeout, TuicOutbound::new(chain.ctx.clone(), opts)) => {
+			result = tokio::time::timeout(relay.timeout, TuicOutbound::new_with_transport(chain.ctx.clone(), opts, transport)) => {
 				result.wrap_err("proxied TUIC handshake timed out")??
 			}
 		},
-		None => TuicOutbound::new(ctx, opts).await?,
+		None => TuicOutbound::new_with_transport(ctx, opts, transport).await?,
 	};
 
 	outbound.start_poll().await?;
@@ -388,7 +394,7 @@ impl Plugin<ClientRouter> for TuicClientPlugin {
 				hooks,
 				bound_addr,
 			};
-			SocksInbound::new(opts, ctx.token.clone())
+			SocksInbound::new(opts, ctx.token.clone()).with_socket_options(local.dual_stack, local.max_packet_size)
 		});
 
 		// TCP tunnel inbounds
@@ -412,6 +418,26 @@ mod tests {
 
 	use super::*;
 	use crate::config::UdpForward;
+
+	#[tokio::test]
+	async fn invalid_socket_and_transport_options_reach_the_backend() -> eyre::Result<()> {
+		let mut cfg = crate::Config::default();
+		cfg.local.server = "127.0.0.1:0".parse()?;
+		cfg.local.max_packet_size = 0;
+		assert!(crate::run(cfg).await.is_err());
+		let mut relay = Relay::default();
+		relay.server = ("127.0.0.1".into(), 4433);
+		relay.skip_cert_verify = true;
+		relay.min_mtu = 1;
+		let ctx = Arc::new(AppContext::default());
+		let error = build_quinn_outbound(ctx.clone(), relay)
+			.await
+			.err()
+			.ok_or_else(|| eyre::eyre!("accepted invalid MTU"))?;
+		ctx.token.cancel();
+		assert!(error.to_string().contains("MTU"), "{error:#}");
+		Ok(())
+	}
 
 	#[tokio::test]
 	async fn dns_preference_and_reconnect_resolver_are_wired() -> eyre::Result<()> {
