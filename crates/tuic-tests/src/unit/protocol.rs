@@ -1,7 +1,7 @@
 //! Protocol- and config-level tests for the TUIC wire codecs (now part of
 //! `tuic-server` `[backend]` configuration.
 //!
-//! These complement the end-to-end tests in `integration_tests.rs`:
+//! These complement endpoint integration tests and full application E2E tests:
 //!
 //! * The TUIC wire codecs and the free decode helpers now live in `wind-tuic` and are shared verbatim by both the quinn and
 //!   tokio-quiche backends. The tests below pin the on-wire byte layout, verify the codec/decoder paths agree, and exercise the
@@ -13,7 +13,7 @@
 use std::net::{Ipv4Addr, Ipv6Addr};
 
 use bytes::{Buf, Bytes, BytesMut};
-use tokio_util::codec::Encoder;
+use tokio_util::codec::{Decoder, Encoder};
 use uuid::Uuid;
 use wind_core::types::TargetAddr;
 use wind_tuic::proto::{
@@ -29,10 +29,17 @@ use wind_tuic::proto::{
 fn encode(header: CmdType, command: Command, address: Option<Address>) -> BytesMut {
 	let mut buf = BytesMut::new();
 	HeaderCodec.encode(Header::new(header), &mut buf).unwrap();
-	CmdCodec(header).encode(command, &mut buf).unwrap();
-	if let Some(addr) = address {
+	CmdCodec(header).encode(command.clone(), &mut buf).unwrap();
+	if let Some(addr) = address.clone() {
 		AddressCodec.encode(addr, &mut buf).unwrap();
 	}
+	let mut decoded = buf.clone();
+	assert_eq!(HeaderCodec.decode(&mut decoded).unwrap().unwrap().command, header);
+	assert_eq!(CmdCodec(header).decode(&mut decoded).unwrap().unwrap(), command);
+	if let Some(addr) = address {
+		assert_eq!(AddressCodec.decode(&mut decoded).unwrap().unwrap(), addr);
+	}
+	assert!(decoded.is_empty());
 	buf
 }
 
@@ -211,7 +218,7 @@ fn address_none_cannot_become_target() {
 
 // ---------------------------------------------------------------------------
 // UDP fragment reassembly state machine (shared via wind-tuic), driven from a
-// consumer crate to confirm the public API is usable end-to-end.
+// consumer crate to check the reassembly state machine in isolation.
 // ---------------------------------------------------------------------------
 
 mod udp {

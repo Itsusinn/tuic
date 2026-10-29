@@ -1,6 +1,6 @@
 //! Full-stack reconnect E2E (quiche backend).
 //!
-//! Each backend lives in its own test binary; both call the shared
+//! The backend-specific cases call the shared
 //! [`tuic_tests::reconnect_case`].
 
 // These e2e tests drive real QUIC sockets; only *run* them on 64-bit hosts

@@ -1,6 +1,6 @@
 //! 0-RTT *resumption* test for the quiche backend.
 //!
-//! Unlike `quiche_zero_rtt.rs` — which only proves the 0-RTT-enabled config
+//! Unlike `zero_rtt_config.rs` — which only proves the 0-RTT-enabled config
 //! path still relays over a fresh 1-RTT connection — this test drives the full
 //! resumption flow and asserts that early data is actually *accepted*:
 //!
@@ -43,14 +43,13 @@ async fn quiche_zero_rtt_resumption_accepts_early_data() -> eyre::Result<()> {
 	install_crypto_provider();
 
 	let server_addr: SocketAddr = "127.0.0.1:0".parse().unwrap();
-	let data_dir = std::env::temp_dir().join("wind-quiche-resumption-test");
-	std::fs::create_dir_all(&data_dir)?;
+	let data_dir = tempfile::tempdir()?;
 
 	// The quiche backend loads credentials from PEM file paths; materialize a
 	// self-signed cert (the client skips verification).
 	let certified = generate_simple_self_signed(vec!["localhost".to_string()])?;
-	let cert_path = data_dir.join("cert.pem");
-	let key_path = data_dir.join("key.pem");
+	let cert_path = data_dir.path().join("cert.pem");
+	let key_path = data_dir.path().join("key.pem");
 	std::fs::write(&cert_path, certified.cert.pem())?;
 	std::fs::write(&key_path, certified.signing_key.serialize_pem())?;
 

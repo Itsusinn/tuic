@@ -42,7 +42,10 @@ cargo run --package tuic-client -- -c ./config.toml
 # Start with the narrowest relevant test
 cargo test --package tuic-server <test-name>
 cargo test --package tuic-client <test-name>
-cargo test --package tuic-tests --test <integration-test-name>
+cargo test --package tuic-tests --test smoke
+cargo test --package tuic-tests --test integration <module-or-test-name>
+cargo test --package tuic-tests --test e2e <module-or-test-name>
+cargo test --package tuic-tests --lib <module-or-test-name>
 
 # Repository-level validation
 cargo +nightly fmt --all --check
@@ -80,9 +83,9 @@ When changing configuration behavior:
 
 - Keep configuration parsing, migration, and pure-function tests in the module that owns the behavior.
 - Put binary-specific filesystem, routing, and shutdown tests under `tuic-server/tests/` or `tuic-client/tests/`.
-- Put cross-endpoint protocol and real loopback-network behavior under `tuic-tests/tests/`, reusing the facilities in `tuic-tests/src/lib.rs`.
+- Keep basic client/server TCP and UDP availability checks in `tuic-tests/tests/smoke/`; put complete application paths through SOCKS/forward/HTTP entry points in `tests/e2e/`, selected endpoint/plugin/lifecycle collaboration in `tests/integration/`, and isolated protocol/configuration/source-contract unit tests in `src/unit/` under `#[cfg(test)]`. There is no separate `component` suite. Reuse `tuic-tests/src/lib.rs` and `tests/support/`. See `crates/tuic-tests/TESTING.md` for the coverage map and deduplication rules.
 - Network tests must use loopback interfaces, temporary directories, temporary certificates, and dynamically allocated ports. Give them explicit timeouts and clean up tasks on success and failure paths.
-- Changes to 0-RTT, reconnect behavior, fragmentation, certificate reload, masquerade, or graceful shutdown require the corresponding named integration tests; a successful package compilation alone is insufficient.
+- Changes to 0-RTT, reconnect behavior, fragmentation, certificate reload, masquerade, or graceful shutdown require the corresponding named integration or E2E tests; a successful package compilation alone is insufficient.
 - If IPv6, Quiche, cross-compilation, or platform-gated tests cannot run on the current host or toolchain, report what ran and what remains unverified. Do not remove conditional compilation merely to force a test to execute.
 
 ## Wind dependency

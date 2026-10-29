@@ -11,7 +11,6 @@
 //! verify individual tunnel inbounds).
 
 use std::{
-	collections::{HashMap, HashSet},
 	net::{Ipv4Addr, SocketAddr},
 	sync::{
 		Arc,
@@ -26,8 +25,8 @@ use tokio::{
 	sync::{oneshot, watch},
 	time::timeout,
 };
-use tuic_server::{Config, TuicServerPlugin, config::ExperimentalConfig};
-use tuic_tests::{TempDataDir, install_crypto_provider};
+use tuic_server::{Config, TuicServerPlugin};
+use tuic_tests::install_crypto_provider;
 use wind_core::{App, FlowContext, Outbound, hooks::Protocol, rule::NetworkType, types::TargetAddr};
 
 // ---------------------------------------------------------------------------
@@ -46,12 +45,6 @@ fn test_ctx(target: &TargetAddr) -> FlowContext {
 		inbound_port: None,
 		inbound_type: None,
 	}
-}
-
-/// Loopback address with an OS-assigned port: the server binds it and reports
-/// the real port back through [`start_server`].
-fn any_loopback_addr() -> SocketAddr {
-	SocketAddr::from((Ipv4Addr::LOCALHOST, 0))
 }
 
 /// Start a server on an OS-assigned loopback port and wait until the inbound
@@ -100,31 +93,6 @@ async fn start_server(
 	assert!(addr.ip().is_loopback(), "the test server must stay on loopback, got {addr}");
 
 	(ctx, handle, addr)
-}
-
-/// Minimal server config suitable for a cancel-only test — self-signed TLS,
-/// empty user list (no client can authenticate, but the inbound starts and
-/// enters its accept loop), and a direct default outbound.
-///
-/// The returned guard owns the server's `data_dir`; keep it alive for as long
-/// as the server runs.
-fn build_minimal_server_config() -> (Config, TempDataDir) {
-	let data_dir = TempDataDir::new("tuic-graceful-shutdown");
-	(
-		Config {
-			server: any_loopback_addr(),
-			users: HashMap::new(),
-			tls: tuic_server::config::TlsConfig {
-				self_sign: true,
-				hostname: "localhost".to_string(),
-				alpn: vec!["h3".to_string()],
-				..Default::default()
-			},
-			data_dir: data_dir.path().to_path_buf(),
-			..Default::default()
-		},
-		data_dir,
-	)
 }
 
 // ---------------------------------------------------------------------------
@@ -220,39 +188,6 @@ async fn active_connection_drains_on_cancel() {
 // ---------------------------------------------------------------------------
 // helpers for traffic tests
 // ---------------------------------------------------------------------------
-
-/// Build a server config with a known user (for client authentication).
-///
-/// The returned guard owns the server's `data_dir`; keep it alive for as long
-/// as the server runs.
-fn build_server_config_with_user(uuid: uuid::Uuid, password: &str) -> (Config, TempDataDir) {
-	let mut users = HashMap::new();
-	users.insert(uuid, password.to_string());
-	let data_dir = TempDataDir::new("tuic-graceful-shutdown");
-	(
-		Config {
-			server: any_loopback_addr(),
-			users,
-			tls: tuic_server::config::TlsConfig {
-				self_sign: true,
-				hostname: "localhost".to_string(),
-				alpn: vec!["h3".to_string()],
-				..Default::default()
-			},
-			data_dir: data_dir.path().to_path_buf(),
-			// The traffic test relays to a loopback echo server, so the loopback
-			// guards must be off or the relay target is rejected before it ever
-			// reaches the outbound (this used to make the test pass with zero
-			// traffic actually flowing).
-			experimental: ExperimentalConfig {
-				drop_loopback: false,
-				drop_private: false,
-			},
-			..Default::default()
-		},
-		data_dir,
-	)
-}
 
 /// Connect a TUIC client to the given server address / credentials.
 async fn connect_tuic_client(
@@ -431,61 +366,4 @@ async fn drains_while_active_traffic_flows() {
 	}
 }
 
-// ---------------------------------------------------------------------------
-// data-directory ownership
-// ---------------------------------------------------------------------------
-
-/// Every server config this file builds must carry its own data directory, so
-/// that no two cases — running in parallel here, or in two sequential runs —
-/// can share one path.
-///
-/// The directory used to be a fixed name under the system temp dir
-/// (`tuic-graceful-shutdown-test` and friends) that nothing removed. A shared
-/// path is a latent cross-run conflict even while it happens to stay empty:
-/// the server writes into `data_dir` as soon as geodata or ACME is enabled.
-/// The guard also means the directory is gone when the test ends rather than
-/// accumulating in the temp dir.
-#[test]
-fn each_server_config_owns_a_unique_data_dir() {
-	let uuid = uuid::Uuid::new_v4();
-
-	let (minimal, minimal_dir) = build_minimal_server_config();
-	let (active, active_dir) = build_server_config_with_user(uuid, "test-password");
-	let (traffic, traffic_dir) = build_server_config_with_user(uuid, "test-pass");
-
-	let dirs = [&minimal_dir, &active_dir, &traffic_dir];
-	let paths: Vec<std::path::PathBuf> = dirs.iter().map(|d| d.path().to_path_buf()).collect();
-	// The directory must be one level under the system temp dir; compare the
-	// canonical parent so a trailing separator cannot make the check vacuous.
-	let temp_dir = std::fs::canonicalize(std::env::temp_dir()).expect("canonicalise the system temp dir");
-
-	assert_eq!(
-		paths.iter().collect::<HashSet<_>>().len(),
-		paths.len(),
-		"each config must get its own data directory, got {paths:?}"
-	);
-	for (config, path) in [(&minimal, &paths[0]), (&active, &paths[1]), (&traffic, &paths[2])] {
-		assert_eq!(
-			&config.data_dir, path,
-			"the config must point at the directory its guard owns"
-		);
-		assert_eq!(
-			path.parent().and_then(|p| std::fs::canonicalize(p).ok()),
-			Some(temp_dir.clone()),
-			"{} must live under the system temp dir",
-			path.display()
-		);
-		let name = path
-			.file_name()
-			.and_then(|n| n.to_str())
-			.expect("the data directory must have a UTF-8 name");
-		let suffix = name
-			.strip_prefix("tuic-graceful-shutdown-")
-			.unwrap_or_else(|| panic!("{name} must be named after the case that owns it"));
-		assert!(
-			uuid::Uuid::parse_str(suffix).is_ok(),
-			"{name} must end in a UUID so two runs cannot collide"
-		);
-		assert!(path.is_dir(), "{} must exist while its guard is alive", path.display());
-	}
-}
+use super::shutdown_fixture::{build_minimal_server_config, build_server_config_with_user};

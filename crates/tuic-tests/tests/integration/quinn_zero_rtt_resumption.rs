@@ -1,6 +1,6 @@
 //! 0-RTT *resumption* test for the quinn backend.
 //!
-//! Unlike `quinn_zero_rtt.rs` — which only proves the 0-RTT-enabled config
+//! Unlike `zero_rtt_config.rs` — which only proves the 0-RTT-enabled config
 //! path still relays over a fresh 1-RTT connection — this test drives the full
 //! resumption flow and asserts that early data is actually *accepted*:
 //!
