@@ -31,6 +31,7 @@ pub struct Proxy {
 	pub associations: Arc<AtomicUsize>,
 	pub packets: Arc<AtomicUsize>,
 	pub replies: Arc<AtomicUsize>,
+	pub unreachable_errors: Arc<AtomicUsize>,
 	pub disconnect: Arc<Notify>,
 	_guard: DropGuard,
 	tasks: TaskTracker,
@@ -45,6 +46,7 @@ impl Proxy {
 		let associations = Arc::new(AtomicUsize::new(0));
 		let packets = Arc::new(AtomicUsize::new(0));
 		let replies = Arc::new(AtomicUsize::new(0));
+		let unreachable_errors = Arc::new(AtomicUsize::new(0));
 		let disconnect = Arc::new(Notify::new());
 		let tasks = TaskTracker::new();
 		let token = CancellationToken::new();
@@ -56,6 +58,7 @@ impl Proxy {
 			let associations = associations.clone();
 			let packets = packets.clone();
 			let replies = replies.clone();
+			let unreachable_errors = unreachable_errors.clone();
 			let disconnect = disconnect.clone();
 			let sessions = sessions.clone();
 			async move {
@@ -69,6 +72,7 @@ impl Proxy {
 					let associations = associations.clone();
 					let packets = packets.clone();
 					let replies = replies.clone();
+					let unreachable_errors = unreachable_errors.clone();
 					let disconnect = disconnect.clone();
 					let task = tasks.spawn(async move {
 						tokio::select! {
@@ -98,14 +102,26 @@ impl Proxy {
 												assert!(destination == TargetAddr::Ip(target)
 													|| destination == TargetAddr::Domain("relay-test.invalid".into(), target.port()));
 												peer = Some(source);
-												upstream.send(payload).await?;
+												match upstream.send(payload).await {
+													Ok(_) => {},
+													// A pending ICMP error can also surface on send.
+													Err(error) if upstream_port_unreachable(&error) => {
+														unreachable_errors.fetch_add(1, Ordering::SeqCst);
+														continue;
+													},
+													Err(error) => return Err(error.into()),
+												}
 												packets.fetch_add(1, Ordering::SeqCst);
 											},
 											packet = upstream.recv(&mut response) => {
 												let len = match packet {
 													Ok(len) => len,
-													// Windows reports ICMP from the brief server restart gap.
-													Err(error) if error.kind() == std::io::ErrorKind::ConnectionReset => continue,
+													// A server restart can produce ICMP port-unreachable:
+													// ConnectionRefused on Linux, ConnectionReset on Windows.
+													Err(error) if upstream_port_unreachable(&error) => {
+														unreachable_errors.fetch_add(1, Ordering::SeqCst);
+														continue;
+													},
 													Err(error) => return Err(error.into()),
 												};
 												if let Some(peer) = peer {
@@ -132,6 +148,7 @@ impl Proxy {
 			associations,
 			packets,
 			replies,
+			unreachable_errors,
 			disconnect,
 			_guard,
 			tasks,
@@ -161,6 +178,13 @@ impl Proxy {
 		}
 		Ok(())
 	}
+}
+
+fn upstream_port_unreachable(error: &std::io::Error) -> bool {
+	matches!(
+		error.kind(),
+		std::io::ErrorKind::ConnectionRefused | std::io::ErrorKind::ConnectionReset
+	)
 }
 
 pub async fn server() -> eyre::Result<(tuic_server::ServerGuard, tuic_server::Config, tempfile::TempDir)> {

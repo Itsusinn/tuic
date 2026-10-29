@@ -19,6 +19,43 @@ use wind_core::{AppContext, FlowContext, Outbound, hooks::Protocol, rule::Networ
 
 use super::proxy_fixture::{LIMIT, Proxy, relay_for, server};
 
+#[cfg(target_os = "linux")]
+#[tokio::test]
+async fn proxy_association_survives_upstream_port_unreachable() -> eyre::Result<()> {
+	tokio::time::timeout(LIMIT, async {
+		let upstream = UdpSocket::bind("127.0.0.1:0").await?;
+		let target = upstream.local_addr()?;
+		let proxy = Proxy::start(target, false).await?;
+		let config = proxy.config();
+		let control = tokio::net::TcpStream::connect((config.server.0.as_str(), config.server.1)).await?;
+		let association = fast_socks5::client::Socks5Datagram::bind_with_password(
+			control,
+			"127.0.0.1:0",
+			"proxy-test-user",
+			"proxy-test-password",
+		)
+		.await?;
+		drop(upstream);
+		association.send_to(b"while stopped", target).await?;
+		// Wait for an actual ICMP error, rather than relying on a restart delay.
+		while proxy.unreachable_errors.load(Ordering::SeqCst) == 0 {
+			tokio::time::sleep(Duration::from_millis(10)).await;
+		}
+		let upstream = UdpSocket::bind(target).await?;
+		association.send_to(b"after restart", target).await?;
+		let mut buffer = [0; 128];
+		let (len, peer) = upstream.recv_from(&mut buffer).await?;
+		assert_eq!(&buffer[..len], b"after restart");
+		upstream.send_to(&buffer[..len], peer).await?;
+		let (len, _) = association.recv_from(&mut buffer).await?;
+		assert_eq!(&buffer[..len], b"after restart");
+		assert_eq!(proxy.associations.load(Ordering::SeqCst), 1);
+		drop(association);
+		proxy.shutdown().await
+	})
+	.await?
+}
+
 async fn transfer(outbound: Arc<dyn Outbound>) -> eyre::Result<()> {
 	let listener = TcpListener::bind("127.0.0.1:0").await?;
 	let target = listener.local_addr()?;
