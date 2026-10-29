@@ -8,8 +8,7 @@
 //! Failure-mode coverage:
 //! * self-signed certificate with verification enabled (TLS handshake fails),
 //! * ALPN mismatch (client `h2` vs server `h3`),
-//! * wrong password (handshake sends; the auth failure surfaces on the first
-//!   bidirectional stream),
+//! * wrong password (handshake sends; the auth failure surfaces on the first bidirectional stream),
 //! * unknown UUID (same),
 //! * ACL reject of the relay target.
 
@@ -73,8 +72,7 @@ async fn try_connect(
 async fn run_cases(backend: Backend) {
 	install_crypto_provider();
 
-	// 1. Certificate verification failure: self-signed server + verification
-	//    on.
+	// 1. Certificate verification failure: self-signed server + verification on.
 	{
 		let uuid = Uuid::new_v4();
 		let server = start_server(backend, uuid, "correct", vec!["h3".into()], vec![], Duration::from_secs(3)).await;
@@ -95,8 +93,8 @@ async fn run_cases(backend: Backend) {
 		server.shutdown().await;
 	}
 
-	// 3. Wrong password: the QUIC handshake completes, but the relay must not
-	//    carry data (the auth failure surfaces on the first bi stream).
+	// 3. Wrong password: the QUIC handshake completes, but the relay must not carry data (the auth failure surfaces on the
+	//    first bi stream).
 	{
 		let uuid = Uuid::new_v4();
 		let server = start_server(backend, uuid, "correct", vec!["h3".into()], vec![], Duration::from_secs(1)).await;

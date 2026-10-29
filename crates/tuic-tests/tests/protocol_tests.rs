@@ -3,15 +3,12 @@
 //!
 //! These complement the end-to-end tests in `integration_tests.rs`:
 //!
-//! * The TUIC wire codecs and the free decode helpers now live in `wind-tuic`
-//!   and are shared verbatim by both the quinn and tokio-quiche backends. The
-//!   tests below pin the on-wire byte layout, verify the codec/decoder paths
-//!   agree, and exercise the error handling that the production read paths rely
-//!   on.
-//! * The UDP fragment-reassembly state machine (also shared via `wind-tuic`) is
-//!   driven through a few representative scenarios from a consumer crate.
-//! * The new `[backend]` config section (mode + per-backend tuning) is checked
-//!   for sane defaults and deserialization.
+//! * The TUIC wire codecs and the free decode helpers now live in `wind-tuic` and are shared verbatim by both the quinn and
+//!   tokio-quiche backends. The tests below pin the on-wire byte layout, verify the codec/decoder paths agree, and exercise the
+//!   error handling that the production read paths rely on.
+//! * The UDP fragment-reassembly state machine (also shared via `wind-tuic`) is driven through a few representative scenarios
+//!   from a consumer crate.
+//! * The new `[backend]` config section (mode + per-backend tuning) is checked for sane defaults and deserialization.
 
 use std::net::{Ipv4Addr, Ipv6Addr};
 
