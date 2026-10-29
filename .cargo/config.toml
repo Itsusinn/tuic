@@ -8,6 +8,9 @@ rustflags = ["--cfg", "reqwest_unstable"]
 
 [env]
 RUSTC_BOOTSTRAP = { value = "1" }
+# BoringSSL's default C++ runtime linkage pulls libstdc++.so into musl binaries.
+# Resolve the static runtime at the final link using the cross-linker's paths.
+BORING_BSSL_RUST_CPPLIB_aarch64_unknown_linux_musl = "static:-bundle=stdc++"
 
 [net]
 # Fetch the Wind and quiche fork Git dependencies with the `git` CLI instead of
