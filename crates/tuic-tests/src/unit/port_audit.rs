@@ -1,4 +1,4 @@
-//! Guards the `ipv6_integration` module header against a stale port list.
+//! Guards the `e2e::ipv6` module header against a stale port list.
 //!
 //! The test binds both the TUIC server and the SOCKS5 listener to `:0` and
 //! reads the port back from the returned guard. A header that still cites a
@@ -13,7 +13,7 @@
 const DYNAMIC_HOSTS: &[&str] = &["[::1]", "127.0.0.1"];
 
 /// The test file whose header is audited.
-const TEST_FILE: &str = "ipv6_integration.rs";
+const TEST_FILE: &str = "e2e/ipv6.rs";
 
 /// Whether `line` is a plain `//` comment. Doc comments (`//!`, `///`) document
 /// modules and items, not the list of addresses the test uses.
@@ -130,9 +130,8 @@ fn the_header_is_the_first_plain_comment_block() {
 /// The header of the real test file cites no fixed port.
 #[test]
 fn the_module_header_cites_no_fixed_port() {
-	let path = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/ipv6_integration.rs");
-	let source = std::fs::read_to_string(path).unwrap_or_else(|e| panic!("cannot read {path} to audit its header: {e}"));
-	let header = module_header(&source);
+	let source = include_str!("../../tests/e2e/ipv6.rs");
+	let header = module_header(source);
 	assert!(
 		!header.is_empty(),
 		"{TEST_FILE} must document the endpoints it sets up, but no comment block was found"

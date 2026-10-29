@@ -7,6 +7,7 @@ rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 publish = false
+autotests = false
 
 [features]
 default = ["aws-lc-rs"]
@@ -17,7 +18,7 @@ aws-lc-rs = ["wind-tuic/aws-lc-rs", "dep:aws-lc-rs", "rustls/aws-lc-rs", "tuic-c
 # feature only forwards it to the benchmark harness, which uses it to gate the
 # quiche end-to-end bench cases.
 quiche = ["wind-tuic/quiche"]
-# The HTTP/3 masquerade e2e test (`tests/masquerade.rs`) and the reqwest HTTP/3
+# The HTTP/3 masquerade e2e test (`tests/e2e/masquerade.rs`) and the reqwest HTTP/3
 # client it probes with, off by default.
 #
 # reqwest's `http3` feature is *unconditionally unstable*: it carries a
@@ -54,7 +55,7 @@ uuid = "1"
 serde_json = { version = "1", default-features = false, features = ["std"] }
 tokio-util = { version = "0.7", features = ["codec"] }
 
-# HTTP/3 client for the masquerade e2e test (tests/masquerade.rs), behind the
+# HTTP/3 client for the masquerade e2e test (tests/e2e/masquerade.rs), behind the
 # `masquerade-test` feature; see that feature's comment for why it cannot be an
 # unconditional dependency (and why it cannot live in `[dev-dependencies]`,
 # which cargo forbids from being optional).
@@ -67,7 +68,7 @@ http = { version = "1", optional = true }
 # `cargo codspeed run` execute the same benchmark functions.
 criterion = { version = "5.0.2", package = "codspeed-criterion-compat" }
 
-# `tests/tls_options.rs`: a recording `ResolvesServerCert` needs rustls' server
+# `tests/integration/tls_options.rs`: a recording `ResolvesServerCert` needs rustls' server
 # and signing traits, and `tempfile`/`rustls-pemfile` cover the certificate
 # plumbing the test builds.
 rustls-pemfile = { version = "2", default-features = false, features = ["std"] }
@@ -94,3 +95,15 @@ tuic-client = { path = "../tuic-client", default-features = false, features = ["
 wind-tuic = { git = "https://github.com/rust-proxy/wind", rev = "12fbf7a690a4f20be6c9c593addf42a670cfc1a5", default-features = false, features = ["quiche"] }
 quinn = { workspace = true, default-features = false, features = ["runtime-tokio", "rustls-aws-lc-rs"] }
 rcgen = { version = "0.14", default-features = false, features = ["crypto", "pem", "aws_lc_rs"] }
+
+[[test]]
+name = "smoke"
+path = "tests/smoke/main.rs"
+
+[[test]]
+name = "integration"
+path = "tests/integration/main.rs"
+
+[[test]]
+name = "e2e"
+path = "tests/e2e/main.rs"

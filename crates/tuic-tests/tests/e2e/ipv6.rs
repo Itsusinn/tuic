@@ -1,4 +1,4 @@
-//! IPv6 end-to-end integration test.
+//! IPv6 end-to-end test.
 
 use std::time::Duration;
 
@@ -8,16 +8,9 @@ use tuic_server::config::ExperimentalConfig;
 use tuic_tests::{run_tcp_echo_server, run_udp_echo_server, test_tcp_through_socks5, test_udp_through_socks5};
 use uuid::Uuid;
 
-/// Outer deadline for the UDP relay half.
-///
-/// It has to outlive what the UDP relay helper does on its own: a 100 ms settle
-/// before the relay starts plus its [`tuic_tests::UDP_RELAY_RESPONSE_DEADLINE`]
-/// window, inside which it retransmits a lost datagram. A tighter outer
-/// deadline aborts the relay while the helper is still retransmitting, so a
-/// slow relay surfaces as this test's opaque "timed out" panic instead of the
-/// helper's own diagnostic. Twice the helper's window also leaves room for the
-/// SOCKS5 UDP association setup.
-const UDP_RELAY_TIMEOUT: Duration = Duration::from_secs(10);
+#[path = "../support/deadlines.rs"]
+mod deadlines;
+use deadlines::UDP_RELAY_TIMEOUT;
 
 // - Server bound on [::1]:0 (IPv6 localhost, OS-assigned port)
 // - Client connecting to the server on the port the guard reported
@@ -30,7 +23,7 @@ const UDP_RELAY_TIMEOUT: Duration = Duration::from_secs(10);
 // endpoint. The port audit in `port_audit.rs` fails if that stops being true.
 #[tokio::test]
 #[tracing_test::traced_test]
-async fn test_ipv6_server_client_integration() -> eyre::Result<()> {
+async fn ipv6_server_client_relay() -> eyre::Result<()> {
 	use std::{collections::HashMap, net::SocketAddr, path::PathBuf};
 	#[cfg(feature = "aws-lc-rs")]
 	let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
@@ -38,7 +31,7 @@ async fn test_ipv6_server_client_integration() -> eyre::Result<()> {
 	let _ = rustls::crypto::ring::default_provider().install_default();
 
 	info!("\n[IPv6 Test] ========================================");
-	info!("[IPv6 Test] Starting IPv6 Integration Test");
+	info!("[IPv6 Test] Starting IPv6 E2E Test");
 	info!("[IPv6 Test] ========================================\n");
 
 	// Skip (rather than silently pass) when the environment has no IPv6
@@ -215,40 +208,8 @@ async fn test_ipv6_server_client_integration() -> eyre::Result<()> {
 	server.shutdown().await;
 
 	info!("[IPv6 Test] ========================================");
-	info!("[IPv6 Test] IPv6 Integration Test Completed");
+	info!("[IPv6 Test] IPv6 E2E Test Completed");
 	info!("[IPv6 Test] ========================================\n");
 
 	Ok(())
-}
-
-/// The outer UDP deadline must stay strictly above the relay helper's own
-/// response window: the helper retransmits a lost datagram for that whole
-/// window, so an outer deadline inside it can only abort a relay that is still
-/// making progress.
-#[test]
-fn the_udp_relay_deadline_outlives_the_helper_response_window() {
-	assert!(
-		UDP_RELAY_TIMEOUT > tuic_tests::UDP_RELAY_RESPONSE_DEADLINE,
-		"outer UDP deadline {UDP_RELAY_TIMEOUT:?} must exceed the relay helper's response window {:?}",
-		tuic_tests::UDP_RELAY_RESPONSE_DEADLINE
-	);
-}
-
-// The module header is audited by the `port_audit` test in this directory,
-// which fails if this file ever documents a fixed loopback port again.
-
-/// A crate-level allowance for unused imports would let a removed call site
-/// leave a dead `use` behind with no diagnostic at all, which is how the
-/// imports in this file previously drifted out of date; the compiler only keeps
-/// reporting them while such an allowance is absent. The audit is textual
-/// because no build of this file can observe an attribute that would silence
-/// it.
-#[test]
-fn the_file_does_not_mute_unused_import_warnings() {
-	const SOURCE: &str = include_str!("ipv6_integration.rs");
-	const FORBIDDEN: &str = concat!("allow", "(unused_imports)");
-	assert!(
-		!SOURCE.contains(FORBIDDEN),
-		"ipv6_integration.rs must drop its dead imports instead of muting the warnings about them"
-	);
 }

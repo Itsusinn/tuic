@@ -1,6 +1,6 @@
 //! Full-stack reconnect E2E (quinn backend).
 //!
-//! Each backend lives in its own test binary; both call the shared
+//! The backend-specific cases call the shared
 //! [`tuic_tests::reconnect_case`].
 
 use tuic_tests::{Backend, reconnect_case};

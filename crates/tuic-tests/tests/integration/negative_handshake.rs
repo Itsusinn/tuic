@@ -1,9 +1,9 @@
-//! Negative end-to-end tests for connection-establishment, authentication, and
+//! Negative outbound/server integration tests for connection-establishment, authentication, and
 //! routing failure modes.
 //!
 //! These are driven at the low-level `TuicOutbound` layer (no SOCKS5 inbound),
 //! mirroring `graceful_shutdown.rs`, so a single test binary can exercise both
-//! QUIC backends without the "one `tuic_client::run` per process" constraint.
+//! QUIC backends with precise control over the failure under test.
 //!
 //! Failure-mode coverage:
 //! * self-signed certificate with verification enabled (TLS handshake fails),

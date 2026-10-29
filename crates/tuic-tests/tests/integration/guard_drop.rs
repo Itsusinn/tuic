@@ -39,3 +39,17 @@ async fn dropping_a_pair_without_shutdown_stops_both_processes() {
 		tokio::time::sleep(Duration::from_millis(50)).await;
 	}
 }
+
+/// Application lifecycle integration: a whole pair's data directory exists
+/// while the pair runs and is gone once the pair has been shut down.
+/// `shutdown` consumes the pair, so its remaining field is released there
+/// rather than at the end of a scope.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_started_pair_leaves_no_data_dir_behind() {
+	let pair = TestPair::start(Backend::Quinn, false).await;
+	let data_dir = pair.data_dir().to_path_buf();
+	std::fs::write(data_dir.join("seed.txt"), b"seed").expect("seed data directory");
+	assert!(data_dir.is_dir(), "{} must exist while the pair runs", data_dir.display());
+	pair.shutdown().await;
+	assert!(!data_dir.exists(), "{} must be gone after shutdown", data_dir.display());
+}
