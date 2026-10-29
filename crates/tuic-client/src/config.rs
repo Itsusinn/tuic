@@ -340,14 +340,12 @@ impl<'de> Deserialize<'de> for Config {
 	fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
 		let mut values = figment::value::Dict::deserialize(deserializer)?;
 		migrate_relay(&mut values).map_err(D::Error::custom)?;
-		Figment::from(Serialized::defaults(values))
+		let config = Figment::from(Serialized::defaults(values))
 			.extract::<ConfigFile>()
 			.map(Config::from)
-			.and_then(|config| {
-				config.validate().map_err(|error| figment::Error::from(error.to_string()))?;
-				Ok(config)
-			})
-			.map_err(D::Error::custom)
+			.map_err(D::Error::custom)?;
+		config.validate().map_err(D::Error::custom)?;
+		Ok(config)
 	}
 }
 
