@@ -11,7 +11,8 @@ reorder_imports = true                  # Reorder imports alphabetically
 reorder_modules = true                  # Reorder module declarations
 
 # Comments
-wrap_comments = true                    # Wrap comments to max_width
+wrap_comments = true                    # Wrap comments to comment_width
+comment_width = 128                     # Maximum width of comment lines
 normalize_comments = true               # Normalize comment style
 format_code_in_doc_comments = true      # Format code blocks in doc comments
 

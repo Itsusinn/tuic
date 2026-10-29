@@ -7,18 +7,13 @@
 //! The suite is layered, because the layers need different instrumentation
 //! modes:
 //!
-//! * **In-process cases** (the TUIC wire codecs in both directions — the
-//!   `Encoder`/`Decoder` pair and the free `decode_*` helpers production
-//!   actually calls — native-mode UDP fragment reassembly and capacity
-//!   eviction, legacy ACL parsing and lowering, startup configuration parsing)
-//!   run in every mode, including `memory` under Valgrind.
-//! * **End-to-end cases** (a real `tuic-server` + `tuic-client` pair relaying
-//!   TCP and a fragmented UDP datagram through a loopback SOCKS5 proxy, quinn
-//!   and quiche backends) are admitted only when `TUIC_BENCH_E2E` is set. A
-//!   Valgrind-instrumented loop cannot complete a QUIC handshake in a usable
-//!   amount of time, so those cases belong on the self-hosted `walltime`
-//!   runner, which sets `TUIC_BENCH_E2E=all`; see
-//!   `.github/workflows/codspeed.yml`.
+//! * **In-process cases** (the TUIC wire codecs in both directions — the `Encoder`/`Decoder` pair and the free `decode_*`
+//!   helpers production actually calls — native-mode UDP fragment reassembly and capacity eviction, legacy ACL parsing and
+//!   lowering, startup configuration parsing) run in every mode, including `memory` under Valgrind.
+//! * **End-to-end cases** (a real `tuic-server` + `tuic-client` pair relaying TCP and a fragmented UDP datagram through a
+//!   loopback SOCKS5 proxy, quinn and quiche backends) are admitted only when `TUIC_BENCH_E2E` is set. A Valgrind-instrumented
+//!   loop cannot complete a QUIC handshake in a usable amount of time, so those cases belong on the self-hosted `walltime`
+//!   runner, which sets `TUIC_BENCH_E2E=all`; see `.github/workflows/codspeed.yml`.
 //!
 //! Configuration inputs come from the existing TUIC fixtures
 //! (`tuic-{server,client}/tests/config/*.toml`) rather than hand-written

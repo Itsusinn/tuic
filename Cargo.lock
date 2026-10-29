@@ -5424,7 +5424,7 @@ checksum = "e421abadd41a4225275504ea4d6566923418b7f05506fbc9c0fe86ba7396114b"
 
 [[package]]
 name = "tuic-client"
-version = "2.0.0-dev8"
+version = "2.0.0-dev9"
 dependencies = [
  "async-trait",
  "aws-lc-rs",
@@ -5465,7 +5465,7 @@ dependencies = [
 
 [[package]]
 name = "tuic-server"
-version = "2.0.0-dev8"
+version = "2.0.0-dev9"
 dependencies = [
  "arc-swap",
  "async-trait",
@@ -5523,7 +5523,7 @@ dependencies = [
 
 [[package]]
 name = "tuic-tests"
-version = "2.0.0-dev8"
+version = "2.0.0-dev9"
 dependencies = [
  "async-trait",
  "aws-lc-rs",

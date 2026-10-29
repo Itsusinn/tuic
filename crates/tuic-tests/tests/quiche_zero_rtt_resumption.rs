@@ -4,12 +4,11 @@
 //! path still relays over a fresh 1-RTT connection — this test drives the full
 //! resumption flow and asserts that early data is actually *accepted*:
 //!
-//! 1. connect once through a `wind-quic` quiche server (full 1-RTT handshake)
-//!    and read back the TLS session ticket from the client handle;
+//! 1. connect once through a `wind-quic` quiche server (full 1-RTT handshake) and read back the TLS session ticket from the
+//!    client handle;
 //! 2. reconnect with that session via `quiche::connect_with_session`;
-//! 3. assert the completed handshake reports `SSL_early_data_reason ==
-//!    SSL_EARLY_DATA_ACCEPTED (2)` — i.e. the server accepted the client's
-//!    early data, not merely the connection.
+//! 3. assert the completed handshake reports `SSL_early_data_reason == SSL_EARLY_DATA_ACCEPTED (2)` — i.e. the server accepted
+//!    the client's early data, not merely the connection.
 //!
 //! The server here is `wind-quic`'s quiche endpoint with
 //! `TransportConfig::enable_0rtt`, the same stack the TUIC server's quiche

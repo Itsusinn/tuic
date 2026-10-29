@@ -54,14 +54,12 @@ pub enum TlsConfigError {
 /// Build the rustls configuration for the quinn TUIC outbound.
 ///
 /// Mirrors the semantics of `[tls]`:
-/// * `skip_cert_verify` disables verification entirely (the trust store is not
-///   even loaded).
-/// * `disable_native_certs` replaces the platform trust store with the built-in
-///   webpki/Mozilla root set instead of switching verification off.
-/// * `certificates` adds extra PEM CA roots to whichever trust store is used,
-///   which is how a privately signed relay certificate becomes trusted.
-/// * `disable_sni` stops advertising the server name in the ClientHello while
-///   certificate verification still uses it.
+/// * `skip_cert_verify` disables verification entirely (the trust store is not even loaded).
+/// * `disable_native_certs` replaces the platform trust store with the built-in webpki/Mozilla root set instead of switching
+///   verification off.
+/// * `certificates` adds extra PEM CA roots to whichever trust store is used, which is how a privately signed relay certificate
+///   becomes trusted.
+/// * `disable_sni` stops advertising the server name in the ClientHello while certificate verification still uses it.
 pub fn build_client_config(relay: &Relay) -> Result<rustls::ClientConfig, TlsConfigError> {
 	let mut config = if relay.skip_cert_verify {
 		warn!(

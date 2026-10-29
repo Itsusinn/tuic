@@ -551,9 +551,8 @@ where
 ///
 /// * Port ranges and protocol-filtered ports produce additional compound rules.
 /// * `Localhost` / `Private` addresses expand into OR-groups of CIDR rules.
-/// * Domain/WildcardDomain ACL rules that previously only matched when DNS-
-///   resolved to an IP are now converted to domain-level Metacubex rules so
-///   they can match *before* resolution.
+/// * Domain/WildcardDomain ACL rules that previously only matched when DNS- resolved to an IP are now converted to domain-level
+///   Metacubex rules so they can match *before* resolution.
 ///
 /// A rule that carries a `hijack` (destination-rewrite) target is converted as
 /// its plain match + outbound only: [`wrule::RuleType`] has no destination-NAT

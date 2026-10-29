@@ -341,8 +341,7 @@ async fn drains_while_active_traffic_flows() {
 	let client = connect_tuic_client(server_addr, uuid, password).await;
 	tokio::time::sleep(Duration::from_millis(200)).await;
 
-	// 4. Open a TCP tunnel through TUIC to the echo server and start continuous
-	//    traffic in a background task.
+	// 4. Open a TCP tunnel through TUIC to the echo server and start continuous traffic in a background task.
 	let (local, remote) = tokio::io::duplex(8192);
 	let target = TargetAddr::IPv4(Ipv4Addr::LOCALHOST, echo_addr.port());
 
@@ -351,8 +350,7 @@ async fn drains_while_active_traffic_flows() {
 		let _ = c.handle_tcp(test_ctx(&target), Box::new(remote)).await;
 	});
 
-	// 5. Pump traffic through the tunnel: send a ping, expect the echo back.
-	//    Run in a loop to keep the connection busy.
+	// 5. Pump traffic through the tunnel: send a ping, expect the echo back. Run in a loop to keep the connection busy.
 	let traffic_done = Arc::new(AtomicBool::new(false));
 	let td = traffic_done.clone();
 	// Count successful ping→echo round-trips so the test can prove traffic
@@ -395,9 +393,8 @@ async fn drains_while_active_traffic_flows() {
 		tokio::time::sleep(Duration::from_millis(10)).await;
 	}
 
-	// 6. Prove traffic actually flowed through the tunnel: several successful
-	//    ping→echo round-trips must have completed before we cancel (previously
-	//    zero round-trips still passed the test).
+	// 6. Prove traffic actually flowed through the tunnel: several successful ping→echo round-trips must have completed before
+	//    we cancel (previously zero round-trips still passed the test).
 	let completed = round_trips.load(Ordering::SeqCst);
 	assert!(
 		completed >= 3,

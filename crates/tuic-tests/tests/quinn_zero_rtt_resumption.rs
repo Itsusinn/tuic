@@ -4,13 +4,11 @@
 //! path still relays over a fresh 1-RTT connection — this test drives the full
 //! resumption flow and asserts that early data is actually *accepted*:
 //!
-//! 1. connect once (full 1-RTT handshake; the server sends a TLS 1.3 session
-//!    ticket which the client caches in memory);
-//! 2. reconnect on the **same** client endpoint/config (so the ticket is still
-//!    there) and convert the handshake via `Connecting::into_0rtt()`;
-//! 3. open a stream and write before the handshake completes, then assert on
-//!    the server side that the received stream `is_0rtt()` — i.e. the server
-//!    *accepted* the client's early data rather than rejecting it.
+//! 1. connect once (full 1-RTT handshake; the server sends a TLS 1.3 session ticket which the client caches in memory);
+//! 2. reconnect on the **same** client endpoint/config (so the ticket is still there) and convert the handshake via
+//!    `Connecting::into_0rtt()`;
+//! 3. open a stream and write before the handshake completes, then assert on the server side that the received stream
+//!    `is_0rtt()` — i.e. the server *accepted* the client's early data rather than rejecting it.
 //!
 //! The client is `wind-quic`'s `QuinnClient` (the stack the `wind-tuic` quinn
 //! outbound builds on) with 0-RTT enabled. The server is a raw quinn endpoint

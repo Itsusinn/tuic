@@ -11,8 +11,7 @@ use uuid::Uuid;
 //
 // This test validates:
 // - Client configuration with SOCKS5 proxy settings
-// - Proper handling of proxy configuration fields (server, username, password,
-//   udp_buffer_size)
+// - Proper handling of proxy configuration fields (server, username, password, udp_buffer_size)
 // - Configuration parsing for different proxy scenarios
 #[tokio::test]
 #[tracing_test::traced_test]
