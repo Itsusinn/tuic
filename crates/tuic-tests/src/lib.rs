@@ -137,7 +137,8 @@ pub fn tuic_client_config(
 			// IPv4 associate socket used here (notably on CI runners without IPv6).
 			// `None` skips the dual-stack setsockopt entirely.
 			dual_stack: None,
-			max_packet_size: 1500,
+			// Payload/fragmentation tests intentionally allow full UDP datagrams.
+			max_packet_size: 65535,
 			tcp_forward: Vec::new(),
 			udp_forward: Vec::new(),
 		},
