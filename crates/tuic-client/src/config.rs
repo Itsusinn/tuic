@@ -113,7 +113,7 @@ struct ConfigFile {
 	/// failure.  Defaults to `true` (matching v1.8.11 `startup_mode =
 	/// "lazy"`).
 	#[educe(Default = true)]
-	#[serde(default)]
+	#[serde(default = "default_lazy")]
 	pub lazy: bool,
 
 	pub tls: TlsConfig,
@@ -343,6 +343,10 @@ impl<'de> Deserialize<'de> for Config {
 		Figment::from(Serialized::defaults(values))
 			.extract::<ConfigFile>()
 			.map(Config::from)
+			.and_then(|config| {
+				config.validate().map_err(|error| figment::Error::from(error.to_string()))?;
+				Ok(config)
+			})
 			.map_err(D::Error::custom)
 	}
 }
@@ -453,7 +457,7 @@ pub struct Relay {
 	/// failure.  Defaults to `true` (matching v1.8.11 `startup_mode =
 	/// "lazy"`).
 	#[educe(Default = true)]
-	#[serde(default)]
+	#[serde(default = "default_lazy")]
 	pub lazy: bool,
 
 	/// Selected QUIC backend. Mirrors `backend.mode`.
@@ -539,7 +543,25 @@ fn default_udp_timeout() -> Duration {
 	Duration::from_secs(60)
 }
 
+fn default_lazy() -> bool {
+	true
+}
+
 impl Config {
+	pub(crate) fn validate(&self) -> eyre::Result<()> {
+		if self.local.username.is_some() != self.local.password.is_some() {
+			eyre::bail!("local.username and local.password must be configured together");
+		}
+		if self.relay.backend_mode == BackendMode::Quiche
+			&& (self.relay.disable_sni || self.relay.disable_native_certs || !self.relay.certificates.is_empty())
+		{
+			eyre::bail!(
+				"quiche does not support tls.disable_sni, tls.disable_native_certs or tls.certificates; use the quinn backend"
+			);
+		}
+		Ok(())
+	}
+
 	pub fn parse(cli: Cli, env_state: EnvState) -> eyre::Result<Self> {
 		let path = cli.config.ok_or(ConfigError::NoConfig)?;
 
@@ -814,6 +836,32 @@ pub enum ConfigError {
 #[cfg(test)]
 mod tests {
 	use super::*;
+
+	#[test]
+	fn omitted_lazy_matches_runtime_default() -> eyre::Result<()> {
+		for content in ["server = '127.0.0.1:4433'", "[relay]\nserver = '127.0.0.1:4433'"] {
+			let cfg: Config = toml::from_str(content)?;
+			assert!(cfg.relay.lazy);
+			assert_eq!(cfg.relay.lazy, Config::default().relay.lazy);
+		}
+		let cfg: Config = toml::from_str("lazy = false")?;
+		assert!(!cfg.relay.lazy);
+		Ok(())
+	}
+
+	#[test]
+	fn unsafe_partial_credentials_and_unsupported_tls_are_rejected() {
+		for input in [
+			"[local]\nusername = 'test'",
+			"[local]\npassword = 'test'",
+			"[backend]\nmode = 'quiche'\n[tls]\ndisable_sni = true",
+			"[backend]\nmode = 'quiche'\n[tls]\ndisable_native_certs = true",
+			"[backend]\nmode = 'quiche'\n[tls]\ncertificates = ['test.pem']",
+		] {
+			assert!(toml::from_str::<Config>(input).is_err());
+		}
+		assert!(toml::from_str::<Config>("[local]\nusername = 'test'\npassword = 'test'").is_ok());
+	}
 
 	#[test]
 	fn modern_and_legacy_layouts_are_equivalent() {

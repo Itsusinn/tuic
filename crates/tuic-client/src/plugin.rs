@@ -8,9 +8,9 @@ use std::{net::SocketAddr, sync::Arc};
 use eyre::WrapErr;
 use tokio::sync::watch;
 use wind_base::{LazyOutbound, tunnel::TunnelTcpInbound};
-use wind_core::{App, AppContext, InboundHooks, Outbound, Plugin};
+use wind_core::{App, AppContext, InboundHooks, Outbound, Plugin, Resolver, SystemResolver};
 use wind_socks::inbound::{AuthMode, SocksInbound, SocksInboundOpt};
-use wind_tuic::quinn::outbound::{ReconnectConfig, TuicOutbound, TuicOutboundOpts};
+use wind_tuic::quinn::outbound::{PeerResolver, ReconnectConfig, TuicOutbound, TuicOutboundOpts};
 
 use crate::{
 	config::{BackendMode, Relay},
@@ -42,14 +42,34 @@ async fn resolve_peer(relay: &Relay) -> eyre::Result<(SocketAddr, String)> {
 	let server_addr = if let Some(ip) = relay.ip {
 		SocketAddr::new(ip, relay.server.1)
 	} else {
-		let addrs = tokio::net::lookup_host(format!("{}:{}", relay.server.0, relay.server.1)).await?;
-		addrs
-			.into_iter()
-			.next()
-			.ok_or_else(|| eyre::eyre!("Failed to resolve server address"))?
+		let host = relay.server.0.trim_start_matches('[').trim_end_matches(']');
+		let ip = SystemResolver::new(relay.ipstack_prefer).resolve(host).await?;
+		SocketAddr::new(ip, relay.server.1)
 	};
 
 	Ok((server_addr, server_name(relay)))
+}
+
+fn peer_resolver(relay: &Relay) -> Option<PeerResolver> {
+	let host = relay.server.0.trim_start_matches('[').trim_end_matches(']');
+	if relay.proxy.is_some() || relay.ip.is_some() || host.parse::<std::net::IpAddr>().is_ok() {
+		return None;
+	}
+	let host = host.to_owned();
+	let port = relay.server.1;
+	let prefer = relay.ipstack_prefer;
+	let timeout = relay.timeout;
+	Some(Arc::new(move || {
+		let host = host.clone();
+		Box::pin(async move {
+			let resolver = SystemResolver::new(prefer);
+			let ip = tokio::time::timeout(timeout, resolver.resolve(&host))
+				.await
+				.map_err(|_| "TUIC relay DNS resolution timed out".to_owned())?
+				.map_err(|error| error.to_string())?;
+			Ok(SocketAddr::new(ip, port))
+		})
+	}))
 }
 
 fn server_name(relay: &Relay) -> String {
@@ -98,6 +118,13 @@ fn install_crypto_provider() {
 /// (including `crate::tls` and the rustls client configuration it builds)
 /// without duplicating it.
 pub async fn build_quinn_outbound(ctx: Arc<AppContext>, relay: Relay) -> eyre::Result<Arc<dyn Outbound>> {
+	tokio::select! {
+		_ = ctx.token.cancelled() => Err(eyre::eyre!("TUIC setup cancelled")),
+		result = tokio::time::timeout(relay.timeout, build_quinn_outbound_inner(ctx.clone(), relay)) => { result.wrap_err("TUIC setup timed out")? }
+	}
+}
+
+async fn build_quinn_outbound_inner(ctx: Arc<AppContext>, relay: Relay) -> eyre::Result<Arc<dyn Outbound>> {
 	install_crypto_provider();
 	let proxy_chain = relay.proxy.as_ref().map(|_| ProxyChain::new(&ctx, &relay)).transpose()?;
 	let (server_addr, sni) = match &proxy_chain {
@@ -130,7 +157,7 @@ pub async fn build_quinn_outbound(ctx: Arc<AppContext>, relay: Relay) -> eyre::R
 
 	let opts = TuicOutboundOpts {
 		peer_addr: server_addr,
-		peer_resolver: None,
+		peer_resolver: peer_resolver(&relay),
 		sni,
 		auth: (relay.uuid, password),
 		zero_rtt_handshake: relay.zero_rtt_handshake,
@@ -178,10 +205,17 @@ pub async fn build_quinn_outbound(ctx: Arc<AppContext>, relay: Relay) -> eyre::R
 /// The quiche client consumes the `backend.quiche` transport tuning plus the
 /// shared `[tls]`/relay fields. `[tls] disable_sni`, `[tls]
 /// disable_native_certs`, and the `[tls] certificates` list have no counterpart
-/// in the quiche TLS settings, so they are named in a warning instead of being
-/// ignored silently (they do work on the quinn backend).
+/// in the quiche TLS settings, so configuration validation rejects them.
 #[cfg(feature = "quiche")]
 async fn build_quiche_outbound(ctx: Arc<AppContext>, relay: Relay) -> eyre::Result<Arc<dyn Outbound>> {
+	tokio::select! {
+		_ = ctx.token.cancelled() => Err(eyre::eyre!("TUIC setup cancelled")),
+		result = tokio::time::timeout(relay.timeout, build_quiche_outbound_inner(ctx.clone(), relay)) => { result.wrap_err("TUIC setup timed out")? }
+	}
+}
+
+#[cfg(feature = "quiche")]
+async fn build_quiche_outbound_inner(ctx: Arc<AppContext>, relay: Relay) -> eyre::Result<Arc<dyn Outbound>> {
 	use wind_tuic::quiche::{
 		CongestionControl as QuicheCongestionControl, ConnectionOpts, ReconnectConfig as QuicheReconnect, TuicheOutbound,
 		TuicheOutboundOpts, UdpRelayMode as QuicheUdpRelayMode,
@@ -196,7 +230,7 @@ async fn build_quiche_outbound(ctx: Arc<AppContext>, relay: Relay) -> eyre::Resu
 	};
 
 	if relay.disable_sni || relay.disable_native_certs || !relay.certificates.is_empty() {
-		tracing::warn!(
+		eyre::bail!(
 			"the quiche backend cannot honour `[tls] disable_sni`, `[tls] disable_native_certs`, or `[tls] certificates`; \
 			 they only take effect on the quinn backend (the default)"
 		);
@@ -285,6 +319,7 @@ impl TuicClientPlugin {
 
 impl Plugin<ClientRouter> for TuicClientPlugin {
 	async fn build(self, app: App<ClientRouter>) -> eyre::Result<App<ClientRouter>> {
+		self.cfg.validate()?;
 		let ctx = app.context().clone();
 		let local = self.cfg.local;
 		// Bind every forwarder before eager relay setup can start background
@@ -377,6 +412,78 @@ mod tests {
 
 	use super::*;
 	use crate::config::UdpForward;
+
+	#[tokio::test]
+	async fn dns_preference_and_reconnect_resolver_are_wired() -> eyre::Result<()> {
+		let mut relay = Relay::default();
+		relay.server = ("localhost".into(), 4433);
+		for (prefer, ipv4) in [
+			(crate::utils::StackPrefer::V4only, true),
+			(crate::utils::StackPrefer::V6only, false),
+		] {
+			relay.ipstack_prefer = prefer;
+			let (address, _) = resolve_peer(&relay).await?;
+			assert_eq!(address.is_ipv4(), ipv4);
+			let resolver = peer_resolver(&relay).ok_or_else(|| eyre::eyre!("missing reconnect resolver"))?;
+			for _ in 0..2 {
+				let resolved = resolver().await.map_err(eyre::Report::msg)?;
+				assert_eq!(resolved.is_ipv4(), ipv4);
+				assert_eq!(resolved.port(), 4433);
+			}
+		}
+		relay.ip = Some("127.0.0.2".parse()?);
+		assert_eq!(
+			resolve_peer(&relay).await?.0.ip(),
+			relay.ip.ok_or_else(|| eyre::eyre!("missing ip"))?
+		);
+		assert!(peer_resolver(&relay).is_none());
+		relay.ip = None;
+		relay.proxy = Some(Default::default());
+		assert!(peer_resolver(&relay).is_none());
+		Ok(())
+	}
+
+	#[tokio::test]
+	async fn partial_local_credentials_fail_before_binding() -> eyre::Result<()> {
+		for username_only in [true, false] {
+			let mut cfg = crate::Config::default();
+			cfg.local.server = "127.0.0.1:0".parse()?;
+			if username_only {
+				cfg.local.username = Some(b"test".to_vec());
+			} else {
+				cfg.local.password = Some(b"test".to_vec());
+			}
+			let error = crate::run(cfg)
+				.await
+				.err()
+				.ok_or_else(|| eyre::eyre!("accepted partial credentials"))?;
+			assert!(error.to_string().contains("configured together"));
+		}
+		Ok(())
+	}
+
+	#[tokio::test]
+	async fn direct_handshake_respects_timeout() -> eyre::Result<()> {
+		let mut backends = vec![BackendMode::Quinn];
+		if cfg!(feature = "quiche") {
+			backends.push(BackendMode::Quiche);
+		}
+		for backend in backends {
+			let blackhole = std::net::UdpSocket::bind("127.0.0.1:0")?;
+			let address = blackhole.local_addr()?;
+			let mut relay = Relay::default();
+			relay.server = (address.ip().to_string(), address.port());
+			relay.skip_cert_verify = true;
+			relay.backend_mode = backend;
+			relay.timeout = Duration::from_millis(30);
+			let ctx = Arc::new(AppContext::default());
+			let result = tokio::time::timeout(Duration::from_secs(2), build_outbound(ctx.clone(), relay)).await?;
+			ctx.token.cancel();
+			let error = result.err().ok_or_else(|| eyre::eyre!("blackhole connected"))?;
+			assert!(error.to_string().contains("timed out"), "{error:#}");
+		}
+		Ok(())
+	}
 
 	/// Occupy a loopback UDP port and keep the socket open, so the address
 	/// stays taken for the duration of the test.
