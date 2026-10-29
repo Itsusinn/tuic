@@ -36,6 +36,9 @@ use wind_core::{
 };
 use wind_tuic::quiche::TuicheInboundBuilder;
 
+#[path = "../../../tuic-server/src/cert_renewal.rs"]
+mod renewal;
+
 /// How long the listener may take to serve the rotated certificate. The swap
 /// itself is an in-process atomic store, so this only has to cover the time to
 /// observe a handshake — it is a failure budget, not an expected wait.
@@ -222,7 +225,37 @@ async fn quiche_certificate_hot_reload() -> eyre::Result<()> {
 		served_a, expected_b,
 		"the two generated certificates must differ, otherwise this test proves nothing"
 	);
-	store.update(cert_b.as_bytes(), key_b.as_bytes())?;
+	std::fs::write(&cert_path, &cert_b)?;
+	std::fs::write(&key_path, &key_b)?;
+	let renew_cert = cert_path.clone();
+	let renew_key = key_path.clone();
+	let renewal_cancel = CancellationToken::new();
+	let signal = renewal_cancel.clone();
+	let updated_store = store.clone();
+	let (updated_tx, updated_rx) = tokio::sync::oneshot::channel();
+	let mut updated_tx = Some(updated_tx);
+	let renewal_task = tokio::spawn(async move {
+		renewal::run(renewal_cancel, Duration::from_millis(1), move || {
+			let (store, cert, key, signal, tx) = (
+				updated_store.clone(),
+				renew_cert.clone(),
+				renew_key.clone(),
+				signal.clone(),
+				updated_tx.take(),
+			);
+			async move {
+				let result = renewal::reload(&store, &cert, &key).await;
+				if let Some(tx) = tx {
+					let _ = tx.send(result.is_ok());
+				}
+				signal.cancel();
+				result
+			}
+		})
+		.await;
+	});
+	assert!(timeout(RELOAD_DEADLINE, updated_rx).await??);
+	timeout(RELOAD_DEADLINE, renewal_task).await??;
 
 	// The swap is an in-process `ArcSwap::store`, so it is visible to the very
 	// next handshake. Poll instead of sleeping a fixed slice: a probe may fail
@@ -260,6 +293,11 @@ async fn quiche_certificate_hot_reload() -> eyre::Result<()> {
 		"the certificate served after CertStore::update is not the rotated leaf"
 	);
 
+	// Failed renewal must leave the previously served leaf intact.
+	std::fs::write(&cert_path, b"invalid certificate")?;
+	assert!(renewal::reload(&store, &cert_path, &key_path).await.is_err());
+	assert_eq!(fetch_served_cert(&endpoint, listen).await?, expected_b);
+
 	endpoint.wait_idle().await;
 
 	// The listener must stop because it was asked to, not because the test
@@ -278,4 +316,36 @@ async fn quiche_certificate_hot_reload() -> eyre::Result<()> {
 		}
 	}
 	Ok(())
+}
+
+#[tokio::test]
+async fn quiche_application_honors_custom_alpn_and_auth_timeout() -> eyre::Result<()> {
+	tuic_tests::install_crypto_provider();
+	let dir = TempDir::new()?;
+	let mut cfg =
+		tuic_tests::quiche_server_config("127.0.0.1:0".parse()?, dir.path().into(), uuid::Uuid::new_v4(), "test", false);
+	cfg.auth_timeout = Duration::from_millis(50);
+	cfg.tls.alpn = vec!["tuic-audit".into()];
+	let server = tuic_server::run(cfg).await?;
+	let provider = Arc::new(rustls::crypto::aws_lc_rs::default_provider());
+	let mut crypto = rustls::ClientConfig::builder_with_provider(provider)
+		.with_protocol_versions(&[&rustls::version::TLS13])?
+		.dangerous()
+		.with_custom_certificate_verifier(Arc::new(SkipVerify))
+		.with_no_client_auth();
+	crypto.alpn_protocols = vec![b"tuic-audit".to_vec()];
+	let qcc = quinn::crypto::rustls::QuicClientConfig::try_from(crypto)?;
+	let endpoint = Endpoint::client("127.0.0.1:0".parse()?)?;
+	endpoint.set_default_client_config(quinn::ClientConfig::new(Arc::new(qcc)));
+	let result = async {
+		let connection = timeout(Duration::from_secs(2), endpoint.connect(server.local_addr, "localhost")?).await??;
+		// Deliberately send no TUIC Authenticate command. The historical 3s
+		// default cannot satisfy this deadline; the configured 50ms can.
+		timeout(Duration::from_secs(2), connection.closed()).await?;
+		Ok::<_, eyre::Report>(())
+	}
+	.await;
+	endpoint.close(0u32.into(), b"done");
+	server.shutdown().await;
+	result
 }
