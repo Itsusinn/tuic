@@ -81,13 +81,21 @@ pub fn make_outbound_action(
 			tcp_keepalive: Some(wind_core::tcp::TcpKeepalive::default()),
 		})),
 		"direct" => build_direct_or_lb(rule, resolver, stream_timeout),
-		other => {
-			tracing::warn!(
-				outbound_type = %other,
-				"unknown outbound type; falling back to DIRECT"
-			);
-			build_direct_or_lb(rule, resolver, stream_timeout)
-		}
+		other => Arc::new(InvalidOutbound(other.to_owned())),
+	}
+}
+
+/// Fail closed even for callers bypassing configuration validation.
+struct InvalidOutbound(String);
+
+#[async_trait]
+impl Outbound for InvalidOutbound {
+	async fn handle_tcp(&self, _: FlowContext, _: Box<dyn wind_core::tcp::AbstractTcpStream>) -> eyre::Result<()> {
+		eyre::bail!("unknown outbound type {:?}", self.0)
+	}
+
+	async fn handle_udp(&self, _: FlowContext, _: wind_core::udp::UdpStream) -> eyre::Result<()> {
+		eyre::bail!("unknown outbound type {:?}", self.0)
 	}
 }
 
@@ -380,7 +388,7 @@ mod tests {
 	}
 
 	#[test]
-	fn test_make_outbound_action_unknown_falls_back_to_direct() {
+	fn test_make_outbound_action_unknown_builds_rejecting_handler() {
 		let rule = OutboundRule {
 			kind: "bogus".to_string(),
 			ip_mode: None,

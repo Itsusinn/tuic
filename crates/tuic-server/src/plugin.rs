@@ -55,6 +55,7 @@ impl TuicServerPlugin {
 impl Plugin<TuicRouter> for TuicServerPlugin {
 	async fn build(self, app: App<TuicRouter>) -> eyre::Result<App<TuicRouter>> {
 		let mut cfg = self.cfg;
+		cfg.validate_outbound_rules()?;
 
 		// DNS resolver
 		let default_ip_mode = cfg.outbound.default.ip_mode.unwrap_or(StackPrefer::V4first);
@@ -71,7 +72,7 @@ impl Plugin<TuicRouter> for TuicServerPlugin {
 
 		// Geo data (blocking io: decode + mmap), off the runtime worker threads
 		// so a large database cannot stall every other task sharing them.
-		let geodata = load_geodata_blocking(cfg.geodata.clone(), cfg.data_dir.clone()).await;
+		let geodata = load_geodata_blocking(cfg.geodata.clone(), cfg.data_dir.clone()).await?;
 
 		// Router
 		let router = wind_adapter::TuicRouter::new(&cfg, resolver.clone(), geodata.clone())?;
@@ -227,7 +228,11 @@ impl Plugin<TuicRouter> for TuicServerPlugin {
 						bound_addr: bound_addr.clone(),
 						..Default::default()
 					};
-					ServerInbound::Tuic(TuicInbound::new(ctx, opts))
+					ServerInbound::Tuic(TuicInbound::new(ctx, opts).with_pmtu(quinn.pmtu).with_runtime_options(
+						cfg.dual_stack,
+						cfg.gc_interval,
+						cfg.gc_lifetime,
+					))
 				});
 			}
 			crate::config::BackendMode::Quiche => {
@@ -266,6 +271,11 @@ impl Plugin<TuicRouter> for TuicServerPlugin {
 						receive_window: quiche_cfg.receive_window,
 						congestion_control: cc,
 						enable_0rtt: quiche_cfg.zero_rtt || zero_rtt,
+						alpn: if cfg.tls.alpn.is_empty() {
+							vec![b"h3".to_vec()]
+						} else {
+							cfg.tls.alpn.iter().map(|s| s.as_bytes().to_vec()).collect()
+						},
 						..Default::default()
 					};
 
@@ -302,6 +312,8 @@ impl Plugin<TuicRouter> for TuicServerPlugin {
 					let quiche_dir = quiche_cert_dir();
 					create_private_dir(&quiche_dir)
 						.with_context(|| format!("create quiche cert dir {}", quiche_dir.display()))?;
+					let staged_certs = StagedCertDir(quiche_dir.clone());
+
 					let quiche_cert_path = quiche_dir.join("cert.pem");
 					let quiche_key_path = quiche_dir.join("key.pem");
 
@@ -337,24 +349,6 @@ impl Plugin<TuicRouter> for TuicServerPlugin {
 						})?;
 					}
 
-					// The listener hands these paths to
-					// tokio-quiche for its whole lifetime, so
-					// drop the staged key only once shutdown
-					// starts. Best effort: a cleanup failure
-					// must not fail an otherwise clean stop.
-					let cleanup_dir = quiche_dir.clone();
-					let cleanup_token = app.context().token.child_token();
-					app.context().tasks.spawn(async move {
-						cleanup_token.cancelled().await;
-						match std::fs::remove_dir_all(&cleanup_dir) {
-							Ok(()) => {}
-							Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
-							Err(e) => {
-								tracing::warn!("failed to remove quiche cert dir {}: {e}", cleanup_dir.display());
-							}
-						}
-					});
-
 					let cert_pem = std::fs::read(&quiche_cert_path)
 						.with_context(|| format!("read quiche cert.pem {}", quiche_cert_path.display()))?;
 					let key_pem = std::fs::read(&quiche_key_path)
@@ -362,27 +356,66 @@ impl Plugin<TuicRouter> for TuicServerPlugin {
 					let cert_store =
 						CertStore::from_pem(&cert_pem, &key_pem).map_err(|e| eyre::eyre!("create quiche cert store: {e}"))?;
 
+					let cleanup_token = app.context().token.child_token();
+					app.context().tasks.spawn(async move {
+						cleanup_token.cancelled().await;
+						drop(staged_certs);
+					});
+
+					if auto_ssl && !tls_self_sign {
+						let store = cert_store.clone();
+						let token = app.context().token.child_token();
+						app.context().tasks.spawn(crate::cert_renewal::run(
+							token,
+							std::time::Duration::from_secs(12 * 60 * 60),
+							move || {
+								let (hostname, email, cert, key, store) = (
+									hostname.clone(),
+									acme_email.clone(),
+									cert_path.clone(),
+									key_path.clone(),
+									store.clone(),
+								);
+								async move {
+									wind_acme::http01::ensure_acme_cert(
+										&hostname,
+										if email.is_empty() { None } else { Some(&email) },
+										&cert,
+										&key,
+										acme_staging,
+									)
+									.await?;
+									crate::cert_renewal::reload(&store, &cert, &key).await
+								}
+							},
+						));
+					}
+
 					let quiche_cert_path_s = quiche_cert_path.to_string_lossy().into_owned();
 					let quiche_key_path_s = quiche_key_path.to_string_lossy().into_owned();
 
 					app = app.add_inbound_with(move |hooks: InboundHooks, ctx: Arc<AppContext>| {
 						let cancel = ctx.token.child_token();
-						ServerInbound::Tuiche(TuicheInbound::new(
-							server,
-							users,
-							opts,
-							quiche_cert_path_s,
-							quiche_key_path_s,
-							cert_store,
-							cancel,
-							masquerade_enabled.then_some(wind_tuic::server::MasqueradeConfig {
-								upstream: masquerade_upstream,
-							}),
-							hooks,
-							active_for_inbound,
-							"tuic".into(),
-							bound_addr.clone(),
-						))
+						ServerInbound::Tuiche(
+							TuicheInbound::new(
+								server,
+								users,
+								opts,
+								quiche_cert_path_s,
+								quiche_key_path_s,
+								cert_store,
+								cancel,
+								masquerade_enabled.then_some(wind_tuic::server::MasqueradeConfig {
+									upstream: masquerade_upstream,
+								}),
+								hooks,
+								active_for_inbound,
+								"tuic".into(),
+								bound_addr.clone(),
+							)
+							.with_auth_timeout(auth_timeout)
+							.with_runtime_options(cfg.dual_stack, cfg.gc_interval, cfg.gc_lifetime),
+						)
 					});
 				}
 			}
@@ -415,6 +448,20 @@ impl Plugin<TuicRouter> for TuicServerPlugin {
 	}
 }
 
+#[cfg(feature = "quiche")]
+struct StagedCertDir(std::path::PathBuf);
+
+#[cfg(feature = "quiche")]
+impl Drop for StagedCertDir {
+	fn drop(&mut self) {
+		if let Err(error) = std::fs::remove_dir_all(&self.0) {
+			if error.kind() != std::io::ErrorKind::NotFound {
+				tracing::warn!("failed to remove quiche cert dir {}: {error}", self.0.display());
+			}
+		}
+	}
+}
+
 // Geo-data loading (blocking)
 
 /// Decode the configured GeoIP/GeoSite databases and open the resulting cache.
@@ -426,45 +473,33 @@ impl Plugin<TuicRouter> for TuicServerPlugin {
 /// scheduled on that thread (including the sockets of an already-running
 /// server during a config reload).
 ///
-/// Failing to load the databases is not fatal: the caller keeps running
-/// without geodata, and geo rules simply cannot match. That is reported by the
-/// warnings below.
-async fn load_geodata_blocking(cfg: GeoDataConfig, data_dir: std::path::PathBuf) -> Option<Arc<wind_geodata::GeoData>> {
-	if !cfg.is_enabled() {
-		return None;
-	}
-	let geosite_path = cfg.geosite?;
-	let geoip_path = cfg.geoip?;
-
-	let loaded = tokio::task::spawn_blocking(move || {
-		let geosite_bytes = std::fs::read(&geosite_path).ok()?;
-		let geoip_bytes = std::fs::read(&geoip_path).ok()?;
-
+/// Configured databases must load successfully before any listener starts.
+async fn load_geodata_blocking(
+	cfg: GeoDataConfig,
+	data_dir: std::path::PathBuf,
+) -> eyre::Result<Option<Arc<wind_geodata::GeoData>>> {
+	let (geosite_path, geoip_path) = match (cfg.geosite, cfg.geoip) {
+		(None, None) => return Ok(None),
+		(Some(site), Some(ip)) => (site, ip),
+		_ => eyre::bail!("geodata requires both geosite and geoip paths"),
+	};
+	tokio::task::spawn_blocking(move || {
+		let geosite_bytes =
+			std::fs::read(&geosite_path).with_context(|| format!("read geosite database {}", geosite_path.display()))?;
+		let geoip_bytes =
+			std::fs::read(&geoip_path).with_context(|| format!("read geoip database {}", geoip_path.display()))?;
 		let cache_path = data_dir.join("geodata.cache");
-		match wind_geodata::GeoData::build_and_open(&geosite_bytes, &geoip_bytes, &cache_path) {
-			Ok(geo) => {
-				tracing::info!(
-					"[geodata] loaded geosite ({}) + geoip ({})",
-					geosite_path.display(),
-					geoip_path.display()
-				);
-				Some(Arc::new(geo))
-			}
-			Err(e) => {
-				tracing::warn!("[geodata] failed to build cache: {e}");
-				None
-			}
-		}
+		let geo =
+			wind_geodata::GeoData::build_and_open(&geosite_bytes, &geoip_bytes, &cache_path).context("build geodata cache")?;
+		tracing::info!(
+			"[geodata] loaded geosite ({}) + geoip ({})",
+			geosite_path.display(),
+			geoip_path.display()
+		);
+		Ok(Some(Arc::new(geo)))
 	})
-	.await;
-
-	match loaded {
-		Ok(geodata) => geodata,
-		Err(e) => {
-			tracing::warn!("[geodata] loading task failed to run to completion: {e}");
-			None
-		}
-	}
+	.await
+	.context("geodata loading task failed")?
 }
 
 // Self-signed cert generation
@@ -537,6 +572,21 @@ mod tests {
 	use std::fs;
 
 	use super::*;
+
+	#[test]
+	fn staged_certificate_directory_is_removed_on_error() -> eyre::Result<()> {
+		let root = tempfile::tempdir()?;
+		let path = root.path().join("staged");
+		let attempt = || -> eyre::Result<()> {
+			create_private_dir(&path)?;
+			let _guard = StagedCertDir(path.clone());
+			write_private_file(&path.join("cert.pem"), b"test")?;
+			eyre::bail!("simulated key read failure")
+		};
+		assert!(attempt().is_err());
+		assert!(!path.exists());
+		Ok(())
+	}
 
 	#[test]
 	fn quiche_cert_dir_is_unique_per_instance() {
@@ -716,6 +766,42 @@ mod geodata_load_tests {
 		Builder::new_current_thread().enable_all().build().unwrap()
 	}
 
+	#[tokio::test]
+	async fn configured_geodata_failures_are_fatal() -> eyre::Result<()> {
+		let dir = tempfile::tempdir()?;
+		let missing = dir.path().join("missing.dat");
+		assert!(
+			load_geodata_blocking(GeoDataConfig::default(), dir.path().into())
+				.await?
+				.is_none()
+		);
+		for cfg in [
+			GeoDataConfig {
+				geosite: Some(missing.clone()),
+				geoip: None,
+			},
+			GeoDataConfig {
+				geosite: Some(missing.clone()),
+				geoip: Some(missing.clone()),
+			},
+		] {
+			assert!(load_geodata_blocking(cfg, dir.path().into()).await.is_err());
+		}
+		std::fs::write(&missing, [255, 255])?;
+		assert!(
+			load_geodata_blocking(
+				GeoDataConfig {
+					geosite: Some(missing.clone()),
+					geoip: Some(missing)
+				},
+				dir.path().into()
+			)
+			.await
+			.is_err()
+		);
+		Ok(())
+	}
+
 	#[test]
 	fn geodata_is_decoded_off_the_runtime_thread() {
 		capture_geodata_events();
@@ -734,7 +820,9 @@ mod geodata_load_tests {
 			(loaded, caller_thread)
 		});
 
-		let geodata = geodata.expect("the fixture geodata must load through the async loader");
+		let geodata = geodata
+			.expect("the loader must succeed")
+			.expect("the fixture geodata must load through the async loader");
 		assert!(geodata.geoip_lookup()("CN", "10.0.0.1".parse().unwrap()));
 		assert!(
 			dir.path().join("geodata.cache").is_file(),

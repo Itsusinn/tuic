@@ -753,13 +753,19 @@ impl Config {
 	///
 	/// The reported error names the offending entry of `[outbound]`, with
 	/// `default` standing for `[outbound.default]`.
-	fn validate_outbound_rules(&self) -> eyre::Result<()> {
+	pub(crate) fn validate_outbound_rules(&self) -> eyre::Result<()> {
 		// `[outbound.default]` is always present (it has a built-in default),
 		// so it is validated together with the named rules.
 		let rules = std::iter::once(("default", &self.outbound.default))
 			.chain(self.outbound.named.iter().map(|(name, rule)| (name.as_str(), rule)));
 
 		for (name, rule) in rules {
+			if !matches!(rule.kind.as_str(), "direct" | "socks5") {
+				eyre::bail!(
+					"outbound rule {name:?} has unknown type {:?}; expected direct or socks5",
+					rule.kind
+				);
+			}
 			if rule.kind != "socks5" {
 				continue;
 			}
@@ -1221,6 +1227,17 @@ mod tests {
 		assert_eq!(socks5.addr, Some("127.0.0.1:1080".to_string()));
 		assert_eq!(socks5.username, Some("optional".to_string()));
 		assert_eq!(socks5.password, Some("optional".to_string()));
+	}
+
+	#[test]
+	fn rejects_unknown_default_and_named_outbound_types() {
+		let mut cfg = Config::default();
+		cfg.outbound.default.kind = "sock5".into();
+		assert!(cfg.validate_outbound_rules().is_err());
+		let rule = cfg.outbound.default.clone();
+		cfg.outbound.default.kind = "direct".into();
+		cfg.outbound.named.insert("upstream".into(), rule);
+		assert!(cfg.validate_outbound_rules().is_err());
 	}
 
 	#[tokio::test]
