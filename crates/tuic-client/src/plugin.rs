@@ -425,10 +425,12 @@ mod tests {
 		cfg.local.server = "127.0.0.1:0".parse()?;
 		cfg.local.max_packet_size = 0;
 		assert!(crate::run(cfg).await.is_err());
-		let mut relay = Relay::default();
-		relay.server = ("127.0.0.1".into(), 4433);
-		relay.skip_cert_verify = true;
-		relay.min_mtu = 1;
+		let relay = Relay {
+			server: ("127.0.0.1".into(), 4433),
+			skip_cert_verify: true,
+			min_mtu: 1,
+			..Default::default()
+		};
 		let ctx = Arc::new(AppContext::default());
 		let error = build_quinn_outbound(ctx.clone(), relay)
 			.await
@@ -441,8 +443,10 @@ mod tests {
 
 	#[tokio::test]
 	async fn dns_preference_and_reconnect_resolver_are_wired() -> eyre::Result<()> {
-		let mut relay = Relay::default();
-		relay.server = ("localhost".into(), 4433);
+		let mut relay = Relay {
+			server: ("localhost".into(), 4433),
+			..Default::default()
+		};
 		for (prefer, ipv4) in [
 			(crate::utils::StackPrefer::V4only, true),
 			(crate::utils::StackPrefer::V6only, false),
@@ -497,11 +501,13 @@ mod tests {
 		for backend in backends {
 			let blackhole = std::net::UdpSocket::bind("127.0.0.1:0")?;
 			let address = blackhole.local_addr()?;
-			let mut relay = Relay::default();
-			relay.server = (address.ip().to_string(), address.port());
-			relay.skip_cert_verify = true;
-			relay.backend_mode = backend;
-			relay.timeout = Duration::from_millis(30);
+			let relay = Relay {
+				server: (address.ip().to_string(), address.port()),
+				skip_cert_verify: true,
+				backend_mode: backend,
+				timeout: Duration::from_millis(30),
+				..Default::default()
+			};
 			let ctx = Arc::new(AppContext::default());
 			let result = tokio::time::timeout(Duration::from_secs(2), build_outbound(ctx.clone(), relay)).await?;
 			ctx.token.cancel();
