@@ -49,6 +49,46 @@ pub enum TlsConfigError {
 
 	#[error("no rustls crypto provider is installed (call `rustls::crypto::*::default_provider().install_default()`)")]
 	NoCryptoProvider,
+
+	#[error("failed to read ECHConfigList: {0}")]
+	EchIo(#[source] std::io::Error),
+
+	#[error("invalid TLS configuration: {0}")]
+	Rustls(#[from] rustls::Error),
+
+	#[error("Quinn ECH requires the aws-lc-rs feature (ring does not provide HPKE)")]
+	EchUnavailable,
+
+	#[error("tls.ech_config_list cannot be combined with tls.disable_sni")]
+	EchWithoutSni,
+}
+
+fn client_builder(relay: &Relay) -> Result<rustls::ConfigBuilder<rustls::ClientConfig, rustls::WantsVerifier>, TlsConfigError> {
+	if relay.ech_config_list.is_some() && relay.disable_sni {
+		return Err(TlsConfigError::EchWithoutSni);
+	}
+	let provider = CryptoProvider::get_default()
+		.cloned()
+		.ok_or(TlsConfigError::NoCryptoProvider)?;
+	let builder = rustls::ClientConfig::builder_with_provider(provider);
+	if let Some(path) = &relay.ech_config_list {
+		#[cfg(feature = "aws-lc-rs")]
+		{
+			let bytes = std::fs::read(path).map_err(TlsConfigError::EchIo)?;
+			let ech = rustls::client::EchConfig::new(
+				rustls::pki_types::EchConfigListBytes::from(bytes),
+				rustls::crypto::aws_lc_rs::hpke::ALL_SUPPORTED_SUITES,
+			)?;
+			// Real ECH (never GREASE). Rustls aborts if the peer rejects it.
+			return Ok(builder.with_ech(ech.into())?);
+		}
+		#[cfg(not(feature = "aws-lc-rs"))]
+		{
+			let _ = path;
+			return Err(TlsConfigError::EchUnavailable);
+		}
+	}
+	Ok(builder.with_safe_default_protocol_versions()?)
 }
 
 /// Build the rustls configuration for the quinn TUIC outbound.
@@ -61,21 +101,20 @@ pub enum TlsConfigError {
 ///   becomes trusted.
 /// * `disable_sni` stops advertising the server name in the ClientHello while certificate verification still uses it.
 pub fn build_client_config(relay: &Relay) -> Result<rustls::ClientConfig, TlsConfigError> {
+	let builder = client_builder(relay)?;
 	let mut config = if relay.skip_cert_verify {
 		warn!(
 			target: "tls",
 			"skip_cert_verify=true: server certificate verification is DISABLED. \
 			 This is insecure and allows trivial MITM of the upstream relay."
 		);
-		rustls::ClientConfig::builder()
+		builder
 			.dangerous()
 			.with_custom_certificate_verifier(SkipServerVerification::new()?)
 			.with_no_client_auth()
 	} else {
 		let roots = build_root_store(relay)?;
-		rustls::ClientConfig::builder()
-			.with_root_certificates(roots)
-			.with_no_client_auth()
+		builder.with_root_certificates(roots).with_no_client_auth()
 	};
 
 	// Honour the caller-supplied ALPN list. An empty list falls back to "h3",
@@ -310,6 +349,40 @@ mod tests {
 			certificates,
 			..Default::default()
 		}
+	}
+
+	#[test]
+	fn ech_rejects_disabled_sni() {
+		install_provider();
+		let mut relay = relay_with(Vec::new(), Vec::new());
+		relay.ech_config_list = Some("unused.list".into());
+		relay.disable_sni = true;
+		assert!(matches!(build_client_config(&relay), Err(TlsConfigError::EchWithoutSni)));
+	}
+
+	#[cfg(feature = "aws-lc-rs")]
+	#[test]
+	fn ech_rejects_missing_malformed_and_unsupported_configs() -> eyre::Result<()> {
+		install_provider();
+		let dir = tempfile::tempdir()?;
+		let path = dir.path().join("ech.list");
+		let mut relay = relay_with(Vec::new(), Vec::new());
+		relay.ech_config_list = Some(path.clone());
+		assert!(matches!(build_client_config(&relay), Err(TlsConfigError::EchIo(_))));
+		for bytes in [&[0, 8, 1][..], &[0, 0], &[0, 4, 0xfa, 0xfa, 0, 0]] {
+			std::fs::write(&path, bytes)?;
+			assert!(matches!(build_client_config(&relay), Err(TlsConfigError::Rustls(_))));
+		}
+		Ok(())
+	}
+
+	#[cfg(not(feature = "aws-lc-rs"))]
+	#[test]
+	fn ech_without_hpke_is_an_explicit_error() {
+		install_provider();
+		let mut relay = relay_with(Vec::new(), Vec::new());
+		relay.ech_config_list = Some("unused.list".into());
+		assert!(matches!(build_client_config(&relay), Err(TlsConfigError::EchUnavailable)));
 	}
 
 	/// Write a self-signed certificate for `name` into `dir` and return its PEM

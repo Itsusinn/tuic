@@ -24,10 +24,10 @@ quiche = ["wind-tuic/quiche"]
 [dependencies]
 
 # Wind framework
-wind-base = { git = "https://github.com/rust-proxy/wind", rev = "a60a98147f3343968e6e07095c1fc058a1a4b234" }
-wind-core = { git = "https://github.com/rust-proxy/wind", rev = "a60a98147f3343968e6e07095c1fc058a1a4b234" }
-wind-socks = { git = "https://github.com/rust-proxy/wind", rev = "a60a98147f3343968e6e07095c1fc058a1a4b234" }
-wind-tuic = { git = "https://github.com/rust-proxy/wind", rev = "a60a98147f3343968e6e07095c1fc058a1a4b234", features = ["client", "quinn"] }
+wind-base = { git = "https://github.com/rust-proxy/wind", rev = "db58b5fa86e5f62046cc89cf2dc2e6041de9e353" }
+wind-core = { git = "https://github.com/rust-proxy/wind", rev = "db58b5fa86e5f62046cc89cf2dc2e6041de9e353" }
+wind-socks = { git = "https://github.com/rust-proxy/wind", rev = "db58b5fa86e5f62046cc89cf2dc2e6041de9e353" }
+wind-tuic = { git = "https://github.com/rust-proxy/wind", rev = "db58b5fa86e5f62046cc89cf2dc2e6041de9e353", features = ["client", "quinn"] }
 
 async-trait = "0.1"
 
@@ -53,7 +53,8 @@ tokio = { version = "1", default-features = false, features = ["io-util", "macro
 tokio-util = { version = "0.7", default-features = false, features = ["compat", "rt"] }
 
 # TLS
-rustls = { version = "0.23", default-features = false }
+# Includes the ECH rejection and HRR fixes needed by the ECH client path.
+rustls = { version = "0.23.46", default-features = false }
 rustls-native-certs = { version = "0.8", default-features = false }
 rustls-pemfile = { version = "2", default-features = false, features = ["std"] }
 # Built-in Mozilla root set used when `[tls] disable_native_certs = true`.

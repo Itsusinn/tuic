@@ -143,6 +143,7 @@ async fn quinn_zero_rtt_resumption_accepts_early_data() -> eyre::Result<()> {
 	// once rustls has actually cached a TLS 1.3 ticket, and quinn reports the
 	// first handshake as complete *before* that ticket arrives.
 	let client_tls = ClientTlsConfig {
+		ech_config_list: None,
 		server_name: "localhost".to_string(),
 		verify_certificate: false,
 		alpn: vec![b"h3".to_vec()],

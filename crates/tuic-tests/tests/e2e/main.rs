@@ -6,6 +6,7 @@ mod forward;
 pub mod proxy_fixture;
 
 mod concurrency;
+mod ech;
 mod forwarding;
 mod ipv6;
 mod masquerade;

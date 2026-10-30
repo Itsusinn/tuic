@@ -264,6 +264,12 @@ async fn build_quiche_outbound_inner(ctx: Arc<AppContext>, relay: Relay) -> eyre
 	};
 
 	let opts = TuicheOutboundOpts {
+		ech_config_list: relay
+			.ech_config_list
+			.as_ref()
+			.map(std::fs::read)
+			.transpose()
+			.wrap_err("read ECHConfigList")?,
 		peer_addr,
 		sni,
 		auth: (relay.uuid, relay.password.clone()),

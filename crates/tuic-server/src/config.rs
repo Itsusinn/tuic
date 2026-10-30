@@ -312,6 +312,8 @@ pub enum BackendMode {
 #[educe(Default)]
 #[serde(default, deny_unknown_fields)]
 pub struct TlsConfig {
+	/// Optional ECH key pair for the quiche backend.
+	pub ech: Option<EchConfig>,
 	pub self_sign: bool,
 	#[educe(Default(expression = ""))]
 	pub certificate: PathBuf,
@@ -327,6 +329,14 @@ pub struct TlsConfig {
 	pub acme_email: String,
 	#[educe(Default(expression = false))]
 	pub acme_staging: bool,
+}
+
+/// Binary ECHConfig and raw X25519 key, separate from the TLS certificate key.
+#[derive(Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct EchConfig {
+	pub config: PathBuf,
+	pub private_key: PathBuf,
 }
 
 /// HTTP/3 masquerade configuration.
@@ -992,6 +1002,14 @@ pub async fn parse_config(cli: Cli, env_state: EnvState) -> eyre::Result<Config>
 	};
 
 	let base_dir = config.data_dir.clone();
+	if let Some(ech) = &mut config.tls.ech {
+		if ech.config.is_relative() {
+			ech.config = base_dir.join(&ech.config);
+		}
+		if ech.private_key.is_relative() {
+			ech.private_key = base_dir.join(&ech.private_key);
+		}
+	}
 	config.tls.certificate = if config.tls.auto_ssl && config.tls.certificate.to_str() == Some("") {
 		config.data_dir.join(format!("{}.cer.pem", config.tls.hostname))
 	} else if config.tls.certificate.is_relative() {
@@ -1033,6 +1051,19 @@ mod tests {
 
 	use super::*;
 	use crate::legacy::{AclPortSpec, AclProtocol};
+
+	#[tokio::test]
+	async fn ech_config_roundtrip_and_relative_paths() -> eyre::Result<()> {
+		let cfg = test_parse_config("[tls.ech]\nconfig = 'ech.config'\nprivate_key = 'ech.key'", ".toml").await?;
+		let ech = cfg.tls.ech.as_ref().ok_or_else(|| eyre::eyre!("missing ECH config"))?;
+		assert_eq!(ech.config, cfg.data_dir.join("ech.config"));
+		assert_eq!(ech.private_key, cfg.data_dir.join("ech.key"));
+		let roundtrip: Config = serde_json::from_str(&serde_json::to_string(&cfg)?)?;
+		assert_eq!(roundtrip.tls.ech.as_ref().map(|e| &e.config), Some(&ech.config));
+		assert!(serde_json::from_str::<EchConfig>(r#"{"config":"test"}"#).is_err());
+		assert!(TlsConfig::default().ech.is_none());
+		Ok(())
+	}
 
 	async fn test_parse_config(config_content: &str, extension: &str) -> eyre::Result<Config> {
 		test_parse_config_with_env(config_content, extension, EnvState::default()).await
