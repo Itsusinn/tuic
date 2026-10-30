@@ -34,11 +34,11 @@ quiche = ["wind-tuic/quiche"]
 masquerade-test = ["dep:reqwest", "dep:http"]
 
 [dependencies]
-wind-core = { git = "https://github.com/rust-proxy/wind", rev = "a60a98147f3343968e6e07095c1fc058a1a4b234" }
-wind-quic = { git = "https://github.com/rust-proxy/wind", rev = "a60a98147f3343968e6e07095c1fc058a1a4b234", default-features = false, features = ["quinn"] }
+wind-core = { git = "https://github.com/rust-proxy/wind", rev = "db58b5fa86e5f62046cc89cf2dc2e6041de9e353" }
+wind-quic = { git = "https://github.com/rust-proxy/wind", rev = "db58b5fa86e5f62046cc89cf2dc2e6041de9e353", default-features = false, features = ["quinn"] }
 tuic-client = { path = "../tuic-client", default-features = false }
 tuic-server = { path = "../tuic-server", default-features = false }
-wind-tuic = { git = "https://github.com/rust-proxy/wind", rev = "a60a98147f3343968e6e07095c1fc058a1a4b234", default-features = false, features = ["server", "client", "quinn", "masquerade"] }
+wind-tuic = { git = "https://github.com/rust-proxy/wind", rev = "db58b5fa86e5f62046cc89cf2dc2e6041de9e353", default-features = false, features = ["server", "client", "quinn", "masquerade"] }
 
 bytes = "1"
 json5 = { version = "1.3" }
@@ -90,9 +90,10 @@ harness = false
 # cannot see the cross sysroot, and BoringSSL does not support LoongArch.
 # Keep this predicate in sync with the crate-level cfg in the quiche test files.
 [target.'cfg(all(target_pointer_width = "64", not(any(target_os = "android", target_os = "freebsd", target_arch = "loongarch64"))))'.dependencies]
+boring = { version = "5", default-features = false }
 tuic-server = { path = "../tuic-server", default-features = false, features = ["quiche"] }
 tuic-client = { path = "../tuic-client", default-features = false, features = ["quiche"] }
-wind-tuic = { git = "https://github.com/rust-proxy/wind", rev = "a60a98147f3343968e6e07095c1fc058a1a4b234", default-features = false, features = ["quiche"] }
+wind-tuic = { git = "https://github.com/rust-proxy/wind", rev = "db58b5fa86e5f62046cc89cf2dc2e6041de9e353", default-features = false, features = ["quiche"] }
 quinn = { workspace = true, default-features = false, features = ["runtime-tokio", "rustls-aws-lc-rs"] }
 rcgen = { version = "0.14", default-features = false, features = ["crypto", "pem", "aws_lc_rs"] }
 

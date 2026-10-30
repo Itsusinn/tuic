@@ -50,6 +50,8 @@ Quiche 和依赖 `quinn`/`rcgen` 的部分握手测试保留原平台条件：�
 
 | 入口与模块 | 独立验证的行为 |
 | --- | --- |
+| E2E `ech` | Quiche 服务端搭配 Quinn/Quiche 客户端的 SOCKS5 TCP/UDP 转发、踢线重连和启用会话恢复时的兼容性；Quinn 用例验证证书与内部主机名 |
+| 集成 `ech` | 错误 ECH 密钥，两种客户端使用过期/无效/空/不支持版本配置或连接未启用 ECH 的服务器时拒绝连接，禁止降级；Quinn 拒绝不可信证书与错误内部主机名 |
 | E2E `relay_semantics` | 四种后端组合的 TCP 半关闭响应、服务端先发数据及同一 UDP association 的 A→B→A 目标切换 |
 | E2E `forwarding` | Quinn/Quiche 客户端，eager/lazy 启动，多规则 TCP/UDP forward、源隔离、UDP idle 后恢复和端口释放 |
 | E2E `upstream_proxy` | 认证 SOCKS 链、代理侧 DNS、eager/lazy TCP/UDP、association 与 QUIC 重连，以及经 SOCKS 链的 TCP/UDP forward |

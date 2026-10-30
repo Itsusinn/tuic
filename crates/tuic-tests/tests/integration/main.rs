@@ -11,6 +11,7 @@ mod shutdown_fixture;
 #[path = "../support/tls.rs"]
 mod tls_fixture_support;
 
+mod ech;
 mod echo;
 mod graceful_shutdown;
 mod guard_drop;

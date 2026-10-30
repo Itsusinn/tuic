@@ -55,6 +55,9 @@ impl TuicServerPlugin {
 impl Plugin<TuicRouter> for TuicServerPlugin {
 	async fn build(self, app: App<TuicRouter>) -> eyre::Result<App<TuicRouter>> {
 		let mut cfg = self.cfg;
+		if cfg.tls.ech.is_some() && cfg.backend.mode != crate::config::BackendMode::Quiche {
+			eyre::bail!("tls.ech currently requires the quiche backend; rustls has no server ECH support");
+		}
 		cfg.validate_outbound_rules()?;
 
 		// DNS resolver
@@ -355,6 +358,14 @@ impl Plugin<TuicRouter> for TuicServerPlugin {
 						.with_context(|| format!("read quiche key.pem {}", quiche_key_path.display()))?;
 					let cert_store =
 						CertStore::from_pem(&cert_pem, &key_pem).map_err(|e| eyre::eyre!("create quiche cert store: {e}"))?;
+
+					let cert_store = if let Some(ech) = &cfg.tls.ech {
+						let config = std::fs::read(&ech.config).wrap_err("read ECH config")?;
+						let key = std::fs::read(&ech.private_key).wrap_err("read ECH private key")?;
+						cert_store.with_ech_key(&config, &key)?
+					} else {
+						cert_store
+					};
 
 					let cleanup_token = app.context().token.child_token();
 					app.context().tasks.spawn(async move {

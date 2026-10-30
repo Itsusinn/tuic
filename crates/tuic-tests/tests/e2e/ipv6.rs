@@ -57,6 +57,7 @@ async fn ipv6_server_client_relay() -> eyre::Result<()> {
 			users
 		},
 		tls: tuic_server::config::TlsConfig {
+			ech: None,
 			self_sign: true,
 			certificate: PathBuf::from("./test_cert_ipv6.pem"),
 			private_key: PathBuf::from("./test_key_ipv6.pem"),

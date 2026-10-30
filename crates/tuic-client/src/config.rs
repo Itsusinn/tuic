@@ -127,6 +127,8 @@ struct ConfigFile {
 #[educe(Default)]
 #[serde(default, deny_unknown_fields)]
 pub struct TlsConfig {
+	/// Path to a binary ECHConfigList. Quinn requires the aws-lc-rs feature.
+	pub ech_config_list: Option<PathBuf>,
 	#[educe(Default(expression = Vec::new()))]
 	pub certificates: Vec<PathBuf>,
 
@@ -244,6 +246,7 @@ impl From<ConfigFile> for Config {
 				password: file.password,
 				ip: file.ip,
 				ipstack_prefer: file.ipstack_prefer,
+				ech_config_list: file.tls.ech_config_list,
 				certificates: file.tls.certificates,
 				udp_relay_mode: file.udp_relay_mode,
 				congestion_control: file.backend.quinn.congestion_control.controller,
@@ -298,6 +301,7 @@ impl From<Config> for ConfigFile {
 			reconnect_max_backoff: relay.reconnect_max_backoff,
 			lazy: relay.lazy,
 			tls: TlsConfig {
+				ech_config_list: relay.ech_config_list,
 				certificates: relay.certificates,
 				alpn: relay.alpn,
 				disable_sni: relay.disable_sni,
@@ -354,6 +358,8 @@ impl<'de> Deserialize<'de> for Config {
 #[serde(deny_unknown_fields, default)]
 #[derive(Clone)]
 pub struct Relay {
+	/// Path to a binary ECHConfigList.
+	pub ech_config_list: Option<PathBuf>,
 	#[serde(deserialize_with = "deserialize_server", serialize_with = "serialize_server")]
 	pub server: (String, u16),
 
@@ -547,6 +553,9 @@ fn default_lazy() -> bool {
 
 impl Config {
 	pub(crate) fn validate(&self) -> eyre::Result<()> {
+		if self.relay.ech_config_list.is_some() && self.relay.disable_sni {
+			eyre::bail!("tls.ech_config_list cannot be combined with tls.disable_sni");
+		}
 		if self.local.username.is_some() != self.local.password.is_some() {
 			eyre::bail!("local.username and local.password must be configured together");
 		}
@@ -834,6 +843,24 @@ pub enum ConfigError {
 #[cfg(test)]
 mod tests {
 	use super::*;
+
+	#[test]
+	fn ech_config_roundtrip_and_backend_validation() -> eyre::Result<()> {
+		let input = "[backend]\nmode = 'quiche'\n[tls]\nech_config_list = 'ech.list'";
+		let config: Config = toml::from_str(input)?;
+		assert_eq!(
+			config.relay.ech_config_list.as_deref(),
+			Some(std::path::Path::new("ech.list"))
+		);
+		let roundtrip: Config = toml::from_str(&toml::to_string(&config)?)?;
+		assert_eq!(roundtrip.relay.ech_config_list, config.relay.ech_config_list);
+		let quinn: Config = toml::from_str("[tls]\nech_config_list = 'ech.list'")?;
+		assert_eq!(quinn.relay.backend_mode, BackendMode::Quinn);
+		assert_eq!(quinn.relay.ech_config_list, config.relay.ech_config_list);
+		assert!(toml::from_str::<Config>("[tls]\nech_config_list = 'ech.list'\ndisable_sni = true").is_err());
+		assert!(Config::default().relay.ech_config_list.is_none());
+		Ok(())
+	}
 
 	#[test]
 	fn omitted_lazy_matches_runtime_default() -> eyre::Result<()> {

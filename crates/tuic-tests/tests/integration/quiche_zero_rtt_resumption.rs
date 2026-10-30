@@ -75,6 +75,7 @@ async fn quiche_zero_rtt_resumption_accepts_early_data() -> eyre::Result<()> {
 	});
 
 	let client_tls = ClientTlsConfig {
+		ech_config_list: None,
 		server_name: "localhost".to_string(),
 		verify_certificate: false,
 		alpn: vec![b"h3".to_vec()],
