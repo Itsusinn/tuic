@@ -25,8 +25,8 @@ quinn-congestions = { git = "https://github.com/proxy-rs/quinn-congestions.git",
 # here. Keep this `rev` in sync with the `forks/quiche` submodule commit recorded
 # by the Wind revision pinned in the `wind-*` dependencies of the member crates.
 [patch.crates-io]
-datagram-socket = { git = "https://github.com/rust-proxy/quiche", rev = "0a773b251216867c56eafc089229dc90f2fde625" }
-tokio-quiche = { git = "https://github.com/rust-proxy/quiche", rev = "0a773b251216867c56eafc089229dc90f2fde625" }
+datagram-socket = { git = "https://github.com/rust-proxy/quiche", rev = "43c4d406c97dc7579c8b346f10a7c45f4d464b68" }
+tokio-quiche = { git = "https://github.com/rust-proxy/quiche", rev = "43c4d406c97dc7579c8b346f10a7c45f4d464b68" }
 
 [workspace.lints.clippy]
 unwrap_used = "deny"
