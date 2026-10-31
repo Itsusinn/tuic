@@ -13,7 +13,7 @@ use fast_socks5::{Socks5Command, server::Socks5ServerProtocol, util::target_addr
 use tokio::{
 	io::AsyncReadExt,
 	net::{TcpListener, UdpSocket},
-	sync::{Mutex, Notify},
+	sync::{Mutex, watch},
 	task::JoinHandle,
 };
 use tokio_util::{
@@ -32,7 +32,7 @@ pub struct Proxy {
 	pub packets: Arc<AtomicUsize>,
 	pub replies: Arc<AtomicUsize>,
 	pub unreachable_errors: Arc<AtomicUsize>,
-	pub disconnect: Arc<Notify>,
+	pub disconnect: watch::Sender<()>,
 	_guard: DropGuard,
 	tasks: TaskTracker,
 	accept: SessionTask,
@@ -47,7 +47,7 @@ impl Proxy {
 		let packets = Arc::new(AtomicUsize::new(0));
 		let replies = Arc::new(AtomicUsize::new(0));
 		let unreachable_errors = Arc::new(AtomicUsize::new(0));
-		let disconnect = Arc::new(Notify::new());
+		let (disconnect, _) = watch::channel(());
 		let tasks = TaskTracker::new();
 		let token = CancellationToken::new();
 		let _guard = token.clone().drop_guard();
@@ -73,7 +73,10 @@ impl Proxy {
 					let packets = packets.clone();
 					let replies = replies.clone();
 					let unreachable_errors = unreachable_errors.clone();
-					let disconnect = disconnect.clone();
+					// Subscribe before the handshake. Requests remain visible while
+					// authentication or packet forwarding is awaiting I/O, and a new
+					// association does not inherit an old disconnect request.
+					let mut disconnect = disconnect.subscribe();
 					let task = tasks.spawn(async move {
 						tokio::select! {
 							_ = token.cancelled() => eyre::Ok(()),
@@ -93,7 +96,7 @@ impl Proxy {
 									let mut peer = None;
 									loop {
 										tokio::select! {
-											_ = disconnect.notified() => return eyre::Ok(()),
+											_ = disconnect.changed() => return eyre::Ok(()),
 											_ = control.read_u8() => return Ok(()),
 											packet = relay.recv_from(&mut request) => {
 												let (len, source) = packet?;

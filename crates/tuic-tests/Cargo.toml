@@ -34,11 +34,11 @@ quiche = ["wind-tuic/quiche"]
 masquerade-test = ["dep:reqwest", "dep:http"]
 
 [dependencies]
-wind-core = { git = "https://github.com/rust-proxy/wind", rev = "921c6bee0bf0db9fa372896682748a7799b23131" }
-wind-quic = { git = "https://github.com/rust-proxy/wind", rev = "921c6bee0bf0db9fa372896682748a7799b23131", default-features = false, features = ["quinn"] }
+wind-core = { git = "https://github.com/rust-proxy/wind", rev = "5e8096f852d069bfa96e2a2f95412246b2035ad9" }
+wind-quic = { git = "https://github.com/rust-proxy/wind", rev = "5e8096f852d069bfa96e2a2f95412246b2035ad9", default-features = false, features = ["quinn"] }
 tuic-client = { path = "../tuic-client", default-features = false }
 tuic-server = { path = "../tuic-server", default-features = false }
-wind-tuic = { git = "https://github.com/rust-proxy/wind", rev = "921c6bee0bf0db9fa372896682748a7799b23131", default-features = false, features = ["server", "client", "quinn", "masquerade"] }
+wind-tuic = { git = "https://github.com/rust-proxy/wind", rev = "5e8096f852d069bfa96e2a2f95412246b2035ad9", default-features = false, features = ["server", "client", "quinn", "masquerade"] }
 
 bytes = "1"
 json5 = { version = "1.3" }
@@ -93,7 +93,7 @@ harness = false
 boring = { version = "5", default-features = false }
 tuic-server = { path = "../tuic-server", default-features = false, features = ["quiche"] }
 tuic-client = { path = "../tuic-client", default-features = false, features = ["quiche"] }
-wind-tuic = { git = "https://github.com/rust-proxy/wind", rev = "921c6bee0bf0db9fa372896682748a7799b23131", default-features = false, features = ["quiche"] }
+wind-tuic = { git = "https://github.com/rust-proxy/wind", rev = "5e8096f852d069bfa96e2a2f95412246b2035ad9", default-features = false, features = ["quiche"] }
 quinn = { workspace = true, default-features = false, features = ["runtime-tokio", "rustls-aws-lc-rs"] }
 rcgen = { version = "0.14", default-features = false, features = ["crypto", "pem", "aws_lc_rs"] }
 

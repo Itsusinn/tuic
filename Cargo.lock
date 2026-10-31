@@ -5860,7 +5860,7 @@ checksum = "712e227841d057c1ee1cd2fb22fa7e5a5461ae8e48fa2ca79ec42cfc1931183f"
 [[package]]
 name = "wind-acl"
 version = "0.2.0"
-source = "git+https://github.com/rust-proxy/wind?rev=921c6bee0bf0db9fa372896682748a7799b23131#921c6bee0bf0db9fa372896682748a7799b23131"
+source = "git+https://github.com/rust-proxy/wind?rev=5e8096f852d069bfa96e2a2f95412246b2035ad9#5e8096f852d069bfa96e2a2f95412246b2035ad9"
 dependencies = [
  "async-trait",
  "derive_more",
@@ -5879,7 +5879,7 @@ dependencies = [
 [[package]]
 name = "wind-acme"
 version = "0.2.0"
-source = "git+https://github.com/rust-proxy/wind?rev=921c6bee0bf0db9fa372896682748a7799b23131#921c6bee0bf0db9fa372896682748a7799b23131"
+source = "git+https://github.com/rust-proxy/wind?rev=5e8096f852d069bfa96e2a2f95412246b2035ad9#5e8096f852d069bfa96e2a2f95412246b2035ad9"
 dependencies = [
  "async-trait",
  "axum",
@@ -5901,7 +5901,7 @@ dependencies = [
 [[package]]
 name = "wind-base"
 version = "0.2.0"
-source = "git+https://github.com/rust-proxy/wind?rev=921c6bee0bf0db9fa372896682748a7799b23131#921c6bee0bf0db9fa372896682748a7799b23131"
+source = "git+https://github.com/rust-proxy/wind?rev=5e8096f852d069bfa96e2a2f95412246b2035ad9#5e8096f852d069bfa96e2a2f95412246b2035ad9"
 dependencies = [
  "async-trait",
  "bytes",
@@ -5917,7 +5917,7 @@ dependencies = [
 [[package]]
 name = "wind-core"
 version = "0.2.0"
-source = "git+https://github.com/rust-proxy/wind?rev=921c6bee0bf0db9fa372896682748a7799b23131#921c6bee0bf0db9fa372896682748a7799b23131"
+source = "git+https://github.com/rust-proxy/wind?rev=5e8096f852d069bfa96e2a2f95412246b2035ad9#5e8096f852d069bfa96e2a2f95412246b2035ad9"
 dependencies = [
  "async-trait",
  "bytes",
@@ -5941,7 +5941,7 @@ dependencies = [
 [[package]]
 name = "wind-dns"
 version = "0.2.0"
-source = "git+https://github.com/rust-proxy/wind?rev=921c6bee0bf0db9fa372896682748a7799b23131#921c6bee0bf0db9fa372896682748a7799b23131"
+source = "git+https://github.com/rust-proxy/wind?rev=5e8096f852d069bfa96e2a2f95412246b2035ad9#5e8096f852d069bfa96e2a2f95412246b2035ad9"
 dependencies = [
  "educe 0.8.1",
  "eyre",
@@ -5955,7 +5955,7 @@ dependencies = [
 [[package]]
 name = "wind-geodata"
 version = "0.2.0"
-source = "git+https://github.com/rust-proxy/wind?rev=921c6bee0bf0db9fa372896682748a7799b23131#921c6bee0bf0db9fa372896682748a7799b23131"
+source = "git+https://github.com/rust-proxy/wind?rev=5e8096f852d069bfa96e2a2f95412246b2035ad9#5e8096f852d069bfa96e2a2f95412246b2035ad9"
 dependencies = [
  "geosite-rs",
  "memmap2",
@@ -5966,7 +5966,7 @@ dependencies = [
 [[package]]
 name = "wind-quic"
 version = "0.2.0"
-source = "git+https://github.com/rust-proxy/wind?rev=921c6bee0bf0db9fa372896682748a7799b23131#921c6bee0bf0db9fa372896682748a7799b23131"
+source = "git+https://github.com/rust-proxy/wind?rev=5e8096f852d069bfa96e2a2f95412246b2035ad9#5e8096f852d069bfa96e2a2f95412246b2035ad9"
 dependencies = [
  "arc-swap",
  "aws-lc-rs",
@@ -5996,7 +5996,7 @@ dependencies = [
 [[package]]
 name = "wind-rule"
 version = "0.2.0"
-source = "git+https://github.com/rust-proxy/wind?rev=921c6bee0bf0db9fa372896682748a7799b23131#921c6bee0bf0db9fa372896682748a7799b23131"
+source = "git+https://github.com/rust-proxy/wind?rev=5e8096f852d069bfa96e2a2f95412246b2035ad9#5e8096f852d069bfa96e2a2f95412246b2035ad9"
 dependencies = [
  "ipnet",
  "regex",
@@ -6005,7 +6005,7 @@ dependencies = [
 [[package]]
 name = "wind-socks"
 version = "0.2.0"
-source = "git+https://github.com/rust-proxy/wind?rev=921c6bee0bf0db9fa372896682748a7799b23131#921c6bee0bf0db9fa372896682748a7799b23131"
+source = "git+https://github.com/rust-proxy/wind?rev=5e8096f852d069bfa96e2a2f95412246b2035ad9#5e8096f852d069bfa96e2a2f95412246b2035ad9"
 dependencies = [
  "arc-swap",
  "async-trait",
@@ -6025,7 +6025,7 @@ dependencies = [
 [[package]]
 name = "wind-tuic"
 version = "0.2.0"
-source = "git+https://github.com/rust-proxy/wind?rev=921c6bee0bf0db9fa372896682748a7799b23131#921c6bee0bf0db9fa372896682748a7799b23131"
+source = "git+https://github.com/rust-proxy/wind?rev=5e8096f852d069bfa96e2a2f95412246b2035ad9#5e8096f852d069bfa96e2a2f95412246b2035ad9"
 dependencies = [
  "arc-swap",
  "async-trait",

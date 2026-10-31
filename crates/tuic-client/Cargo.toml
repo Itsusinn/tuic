@@ -24,10 +24,10 @@ quiche = ["wind-tuic/quiche"]
 [dependencies]
 
 # Wind framework
-wind-base = { git = "https://github.com/rust-proxy/wind", rev = "921c6bee0bf0db9fa372896682748a7799b23131" }
-wind-core = { git = "https://github.com/rust-proxy/wind", rev = "921c6bee0bf0db9fa372896682748a7799b23131" }
-wind-socks = { git = "https://github.com/rust-proxy/wind", rev = "921c6bee0bf0db9fa372896682748a7799b23131" }
-wind-tuic = { git = "https://github.com/rust-proxy/wind", rev = "921c6bee0bf0db9fa372896682748a7799b23131", features = ["client", "quinn"] }
+wind-base = { git = "https://github.com/rust-proxy/wind", rev = "5e8096f852d069bfa96e2a2f95412246b2035ad9" }
+wind-core = { git = "https://github.com/rust-proxy/wind", rev = "5e8096f852d069bfa96e2a2f95412246b2035ad9" }
+wind-socks = { git = "https://github.com/rust-proxy/wind", rev = "5e8096f852d069bfa96e2a2f95412246b2035ad9" }
+wind-tuic = { git = "https://github.com/rust-proxy/wind", rev = "5e8096f852d069bfa96e2a2f95412246b2035ad9", features = ["client", "quinn"] }
 
 async-trait = "0.1"
 
