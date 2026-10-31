@@ -19,6 +19,72 @@ use wind_core::{AppContext, FlowContext, Outbound, hooks::Protocol, rule::Networ
 
 use super::proxy_fixture::{LIMIT, Proxy, relay_for, server};
 
+#[tokio::test]
+async fn proxy_disconnect_during_handshake_is_not_lost() -> eyre::Result<()> {
+	tokio::time::timeout(LIMIT, async {
+		let upstream = UdpSocket::bind("127.0.0.1:0").await?;
+		let target = upstream.local_addr()?;
+		let proxy = Proxy::start(target, false).await?;
+		let config = proxy.config();
+		let mut control = tokio::net::TcpStream::connect((config.server.0.as_str(), config.server.1)).await?;
+		control.write_all(&[5, 1, 2]).await?;
+		let mut reply = [0; 2];
+		control.read_exact(&mut reply).await?;
+		assert_eq!(reply, [5, 2]);
+		// The session exists but cannot poll its relay loop until authentication
+		// finishes. A one-shot broadcast with no registered waiter is lost here.
+		proxy.disconnect.send_replace(());
+		let user = b"proxy-test-user";
+		let password = b"proxy-test-password";
+		let mut auth = vec![1, u8::try_from(user.len())?];
+		auth.extend_from_slice(user);
+		auth.push(u8::try_from(password.len())?);
+		auth.extend_from_slice(password);
+		control.write_all(&auth).await?;
+		control.read_exact(&mut reply).await?;
+		assert_eq!(reply, [1, 0]);
+		control.write_all(&[5, 3, 0, 1, 0, 0, 0, 0, 0, 0]).await?;
+		let mut associated = [0; 10];
+		control.read_exact(&mut associated).await?;
+		assert_eq!(&associated[..4], &[5, 0, 0, 1]);
+		assert_eq!(
+			control.read(&mut reply).await?,
+			0,
+			"disconnect must close the existing session"
+		);
+
+		// New sessions must not inherit an earlier disconnect request.
+		let mut control = tokio::net::TcpStream::connect((config.server.0.as_str(), config.server.1)).await?;
+		control.write_all(&[5, 1, 2]).await?;
+		control.read_exact(&mut reply).await?;
+		assert_eq!(reply, [5, 2]);
+		control.write_all(&auth).await?;
+		control.read_exact(&mut reply).await?;
+		assert_eq!(reply, [1, 0]);
+		control.write_all(&[5, 3, 0, 1, 0, 0, 0, 0, 0, 0]).await?;
+		control.read_exact(&mut associated).await?;
+		assert_eq!(&associated[..4], &[5, 0, 0, 1]);
+		// The fixture returns an unspecified address: use the control peer IP,
+		// since sending UDP to 0.0.0.0 is invalid on Windows.
+		let mut relay = control.peer_addr()?;
+		relay.set_port(u16::from_be_bytes([associated[8], associated[9]]));
+		let association = UdpSocket::bind("127.0.0.1:0").await?;
+		let mut packet = fast_socks5::new_udp_header(target)?;
+		packet.extend_from_slice(b"after disconnect");
+		association.send_to(&packet, relay).await?;
+		let mut buffer = [0; 64];
+		let (len, peer) = upstream.recv_from(&mut buffer).await?;
+		assert_eq!(&buffer[..len], b"after disconnect");
+		upstream.send_to(&buffer[..len], peer).await?;
+		let (len, _) = association.recv_from(&mut buffer).await?;
+		let (_, _, payload) = fast_socks5::parse_udp_request(&buffer[..len]).await?;
+		assert_eq!(payload, b"after disconnect");
+		drop(association);
+		proxy.shutdown().await
+	})
+	.await?
+}
+
 #[cfg(target_os = "linux")]
 #[tokio::test]
 async fn proxy_association_survives_upstream_port_unreachable() -> eyre::Result<()> {

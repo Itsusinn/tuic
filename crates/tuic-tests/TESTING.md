@@ -59,7 +59,7 @@ Quiche 和依赖 `quinn`/`rcgen` 的部分握手测试保留原平台条件：�
 | E2E `zero_rtt_config` | 开启 0-RTT 配置后的首次连接仍能完成完整 TCP/UDP 转发 |
 | E2E `reconnect_*`、`udp_fragmentation_*` | 完整客户端重连及大于 MTU 的 UDP 分片转发 |
 | E2E `restful_traffic_stats`、`masquerade` | 完整代理流量对应的统计、可选 HTTP/3 反向代理请求 |
-| 集成 `upstream_proxy` | outbound 释放、代理中断不直连回退、lazy 启动、SNI/ALPN、代理拒绝不直接拨号 |
+| 集成 `upstream_proxy` | outbound 释放、代理中断不直连回退、握手期间断线通知不丢失且不影响新连接、lazy 启动、SNI/ALPN、代理拒绝不直接拨号 |
 | 集成 `negative_handshake`、`tls_options` | 两后端的低层握手/鉴权/ACL 失败，以及 Quinn 的 SNI 和自定义 CA 行为 |
 | 集成 `quinn_zero_rtt_resumption`、`quiche_zero_rtt_resumption` | 底层 QUIC 会话恢复时实际接受 early data；不经过完整 TUIC 客户端入口 |
 | 集成 `quiche_cert_reload` | 入站端点在热重载后握手提供新证书 |

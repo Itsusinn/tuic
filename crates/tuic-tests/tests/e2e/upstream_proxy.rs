@@ -78,7 +78,7 @@ async fn full_client(mode: tuic_client::config::BackendMode, lazy: bool) -> eyre
 	);
 	echo.abort();
 	assert!(proxy.packets.load(Ordering::SeqCst) > 0 && proxy.replies.load(Ordering::SeqCst) > 0);
-	proxy.disconnect.notify_waiters();
+	proxy.disconnect.send_replace(());
 	tokio::time::timeout(LIMIT, async {
 		while proxy.associations.load(Ordering::SeqCst) < 2 {
 			tokio::time::sleep(Duration::from_millis(20)).await;
