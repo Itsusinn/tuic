@@ -31,7 +31,7 @@ jobs:
     with:
       rust-toolchain: "stable"
       packages: "tuic-server,tuic-client"
-      target-config-file: ".github/target.toml"
+      target-config-file: ${{ github.event_name == 'pull_request' && '.github/target-pr.toml' || '.github/target.toml' }}
       # The reusable workflow exports this as the `RUSTFLAGS` env var, which
       # overrides `.cargo/config.toml [build] rustflags`; mirror the committed
       # `--cfg reqwest_unstable` here so it stays enabled in CI. It is required
@@ -52,6 +52,8 @@ jobs:
 
   docker:
     name: Docker
+    # Multi-arch image builds are slow and consume minutes/cache on PRs.
+    if: github.event_name != 'pull_request'
     needs: [build]
     uses: rust-proxy/workflows/.github/workflows/docker-publish.yml@v2.0.4
     with:
