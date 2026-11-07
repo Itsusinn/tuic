@@ -39,7 +39,7 @@ json5 = { version = "1.3", default-features = false }
 toml = "1.0"
 figment = { version = "0.10", features = ["toml", "yaml"] }
 figment-json5 = "0.1.1"
-educe = { version = "0.6", default-features = false, features = ["Default"] }
+educe = { version = "0.8", default-features = false, features = ["Default"] }
 humantime-serde = "1"
 
 uuid = { version = "1", default-features = false, features = ["serde", "std"] }
