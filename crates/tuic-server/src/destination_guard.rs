@@ -15,9 +15,10 @@ use wind_core::{
 use crate::config::ExperimentalConfig;
 
 pub(crate) fn check_destination(addr: SocketAddr, restrictions: &ExperimentalConfig) -> eyre::Result<()> {
-	// IPv4-mapped IPv6 destinations reach the same host as their IPv4 form.
+	// IPv4-mapped IPv6 destinations reach the same host as their IPv4 form, and
+	// a connect to the unspecified address (`0.0.0.0`, `::`) reaches this host.
 	let ip = addr.ip().to_canonical();
-	if restrictions.drop_loopback && ip.is_loopback() {
+	if restrictions.drop_loopback && (ip.is_loopback() || ip.is_unspecified()) {
 		eyre::bail!("loopback address rejected: {addr}");
 	}
 	if restrictions.drop_private && is_private_ip(&ip) {
@@ -330,6 +331,9 @@ mod tests {
 			("127.0.0.1:80", true, false, true),
 			("[::1]:80", true, false, true),
 			("[::ffff:127.0.0.1]:80", true, false, true),
+			("0.0.0.0:80", true, false, true),
+			("[::]:80", true, false, true),
+			("[::ffff:0.0.0.0]:80", true, false, true),
 			("10.0.0.1:80", false, true, true),
 			("[::ffff:192.168.1.1]:80", false, true, true),
 			("[fd00::1]:80", false, true, true),
