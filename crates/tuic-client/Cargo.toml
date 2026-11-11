@@ -16,18 +16,14 @@ default = ["aws-lc-rs"]
 ring = ["rustls/ring", "quinn/rustls-ring", "rcgen/ring"]
 aws-lc-rs = ["dep:aws-lc-rs", "rustls/aws-lc-rs", "quinn/rustls-aws-lc-rs", "rcgen/aws_lc_rs"]
 jemallocator = ["tikv-jemallocator"]
-# The tokio-quiche backend, hosted inside wind-tuic behind its `quiche`
-# feature. 64-bit only — tokio-quiche does not compile on 32-bit. Enabled per
-# target via `.github/target.toml`; do NOT enable on 32-bit targets.
-quiche = ["wind-tuic/quiche"]
 
 [dependencies]
 
 # Wind framework
-wind-base = { git = "https://github.com/rust-proxy/wind", rev = "0a2500c69aa5dfee06a68146e42f6255641bc1d6" }
-wind-core = { git = "https://github.com/rust-proxy/wind", rev = "0a2500c69aa5dfee06a68146e42f6255641bc1d6" }
-wind-socks = { git = "https://github.com/rust-proxy/wind", rev = "0a2500c69aa5dfee06a68146e42f6255641bc1d6" }
-wind-tuic = { git = "https://github.com/rust-proxy/wind", rev = "0a2500c69aa5dfee06a68146e42f6255641bc1d6", features = ["client", "quinn"] }
+wind-base = { git = "https://github.com/rust-proxy/wind", rev = "03d5406049af1c950b178829d24b4a67d6fad1f2" }
+wind-core = { git = "https://github.com/rust-proxy/wind", rev = "03d5406049af1c950b178829d24b4a67d6fad1f2" }
+wind-socks = { git = "https://github.com/rust-proxy/wind", rev = "03d5406049af1c950b178829d24b4a67d6fad1f2" }
+wind-tuic = { git = "https://github.com/rust-proxy/wind", rev = "03d5406049af1c950b178829d24b4a67d6fad1f2", features = ["client", "quinn"] }
 
 async-trait = "0.1"
 

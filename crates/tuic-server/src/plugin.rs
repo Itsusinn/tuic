@@ -239,12 +239,6 @@ impl Plugin<TuicRouter> for TuicServerPlugin {
 				});
 			}
 			crate::config::BackendMode::Quiche => {
-				#[cfg(not(feature = "quiche"))]
-				{
-					tracing::error!("backend.mode = \"quiche\" requires the `quiche` feature");
-					return Err(eyre::eyre!("backend.mode = \"quiche\" requires the `quiche` feature"));
-				}
-				#[cfg(feature = "quiche")]
 				{
 					use wind_tuic::quiche::{CertStore, CongestionControl as QuicheCC, ConnectionOpts, TuicheInbound};
 
@@ -459,10 +453,8 @@ impl Plugin<TuicRouter> for TuicServerPlugin {
 	}
 }
 
-#[cfg(feature = "quiche")]
 struct StagedCertDir(std::path::PathBuf);
 
-#[cfg(feature = "quiche")]
 impl Drop for StagedCertDir {
 	fn drop(&mut self) {
 		if let Err(error) = std::fs::remove_dir_all(&self.0) {
@@ -533,7 +525,6 @@ fn generate_self_signed(
 ///
 /// The name carries a fresh UUID so that two server instances (or two tests in
 /// the same process) never stage their key material at the same path.
-#[cfg(feature = "quiche")]
 fn quiche_cert_dir() -> std::path::PathBuf {
 	std::env::temp_dir().join(format!("tuic-server-quiche-{}", uuid::Uuid::new_v4()))
 }
@@ -543,7 +534,7 @@ fn quiche_cert_dir() -> std::path::PathBuf {
 /// Deliberately non-recursive and non-idempotent: an existing path is refused
 /// instead of being reused, so the caller never adopts a directory it did not
 /// create.
-#[cfg(all(feature = "quiche", unix))]
+#[cfg(unix)]
 fn create_private_dir(dir: &std::path::Path) -> std::io::Result<()> {
 	use std::os::unix::fs::DirBuilderExt;
 
@@ -553,7 +544,7 @@ fn create_private_dir(dir: &std::path::Path) -> std::io::Result<()> {
 /// Create `dir`. Non-Unix hosts have no portable owner-only mode to set, so
 /// this only guarantees the path is new; the platform's temporary directory is
 /// already per-user.
-#[cfg(all(feature = "quiche", not(unix)))]
+#[cfg(not(unix))]
 fn create_private_dir(dir: &std::path::Path) -> std::io::Result<()> {
 	std::fs::create_dir(dir)
 }
@@ -563,7 +554,6 @@ fn create_private_dir(dir: &std::path::Path) -> std::io::Result<()> {
 ///
 /// `create_new` refuses to follow an existing file or symlink at `path`, which
 /// keeps a raced-in path from being overwritten through.
-#[cfg(feature = "quiche")]
 fn write_private_file(path: &std::path::Path, contents: &[u8]) -> std::io::Result<()> {
 	use std::io::Write;
 
@@ -578,7 +568,7 @@ fn write_private_file(path: &std::path::Path, contents: &[u8]) -> std::io::Resul
 	file.write_all(contents)
 }
 
-#[cfg(all(test, feature = "quiche"))]
+#[cfg(test)]
 mod tests {
 	use std::fs;
 

@@ -175,10 +175,6 @@ macro_rules! backend_cases {
 
 backend_cases!(quinn_quinn, Quinn, Quinn);
 
-#[cfg(all(
-	target_pointer_width = "64",
-	not(any(target_os = "android", target_os = "freebsd", target_arch = "loongarch64"))
-))]
 mod quiche {
 	use super::*;
 	backend_cases!(quiche_quinn, Quiche, Quinn);

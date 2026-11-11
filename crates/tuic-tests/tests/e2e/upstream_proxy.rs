@@ -105,10 +105,6 @@ async fn quinn_chain_uses_remote_dns_for_eager_and_lazy_tcp_and_udp() -> eyre::R
 	Ok(())
 }
 
-#[cfg(all(
-	target_pointer_width = "64",
-	not(any(target_os = "android", target_os = "freebsd", target_arch = "loongarch64"))
-))]
 #[tokio::test]
 async fn quiche_chain_uses_remote_dns_for_eager_and_lazy_tcp_and_udp() -> eyre::Result<()> {
 	for lazy in [false, true] {
@@ -157,19 +153,11 @@ async fn quinn_lazy_socks_chain_tcp_udp_forward() -> eyre::Result<()> {
 	chained_forwards(tuic_client::config::BackendMode::Quinn, true).await
 }
 
-#[cfg(all(
-	target_pointer_width = "64",
-	not(any(target_os = "android", target_os = "freebsd", target_arch = "loongarch64"))
-))]
 #[tokio::test]
 async fn quiche_eager_socks_chain_tcp_udp_forward() -> eyre::Result<()> {
 	chained_forwards(tuic_client::config::BackendMode::Quiche, false).await
 }
 
-#[cfg(all(
-	target_pointer_width = "64",
-	not(any(target_os = "android", target_os = "freebsd", target_arch = "loongarch64"))
-))]
 #[tokio::test]
 async fn quiche_lazy_socks_chain_tcp_udp_forward() -> eyre::Result<()> {
 	chained_forwards(tuic_client::config::BackendMode::Quiche, true).await

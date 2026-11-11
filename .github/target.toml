@@ -24,10 +24,8 @@ os = "ubuntu-latest"
 target = "x86_64-unknown-linux-gnu"
 release-name = "x86_64-linux"
 tool = "cross"
-# `quiche` (tokio-quiche) is 64-bit only; keep it out of the 32-bit targets
-# below. It enables the optional quiche backend on the packages that declare it
-# (tuic-server, tuic-client, and tuic-tests).
-extra-args = "--features jemallocator,quiche"
+# Both QUIC backends are compiled on every target.
+extra-args = "--features jemallocator"
 zig = "2.17"
 
 # 32-bit Linux (GNU)
@@ -46,7 +44,7 @@ os = "ubuntu-latest"
 target = "x86_64-unknown-linux-musl"
 release-name = "x86_64-linux-musl"
 tool = "cross"
-extra-args = "--features jemallocator,quiche"
+extra-args = "--features jemallocator"
 
 # 32-bit Linux (MUSL - statically linked)
 [[target]]
@@ -64,7 +62,7 @@ os = "ubuntu-latest"
 target = "aarch64-unknown-linux-gnu"
 release-name = "aarch64-linux"
 tool = "cross"
-extra-args = "--features jemallocator,quiche"
+extra-args = "--features jemallocator"
 
 # ARMv7 Linux (GNU - soft float ABI)
 [[target]]
@@ -90,7 +88,7 @@ os = "ubuntu-latest"
 target = "aarch64-unknown-linux-musl"
 release-name = "aarch64-linux-musl"
 tool = "cross"
-extra-args = "--features jemallocator,quiche"
+extra-args = "--features jemallocator"
 
 # ARMv7 Linux (MUSL - soft float ABI, statically linked)
 [[target]]
@@ -127,7 +125,7 @@ os = "windows-latest"
 target = "x86_64-pc-windows-msvc"
 release-name = "x86_64-windows"
 postfix = ".exe"
-extra-args = "--features quiche"
+extra-args = ""
 
 # 32-bit Windows
 [[target]]
@@ -151,14 +149,14 @@ skip-test = true
 os = "macos-15-intel"
 target = "x86_64-apple-darwin"
 release-name = "x86_64-darwin"
-extra-args = "--features jemallocator,quiche"
+extra-args = "--features jemallocator"
 
 # Apple Silicon macOS (ARM64)
 [[target]]
 os = "macos-latest"
 target = "aarch64-apple-darwin"
 release-name = "aarch64-darwin"
-extra-args = "--features jemallocator,quiche"
+extra-args = "--features jemallocator"
 
 # ==================== Other Targets ====================
 

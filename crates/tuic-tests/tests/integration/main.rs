@@ -4,10 +4,6 @@
 pub mod proxy_fixture;
 #[path = "../support/shutdown_config.rs"]
 mod shutdown_fixture;
-#[cfg(all(
-	target_pointer_width = "64",
-	not(any(target_os = "android", target_os = "freebsd", target_arch = "loongarch64"))
-))]
 #[path = "../support/tls.rs"]
 mod tls_fixture_support;
 

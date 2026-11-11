@@ -10,10 +10,6 @@ async fn quinn_server_quinn_client() -> eyre::Result<()> {
 	relay::exercise(Backend::Quinn, Backend::Quinn, false).await
 }
 
-#[cfg(all(
-	target_pointer_width = "64",
-	not(any(target_os = "android", target_os = "freebsd", target_arch = "loongarch64"))
-))]
 mod quiche {
 	use super::*;
 

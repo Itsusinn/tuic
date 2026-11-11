@@ -17,23 +17,18 @@ ring = ["rustls/ring", "rcgen/ring", "quinn/rustls-ring"]
 aws-lc-rs = ["dep:aws-lc-rs", "rustls/aws-lc-rs", "rcgen/aws_lc_rs", "quinn/rustls-aws-lc-rs"]
 jemallocator = ["tikv-jemallocator"]
 quinn = ["wind-tuic/quinn"]
-# The tokio-quiche backend, now hosted inside wind-tuic behind its `quiche`
-# feature. 64-bit only — tokio-quiche does not compile on 32-bit (its GSO path
-# transmutes `u128` -> `Instant`). Enabled per target via `.github/target.toml`;
-# do NOT enable on 32-bit targets.
-quiche = ["wind-tuic/quiche"]
 
 [dependencies]
 
 # Wind framework
-wind-core = { git = "https://github.com/rust-proxy/wind", rev = "0a2500c69aa5dfee06a68146e42f6255641bc1d6" }
-wind-base = { git = "https://github.com/rust-proxy/wind", rev = "0a2500c69aa5dfee06a68146e42f6255641bc1d6" }
-wind-dns = { git = "https://github.com/rust-proxy/wind", rev = "0a2500c69aa5dfee06a68146e42f6255641bc1d6" }
-wind-socks = { git = "https://github.com/rust-proxy/wind", rev = "0a2500c69aa5dfee06a68146e42f6255641bc1d6" }
-wind-tuic = { git = "https://github.com/rust-proxy/wind", rev = "0a2500c69aa5dfee06a68146e42f6255641bc1d6", features = ["server"] }
-wind-acme = { git = "https://github.com/rust-proxy/wind", rev = "0a2500c69aa5dfee06a68146e42f6255641bc1d6", features = ["http01"] }
-wind-acl = { git = "https://github.com/rust-proxy/wind", rev = "0a2500c69aa5dfee06a68146e42f6255641bc1d6" }
-wind-geodata = { git = "https://github.com/rust-proxy/wind", rev = "0a2500c69aa5dfee06a68146e42f6255641bc1d6" }
+wind-core = { git = "https://github.com/rust-proxy/wind", rev = "03d5406049af1c950b178829d24b4a67d6fad1f2" }
+wind-base = { git = "https://github.com/rust-proxy/wind", rev = "03d5406049af1c950b178829d24b4a67d6fad1f2" }
+wind-dns = { git = "https://github.com/rust-proxy/wind", rev = "03d5406049af1c950b178829d24b4a67d6fad1f2" }
+wind-socks = { git = "https://github.com/rust-proxy/wind", rev = "03d5406049af1c950b178829d24b4a67d6fad1f2" }
+wind-tuic = { git = "https://github.com/rust-proxy/wind", rev = "03d5406049af1c950b178829d24b4a67d6fad1f2", features = ["server"] }
+wind-acme = { git = "https://github.com/rust-proxy/wind", rev = "03d5406049af1c950b178829d24b4a67d6fad1f2", features = ["http01"] }
+wind-acl = { git = "https://github.com/rust-proxy/wind", rev = "03d5406049af1c950b178829d24b4a67d6fad1f2" }
+wind-geodata = { git = "https://github.com/rust-proxy/wind", rev = "03d5406049af1c950b178829d24b4a67d6fad1f2" }
 
 toml = "1.0"
 clap = { version = "4", features = ["derive"] }

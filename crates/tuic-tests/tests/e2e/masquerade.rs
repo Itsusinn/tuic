@@ -13,7 +13,7 @@
 //! `.cargo/config.toml`, but the CodSpeed build replaces the workspace
 //! rustflags, so the dependency stays off the default path — see the
 //! `masquerade-test` feature in `Cargo.toml`.
-#![cfg(all(feature = "masquerade-test", reqwest_unstable, target_pointer_width = "64"))]
+#![cfg(all(feature = "masquerade-test", reqwest_unstable))]
 
 use std::{collections::HashMap, net::SocketAddr, time::Duration};
 

@@ -42,7 +42,6 @@ use crate::{
 #[allow(clippy::large_enum_variant)]
 pub enum ServerInbound {
 	Tuic(wind_tuic::quinn::inbound::TuicInbound),
-	#[cfg(feature = "quiche")]
 	Tuiche(wind_tuic::quiche::TuicheInbound),
 }
 
@@ -51,7 +50,6 @@ impl<R: Router> AbstractInbound<R> for ServerInbound {
 	async fn listen(&self, cb: &Dispatcher<R>) -> eyre::Result<()> {
 		match self {
 			ServerInbound::Tuic(inbound) => inbound.listen(cb).await,
-			#[cfg(feature = "quiche")]
 			ServerInbound::Tuiche(inbound) => inbound.listen(cb).await,
 		}
 	}

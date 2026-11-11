@@ -18,7 +18,7 @@ TUIC is a low-latency QUIC proxy implementation with standalone server and clien
 | `wind` (Git dependency) | Shared proxy framework and TUIC/QUIC implementation, fetched by Cargo from `https://github.com/rust-proxy/wind` at a pinned `rev`; not a workspace member |
 | `.github/` | Build targets, container configuration, and release workflows |
 
-All three root crates consume Wind through Git dependencies pinned to an exact `rev`, and the root `Cargo.toml` pins `datagram-socket`/`tokio-quiche` to the matching `rust-proxy/quiche` commit in `[patch.crates-io]`. Do not treat the fetched Wind workspace as part of this Cargo workspace.
+All three root crates consume Wind through Git dependencies pinned to an exact `rev`, and the root `Cargo.toml` pins `quiche`/`datagram-socket`/`tokio-quiche` to the matching `rust-proxy/quiche` commit in `[patch.crates-io]`. Do not treat the fetched Wind workspace as part of this Cargo workspace.
 
 ## Before making changes
 
@@ -60,8 +60,8 @@ If a change involves Wind, run its formatting, Clippy, and test commands separat
 ## Implementation constraints
 
 - Preserve protocol compatibility, authentication, TLS verification, 0-RTT security semantics, ACL and routing order, traffic accounting, and graceful shutdown behavior. Do not change defaults unless the task explicitly requires it.
-- The server supports Quinn and an optional Quiche backend. Quiche is limited to supported 64-bit targets. When changing backend selection or feature gates, keep `Cargo.toml`, `.github/target.toml`, and the target conditions in `tuic-tests` synchronized.
-- The client currently uses Quinn. Do not spread server-only Quiche assumptions into client code.
+- Both client and server always compile the Quiche backend on every target. Runtime configuration selects Quinn or Quiche; there is no `quiche` Cargo feature. Keep manifests, build commands, and backend tests synchronized.
+- The client supports both Quinn and Quiche. Preserve backend-specific TLS validation.
 - The root workspace defaults to `aws-lc-rs` and retains a `ring` feature. For TLS or crypto-provider changes, check both feature combinations and avoid installing multiple providers or initializing Rustls without one.
 - Propagate errors through `Result` with useful context. The workspace Clippy policy denies `unwrap`, `expect`, `panic!`, `todo!`, and `unimplemented!`. Tests should follow the same style where practical, except where assertion failures are the intended test mechanism.
 - Keep public APIs and configuration backward-compatible. Do not refactor adjacent modules, upgrade dependencies, or run a broad `cargo update` unless the task requires it.
@@ -90,7 +90,7 @@ When changing configuration behavior:
 
 ## Wind dependency
 
-- Wind is consumed as a Git dependency pinned to an exact `rev`. The root `Cargo.toml` also pins `datagram-socket`/`tokio-quiche` in `[patch.crates-io]` to the `rust-proxy/quiche` commit that Wind records for its own `forks/quiche` submodule. There is no `crates/wind` checkout in this repository.
+- Wind is consumed as a Git dependency pinned to an exact `rev`. The root `Cargo.toml` also pins `quiche`/`datagram-socket`/`tokio-quiche` in `[patch.crates-io]` to the `rust-proxy/quiche` commit that Wind records for its own `forks/quiche` submodule. There is no `crates/wind` checkout in this repository.
 - Do not develop Wind changes here. Make shared implementation changes in the sibling top-level `../wind/` repository. To test an unreleased Wind change locally, temporarily replace the `git`/`rev` keys with `path = "../wind/crates/..."`, then restore the pinned Git form before committing TUIC changes.
 - Upgrading Wind means editing the pinned `rev` in every `wind-*` entry together with the `rust-proxy/quiche` revision in `[patch.crates-io]`, and refreshing `Cargo.lock` in the same commit.
 
