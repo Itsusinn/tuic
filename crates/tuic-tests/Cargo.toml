@@ -11,13 +11,8 @@ autotests = false
 
 [features]
 default = ["aws-lc-rs"]
-ring = ["wind-tuic/ring", "rustls/ring", "tuic-client/ring", "tuic-server/ring"]
-aws-lc-rs = ["wind-tuic/aws-lc-rs", "dep:aws-lc-rs", "rustls/aws-lc-rs", "tuic-client/aws-lc-rs", "tuic-server/aws-lc-rs"]
-# Mirrors the opt-in tokio-quiche backend of `tuic-server`/`tuic-client`; the
-# two crates and `wind-tuic` already enable it per target below, so this
-# feature only forwards it to the benchmark harness, which uses it to gate the
-# quiche end-to-end bench cases.
-quiche = ["wind-tuic/quiche"]
+ring = ["wind-tuic/ring", "rustls/ring", "tuic-client/ring", "tuic-server/ring", "quinn/rustls-ring", "rcgen/ring"]
+aws-lc-rs = ["wind-tuic/aws-lc-rs", "dep:aws-lc-rs", "rustls/aws-lc-rs", "tuic-client/aws-lc-rs", "tuic-server/aws-lc-rs", "quinn/rustls-aws-lc-rs", "rcgen/aws_lc_rs"]
 # The HTTP/3 masquerade e2e test (`tests/e2e/masquerade.rs`) and the reqwest HTTP/3
 # client it probes with, off by default.
 #
@@ -34,11 +29,11 @@ quiche = ["wind-tuic/quiche"]
 masquerade-test = ["dep:reqwest", "dep:http"]
 
 [dependencies]
-wind-core = { git = "https://github.com/rust-proxy/wind", rev = "0a2500c69aa5dfee06a68146e42f6255641bc1d6" }
-wind-quic = { git = "https://github.com/rust-proxy/wind", rev = "0a2500c69aa5dfee06a68146e42f6255641bc1d6", default-features = false, features = ["quinn"] }
+wind-core = { git = "https://github.com/rust-proxy/wind", rev = "03d5406049af1c950b178829d24b4a67d6fad1f2" }
+wind-quic = { git = "https://github.com/rust-proxy/wind", rev = "03d5406049af1c950b178829d24b4a67d6fad1f2", default-features = false, features = ["quinn"] }
 tuic-client = { path = "../tuic-client", default-features = false }
 tuic-server = { path = "../tuic-server", default-features = false }
-wind-tuic = { git = "https://github.com/rust-proxy/wind", rev = "0a2500c69aa5dfee06a68146e42f6255641bc1d6", default-features = false, features = ["server", "client", "quinn", "masquerade"] }
+wind-tuic = { git = "https://github.com/rust-proxy/wind", rev = "03d5406049af1c950b178829d24b4a67d6fad1f2", default-features = false, features = ["server", "client", "quinn", "masquerade"] }
 
 bytes = "1"
 json5 = { version = "1.3" }
@@ -63,6 +58,9 @@ reqwest = { version = "0.12", default-features = false, features = ["http3", "ru
 http = { version = "1", optional = true }
 
 [dev-dependencies]
+boring = { version = "5", default-features = false }
+quinn = { workspace = true, default-features = false, features = ["runtime-tokio"] }
+rcgen = { version = "0.14", default-features = false, features = ["crypto", "pem"] }
 # `benches/codspeed.rs`: the CodSpeed-facing harness. The crate is the
 # `codspeed-criterion-compat` mirror of `criterion`, so `cargo bench` and
 # `cargo codspeed run` execute the same benchmark functions.
@@ -83,19 +81,6 @@ unexpected_cfgs = { level = "warn", check-cfg = ['cfg(reqwest_unstable)'] }
 [[bench]]
 name = "codspeed"
 harness = false
-
-# The quiche e2e tests only run where the vendored BoringSSL toolchain is
-# available and cross-emulated socket tests are practical. Android needs an NDK
-# setup that the CI cross image does not provide, FreeBSD's bindgen invocation
-# cannot see the cross sysroot, and BoringSSL does not support LoongArch.
-# Keep this predicate in sync with the crate-level cfg in the quiche test files.
-[target.'cfg(all(target_pointer_width = "64", not(any(target_os = "android", target_os = "freebsd", target_arch = "loongarch64"))))'.dependencies]
-boring = { version = "5", default-features = false }
-tuic-server = { path = "../tuic-server", default-features = false, features = ["quiche"] }
-tuic-client = { path = "../tuic-client", default-features = false, features = ["quiche"] }
-wind-tuic = { git = "https://github.com/rust-proxy/wind", rev = "0a2500c69aa5dfee06a68146e42f6255641bc1d6", default-features = false, features = ["quiche"] }
-quinn = { workspace = true, default-features = false, features = ["runtime-tokio", "rustls-aws-lc-rs"] }
-rcgen = { version = "0.14", default-features = false, features = ["crypto", "pem", "aws_lc_rs"] }
 
 [[test]]
 name = "smoke"

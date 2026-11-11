@@ -40,10 +40,6 @@ async fn quinn_lazy_tcp_udp_forward() -> Result<()> {
 	forwards(Backend::Quinn, true).await
 }
 
-#[cfg(all(
-	target_pointer_width = "64",
-	not(any(target_os = "android", target_os = "freebsd", target_arch = "loongarch64"))
-))]
 mod quiche {
 	use super::*;
 	#[tokio::test]

@@ -97,14 +97,11 @@ jobs:
         with:
           tool: cargo-codspeed
 
-      # `--features quiche` is required: `bench_e2e_quiche` compiles out
-      # without it, so the walltime job would silently report only the quinn
-      # backend while claiming both.
       - name: Build benchmarks — walltime mode
-        run: cargo codspeed build -m walltime -p tuic-tests --features quiche
+        run: cargo codspeed build -m walltime -p tuic-tests
 
       - name: Run the benchmarks (walltime)
         uses: CodSpeedHQ/action@v5
         with:
           mode: walltime
-          run: cargo codspeed run -p tuic-tests --features quiche
+          run: cargo codspeed run -p tuic-tests

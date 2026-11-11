@@ -10,10 +10,6 @@ use tokio::{
 	net::{TcpListener, UdpSocket},
 };
 use tuic_client::{config::ProxyConfig, plugin::build_quinn_outbound};
-#[cfg(all(
-	target_pointer_width = "64",
-	not(any(target_os = "android", target_os = "freebsd", target_arch = "loongarch64"))
-))]
 use tuic_tests::install_crypto_provider;
 use wind_core::{AppContext, FlowContext, Outbound, hooks::Protocol, rule::NetworkType};
 
@@ -205,10 +201,6 @@ async fn proxy_disconnect_does_not_fall_back_to_direct_quic() -> eyre::Result<()
 async fn proxy_startup_is_lazy_for_supported_backends() -> eyre::Result<()> {
 	for mode in [
 		tuic_client::config::BackendMode::Quinn,
-		#[cfg(all(
-			target_pointer_width = "64",
-			not(any(target_os = "android", target_os = "freebsd", target_arch = "loongarch64"))
-		))]
 		tuic_client::config::BackendMode::Quiche,
 	] {
 		let listener = TcpListener::bind("127.0.0.1:0").await?;
@@ -231,20 +223,12 @@ async fn proxy_startup_is_lazy_for_supported_backends() -> eyre::Result<()> {
 	Ok(())
 }
 
-#[cfg(all(
-	target_pointer_width = "64",
-	not(any(target_os = "android", target_os = "freebsd", target_arch = "loongarch64"))
-))]
 #[derive(Debug)]
 struct RecordingCertificate {
 	key: Arc<rustls::sign::CertifiedKey>,
 	names: tokio::sync::mpsc::UnboundedSender<Option<String>>,
 }
 
-#[cfg(all(
-	target_pointer_width = "64",
-	not(any(target_os = "android", target_os = "freebsd", target_arch = "loongarch64"))
-))]
 impl rustls::server::ResolvesServerCert for RecordingCertificate {
 	fn resolve(&self, hello: rustls::server::ClientHello<'_>) -> Option<Arc<rustls::sign::CertifiedKey>> {
 		let _ = self.names.send(hello.server_name().map(str::to_owned));
@@ -252,19 +236,11 @@ impl rustls::server::ResolvesServerCert for RecordingCertificate {
 	}
 }
 
-#[cfg(all(
-	target_pointer_width = "64",
-	not(any(target_os = "android", target_os = "freebsd", target_arch = "loongarch64"))
-))]
 #[tokio::test]
 async fn proxy_preserves_original_sni_and_alpn_in_both_backends() -> eyre::Result<()> {
 	install_crypto_provider();
 	for mode in [
 		tuic_client::config::BackendMode::Quinn,
-		#[cfg(all(
-			target_pointer_width = "64",
-			not(any(target_os = "android", target_os = "freebsd", target_arch = "loongarch64"))
-		))]
 		tuic_client::config::BackendMode::Quiche,
 	] {
 		let cert = rcgen::generate_simple_self_signed(vec!["relay-test.invalid".into()])?;
@@ -328,10 +304,6 @@ async fn proxy_preserves_original_sni_and_alpn_in_both_backends() -> eyre::Resul
 async fn rejected_proxy_never_dials_the_relay_in_supported_backends() -> eyre::Result<()> {
 	for mode in [
 		tuic_client::config::BackendMode::Quinn,
-		#[cfg(all(
-			target_pointer_width = "64",
-			not(any(target_os = "android", target_os = "freebsd", target_arch = "loongarch64"))
-		))]
 		tuic_client::config::BackendMode::Quiche,
 	] {
 		let target = UdpSocket::bind("127.0.0.1:0").await?;

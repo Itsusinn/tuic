@@ -528,9 +528,7 @@ fn e2e_enabled() -> bool {
 }
 
 /// Whether the end-to-end cases should also cover the quiche backend
-/// (`TUIC_BENCH_E2E=quiche` or `all`). Compiled only with the `quiche` feature,
-/// which is also the only configuration whose suite constructs that backend.
-#[cfg(feature = "quiche")]
+/// (`TUIC_BENCH_E2E=quiche` or `all`). Both backends are always compiled.
 fn e2e_wants_quiche() -> bool {
 	std::env::var("TUIC_BENCH_E2E").is_ok_and(|value| value.eq_ignore_ascii_case("quiche") || value.eq_ignore_ascii_case("all"))
 }
@@ -625,9 +623,6 @@ impl EchoServers {
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum E2eBackend {
 	Quinn,
-	/// Only constructed where the workspace's `quiche` feature is on, which is
-	/// also the only configuration in which this variant's match arm exists.
-	#[cfg(feature = "quiche")]
 	Quiche,
 }
 
@@ -635,7 +630,6 @@ impl E2eBackend {
 	fn label(self) -> &'static str {
 		match self {
 			Self::Quinn => "quinn",
-			#[cfg(feature = "quiche")]
 			Self::Quiche => "quiche",
 		}
 	}
@@ -656,7 +650,6 @@ fn bench_e2e_backend(c: &mut criterion::Criterion, backend: E2eBackend) {
 	let pair = runtime.block_on(async {
 		match backend {
 			E2eBackend::Quinn => tuic_tests::start_quinn_pair(false).await,
-			#[cfg(feature = "quiche")]
 			E2eBackend::Quiche => tuic_tests::start_quiche_pair(false).await,
 		}
 	});
@@ -731,21 +724,13 @@ fn bench_e2e_quinn(c: &mut criterion::Criterion) {
 	bench_e2e_backend(c, E2eBackend::Quinn);
 }
 
-/// The same relay cases over the tokio-quiche backend. Compiled only where
-/// `tuic-server`/`tuic-client` expose it (64-bit hosts, `quiche` feature).
-#[cfg(feature = "quiche")]
+/// The same relay cases over the always-available tokio-quiche backend.
 fn bench_e2e_quiche(c: &mut criterion::Criterion) {
 	if !e2e_enabled() || !e2e_wants_quiche() {
 		return;
 	}
 	bench_e2e_backend(c, E2eBackend::Quiche);
 }
-
-/// The quiche cases are compiled out on targets without the backend, so the
-/// harness always builds; `TUIC_BENCH_E2E=quiche`/`all` selects them at
-/// runtime.
-#[cfg(not(feature = "quiche"))]
-fn bench_e2e_quiche(_c: &mut criterion::Criterion) {}
 
 fn all_benches(c: &mut criterion::Criterion) {
 	bench_wire_codec(c);

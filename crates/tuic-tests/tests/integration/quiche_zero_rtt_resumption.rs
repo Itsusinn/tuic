@@ -14,13 +14,8 @@
 //! `TransportConfig::enable_0rtt`, the same stack the TUIC server's quiche
 //! backend wires `zero_rtt_handshake` into.
 //!
-//! `rcgen`/quiche are declared under the 64-bit target cfg in Cargo.toml, so
-//! keep this file behind the same predicate as the other quiche tests.
+//! Both the backend and TLS test helpers are available on every target.
 
-#![cfg(all(
-	target_pointer_width = "64",
-	not(any(target_os = "android", target_os = "freebsd", target_arch = "loongarch64"))
-))]
 
 use std::{net::SocketAddr, time::Duration};
 

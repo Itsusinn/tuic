@@ -200,10 +200,6 @@ pub async fn server() -> eyre::Result<(tuic_server::ServerGuard, tuic_server::Co
 		"tuic-test-password",
 		false,
 	);
-	#[cfg(all(
-		target_pointer_width = "64",
-		not(any(target_os = "android", target_os = "freebsd", target_arch = "loongarch64"))
-	))]
 	let cfg = {
 		let mut cfg = cfg;
 		let cert = rcgen::generate_simple_self_signed(vec!["relay-test.invalid".into()])?;
@@ -230,18 +226,8 @@ pub fn relay_for(cfg: &tuic_server::Config, proxy: ProxyConfig) -> eyre::Result<
 		ip: Some(cfg.server.ip()),
 		uuid,
 		password: Arc::from(b"tuic-test-password".as_slice()),
-		certificates: if cfg!(all(
-			target_pointer_width = "64",
-			not(any(target_os = "android", target_os = "freebsd", target_arch = "loongarch64"))
-		)) {
-			vec![cfg.tls.certificate.clone()]
-		} else {
-			Vec::new()
-		},
-		skip_cert_verify: !cfg!(all(
-			target_pointer_width = "64",
-			not(any(target_os = "android", target_os = "freebsd", target_arch = "loongarch64"))
-		)),
+		certificates: vec![cfg.tls.certificate.clone()],
+		skip_cert_verify: false,
 		disable_native_certs: true,
 		alpn: vec![b"h3".to_vec()],
 		proxy: Some(proxy),

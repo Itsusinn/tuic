@@ -1,8 +1,4 @@
 //! SOCKS5 -> TUIC (Quinn or Quiche client) -> Quiche server with mandatory ECH.
-#![cfg(all(
-	target_pointer_width = "64",
-	not(any(target_os = "android", target_os = "freebsd", target_arch = "loongarch64"))
-))]
 
 use std::time::Duration;
 

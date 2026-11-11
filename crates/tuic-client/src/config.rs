@@ -224,9 +224,8 @@ pub struct BackendConfig {
 
 /// Selects the QUIC implementation.
 ///
-/// `Quiche` requires the `quiche` cargo feature (64-bit targets only). Config
-/// parsing accepts it unconditionally so a config file is portable; the plugin
-/// rejects it at startup when the feature isn't compiled in.
+/// Both Quinn and Quiche are available on every target; this selects the
+/// backend at runtime.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize, serde::Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum BackendMode {

@@ -150,10 +150,6 @@ async fn negative_handshake_quinn() {
 	run_cases(Backend::Quinn).await;
 }
 
-#[cfg(all(
-	target_pointer_width = "64",
-	not(any(target_os = "android", target_os = "freebsd", target_arch = "loongarch64"))
-))]
 #[tokio::test]
 #[tracing_test::traced_test]
 async fn negative_handshake_quiche() {

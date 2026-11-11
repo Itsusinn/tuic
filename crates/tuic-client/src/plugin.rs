@@ -212,7 +212,6 @@ async fn build_quinn_outbound_inner(ctx: Arc<AppContext>, relay: Relay) -> eyre:
 /// shared `[tls]`/relay fields. `[tls] disable_sni`, `[tls]
 /// disable_native_certs`, and the `[tls] certificates` list have no counterpart
 /// in the quiche TLS settings, so configuration validation rejects them.
-#[cfg(feature = "quiche")]
 async fn build_quiche_outbound(ctx: Arc<AppContext>, relay: Relay) -> eyre::Result<Arc<dyn Outbound>> {
 	tokio::select! {
 		_ = ctx.token.cancelled() => Err(eyre::eyre!("TUIC setup cancelled")),
@@ -220,7 +219,6 @@ async fn build_quiche_outbound(ctx: Arc<AppContext>, relay: Relay) -> eyre::Resu
 	}
 }
 
-#[cfg(feature = "quiche")]
 async fn build_quiche_outbound_inner(ctx: Arc<AppContext>, relay: Relay) -> eyre::Result<Arc<dyn Outbound>> {
 	use wind_tuic::quiche::{
 		CongestionControl as QuicheCongestionControl, ConnectionOpts, ReconnectConfig as QuicheReconnect, TuicheOutbound,
@@ -301,13 +299,6 @@ async fn build_quiche_outbound_inner(ctx: Arc<AppContext>, relay: Relay) -> eyre
 		Some(chain) => chain.wrap(Arc::new(outbound)),
 		None => Arc::new(outbound) as Arc<dyn Outbound>,
 	})
-}
-
-/// Mirror of `build_quiche_outbound` for builds without the `quiche` feature:
-/// selecting the backend in config is always valid, but starting requires it.
-#[cfg(not(feature = "quiche"))]
-async fn build_quiche_outbound(_ctx: Arc<AppContext>, _relay: Relay) -> eyre::Result<Arc<dyn Outbound>> {
-	Err(eyre::eyre!("backend.mode = \"quiche\" requires the `quiche` feature"))
 }
 
 /// Wind framework plugin that wires a TUIC client's full runtime.
@@ -500,10 +491,7 @@ mod tests {
 
 	#[tokio::test]
 	async fn direct_handshake_respects_timeout() -> eyre::Result<()> {
-		let mut backends = vec![BackendMode::Quinn];
-		if cfg!(feature = "quiche") {
-			backends.push(BackendMode::Quiche);
-		}
+		let backends = [BackendMode::Quinn, BackendMode::Quiche];
 		for backend in backends {
 			let blackhole = std::net::UdpSocket::bind("127.0.0.1:0")?;
 			let address = blackhole.local_addr()?;

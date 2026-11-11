@@ -1,7 +1,3 @@
-#![cfg(all(
-	target_pointer_width = "64",
-	not(any(target_os = "android", target_os = "freebsd", target_arch = "loongarch64"))
-))]
 use tuic_client::config::Relay;
 use tuic_tests::install_crypto_provider;
 

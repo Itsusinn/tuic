@@ -42,7 +42,7 @@ cargo +nightly fmt --all --check
 cargo clippy -p tuic-tests --all-targets --locked --jobs 2
 ```
 
-Quiche 和依赖 `quinn`/`rcgen` 的部分握手测试保留原平台条件：仅受支持的 64 位目标，排除 Android、FreeBSD 和 LoongArch。IPv6 不可用时该用例会记录跳过原因。默认运行不包含 HTTP/3 伪装测试；需要额外启用 `masquerade-test`。
+Quiche 与握手测试不再按位宽或平台排除；所有目标都编译 Quiche，交叉编译环境需提供对应的 BoringSSL 工具链。IPv6 不可用时该用例会记录跳过原因。默认运行不包含 HTTP/3 伪装测试；需要额外启用 `masquerade-test`。
 
 通用 Quinn 链式代理用例不受 Quiche 平台条件限制，以承接旧 SOCKS 测试的平台覆盖。没有测试证书生成依赖的平台沿用本地自签名证书和测试专用验证跳过；SNI/自定义证书检查仍受对应依赖的平台条件限制。
 
