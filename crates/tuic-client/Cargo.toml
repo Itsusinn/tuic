@@ -20,10 +20,10 @@ jemallocator = ["tikv-jemallocator"]
 [dependencies]
 
 # Wind framework
-wind-base = { git = "https://github.com/rust-proxy/wind", rev = "02f582e1f5307c8334d52a8ee9353fa7a58cfdc4" }
-wind-core = { git = "https://github.com/rust-proxy/wind", rev = "02f582e1f5307c8334d52a8ee9353fa7a58cfdc4" }
-wind-socks = { git = "https://github.com/rust-proxy/wind", rev = "02f582e1f5307c8334d52a8ee9353fa7a58cfdc4" }
-wind-tuic = { git = "https://github.com/rust-proxy/wind", rev = "02f582e1f5307c8334d52a8ee9353fa7a58cfdc4", features = ["client", "quinn"] }
+wind-base = { git = "https://github.com/rust-proxy/wind", rev = "075cee4120cc91a8bfeb2864d68f585df2909797" }
+wind-core = { git = "https://github.com/rust-proxy/wind", rev = "075cee4120cc91a8bfeb2864d68f585df2909797" }
+wind-socks = { git = "https://github.com/rust-proxy/wind", rev = "075cee4120cc91a8bfeb2864d68f585df2909797" }
+wind-tuic = { git = "https://github.com/rust-proxy/wind", rev = "075cee4120cc91a8bfeb2864d68f585df2909797", features = ["client", "quinn"] }
 
 async-trait = "0.1"
 
