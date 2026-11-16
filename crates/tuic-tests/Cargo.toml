@@ -29,11 +29,11 @@ aws-lc-rs = ["wind-tuic/aws-lc-rs", "dep:aws-lc-rs", "rustls/aws-lc-rs", "tuic-c
 masquerade-test = ["dep:reqwest", "dep:http"]
 
 [dependencies]
-wind-core = { git = "https://github.com/rust-proxy/wind", rev = "03d5406049af1c950b178829d24b4a67d6fad1f2" }
-wind-quic = { git = "https://github.com/rust-proxy/wind", rev = "03d5406049af1c950b178829d24b4a67d6fad1f2", default-features = false, features = ["quinn"] }
+wind-core = { git = "https://github.com/rust-proxy/wind", rev = "21bc1be3365d1d4a9da20aacf2fbfcc1f527ca62" }
+wind-quic = { git = "https://github.com/rust-proxy/wind", rev = "21bc1be3365d1d4a9da20aacf2fbfcc1f527ca62", default-features = false, features = ["quinn"] }
 tuic-client = { path = "../tuic-client", default-features = false }
 tuic-server = { path = "../tuic-server", default-features = false }
-wind-tuic = { git = "https://github.com/rust-proxy/wind", rev = "03d5406049af1c950b178829d24b4a67d6fad1f2", default-features = false, features = ["server", "client", "quinn", "masquerade"] }
+wind-tuic = { git = "https://github.com/rust-proxy/wind", rev = "21bc1be3365d1d4a9da20aacf2fbfcc1f527ca62", default-features = false, features = ["server", "client", "quinn", "masquerade"] }
 
 bytes = "1"
 json5 = { version = "1.3" }
