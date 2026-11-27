@@ -1115,7 +1115,7 @@ checksum = "4583a4551df46e2792f82ceeac45e850d2e2d5debba0b91f102385cda5b11f06"
 [[package]]
 name = "datagram-socket"
 version = "0.8.1"
-source = "git+https://github.com/rust-proxy/quiche?rev=b25abcc4077ef03de1272832d6427ecfe761c09c#b25abcc4077ef03de1272832d6427ecfe761c09c"
+source = "git+https://github.com/rust-proxy/quiche?rev=be25b02273ad5108d6e8067983e3a4ba4a6aace1#be25b02273ad5108d6e8067983e3a4ba4a6aace1"
 dependencies = [
  "bytes",
  "futures-util",
@@ -3588,7 +3588,7 @@ dependencies = [
 [[package]]
 name = "quiche"
 version = "0.30.1"
-source = "git+https://github.com/rust-proxy/quiche?rev=b25abcc4077ef03de1272832d6427ecfe761c09c#b25abcc4077ef03de1272832d6427ecfe761c09c"
+source = "git+https://github.com/rust-proxy/quiche?rev=be25b02273ad5108d6e8067983e3a4ba4a6aace1#be25b02273ad5108d6e8067983e3a4ba4a6aace1"
 dependencies = [
  "boring",
  "boring-sys",
@@ -5041,7 +5041,7 @@ dependencies = [
 [[package]]
 name = "tokio-quiche"
 version = "0.23.0"
-source = "git+https://github.com/rust-proxy/quiche?rev=b25abcc4077ef03de1272832d6427ecfe761c09c#b25abcc4077ef03de1272832d6427ecfe761c09c"
+source = "git+https://github.com/rust-proxy/quiche?rev=be25b02273ad5108d6e8067983e3a4ba4a6aace1#be25b02273ad5108d6e8067983e3a4ba4a6aace1"
 dependencies = [
  "anyhow",
  "boring",
@@ -5875,7 +5875,7 @@ checksum = "712e227841d057c1ee1cd2fb22fa7e5a5461ae8e48fa2ca79ec42cfc1931183f"
 [[package]]
 name = "wind-acl"
 version = "0.2.0"
-source = "git+https://github.com/rust-proxy/wind?rev=3f8378a74e81885d40fb13accd8cd999b4cc73a9#3f8378a74e81885d40fb13accd8cd999b4cc73a9"
+source = "git+https://github.com/rust-proxy/wind?rev=c5385ac907906eaf02249842084fda8f8c66b3ef#c5385ac907906eaf02249842084fda8f8c66b3ef"
 dependencies = [
  "async-trait",
  "derive_more",
@@ -5894,7 +5894,7 @@ dependencies = [
 [[package]]
 name = "wind-acme"
 version = "0.2.0"
-source = "git+https://github.com/rust-proxy/wind?rev=3f8378a74e81885d40fb13accd8cd999b4cc73a9#3f8378a74e81885d40fb13accd8cd999b4cc73a9"
+source = "git+https://github.com/rust-proxy/wind?rev=c5385ac907906eaf02249842084fda8f8c66b3ef#c5385ac907906eaf02249842084fda8f8c66b3ef"
 dependencies = [
  "async-trait",
  "axum",
@@ -5905,6 +5905,7 @@ dependencies = [
  "rustls-acme",
  "serde",
  "serde_json",
+ "tempfile",
  "time",
  "tokio",
  "tokio-stream",
@@ -5916,12 +5917,12 @@ dependencies = [
 [[package]]
 name = "wind-base"
 version = "0.2.0"
-source = "git+https://github.com/rust-proxy/wind?rev=3f8378a74e81885d40fb13accd8cd999b4cc73a9#3f8378a74e81885d40fb13accd8cd999b4cc73a9"
+source = "git+https://github.com/rust-proxy/wind?rev=c5385ac907906eaf02249842084fda8f8c66b3ef#c5385ac907906eaf02249842084fda8f8c66b3ef"
 dependencies = [
  "async-trait",
  "bytes",
  "eyre",
- "libc",
+ "nix",
  "socket2 0.6.5",
  "tokio",
  "tokio-util",
@@ -5932,7 +5933,7 @@ dependencies = [
 [[package]]
 name = "wind-core"
 version = "0.2.0"
-source = "git+https://github.com/rust-proxy/wind?rev=3f8378a74e81885d40fb13accd8cd999b4cc73a9#3f8378a74e81885d40fb13accd8cd999b4cc73a9"
+source = "git+https://github.com/rust-proxy/wind?rev=c5385ac907906eaf02249842084fda8f8c66b3ef#c5385ac907906eaf02249842084fda8f8c66b3ef"
 dependencies = [
  "async-trait",
  "bytes",
@@ -5957,7 +5958,7 @@ dependencies = [
 [[package]]
 name = "wind-dns"
 version = "0.2.0"
-source = "git+https://github.com/rust-proxy/wind?rev=3f8378a74e81885d40fb13accd8cd999b4cc73a9#3f8378a74e81885d40fb13accd8cd999b4cc73a9"
+source = "git+https://github.com/rust-proxy/wind?rev=c5385ac907906eaf02249842084fda8f8c66b3ef#c5385ac907906eaf02249842084fda8f8c66b3ef"
 dependencies = [
  "educe",
  "eyre",
@@ -5971,7 +5972,7 @@ dependencies = [
 [[package]]
 name = "wind-geodata"
 version = "0.2.0"
-source = "git+https://github.com/rust-proxy/wind?rev=3f8378a74e81885d40fb13accd8cd999b4cc73a9#3f8378a74e81885d40fb13accd8cd999b4cc73a9"
+source = "git+https://github.com/rust-proxy/wind?rev=c5385ac907906eaf02249842084fda8f8c66b3ef#c5385ac907906eaf02249842084fda8f8c66b3ef"
 dependencies = [
  "geosite-rs",
  "memmap2",
@@ -5982,7 +5983,7 @@ dependencies = [
 [[package]]
 name = "wind-quic"
 version = "0.2.0"
-source = "git+https://github.com/rust-proxy/wind?rev=3f8378a74e81885d40fb13accd8cd999b4cc73a9#3f8378a74e81885d40fb13accd8cd999b4cc73a9"
+source = "git+https://github.com/rust-proxy/wind?rev=c5385ac907906eaf02249842084fda8f8c66b3ef#c5385ac907906eaf02249842084fda8f8c66b3ef"
 dependencies = [
  "arc-swap",
  "aws-lc-rs",
@@ -6012,7 +6013,7 @@ dependencies = [
 [[package]]
 name = "wind-rule"
 version = "0.2.0"
-source = "git+https://github.com/rust-proxy/wind?rev=3f8378a74e81885d40fb13accd8cd999b4cc73a9#3f8378a74e81885d40fb13accd8cd999b4cc73a9"
+source = "git+https://github.com/rust-proxy/wind?rev=c5385ac907906eaf02249842084fda8f8c66b3ef#c5385ac907906eaf02249842084fda8f8c66b3ef"
 dependencies = [
  "ipnet",
  "regex",
@@ -6021,7 +6022,7 @@ dependencies = [
 [[package]]
 name = "wind-socks"
 version = "0.2.0"
-source = "git+https://github.com/rust-proxy/wind?rev=3f8378a74e81885d40fb13accd8cd999b4cc73a9#3f8378a74e81885d40fb13accd8cd999b4cc73a9"
+source = "git+https://github.com/rust-proxy/wind?rev=c5385ac907906eaf02249842084fda8f8c66b3ef#c5385ac907906eaf02249842084fda8f8c66b3ef"
 dependencies = [
  "arc-swap",
  "async-trait",
@@ -6041,7 +6042,7 @@ dependencies = [
 [[package]]
 name = "wind-tuic"
 version = "0.2.0"
-source = "git+https://github.com/rust-proxy/wind?rev=3f8378a74e81885d40fb13accd8cd999b4cc73a9#3f8378a74e81885d40fb13accd8cd999b4cc73a9"
+source = "git+https://github.com/rust-proxy/wind?rev=c5385ac907906eaf02249842084fda8f8c66b3ef#c5385ac907906eaf02249842084fda8f8c66b3ef"
 dependencies = [
  "arc-swap",
  "async-trait",

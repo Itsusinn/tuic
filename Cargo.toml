@@ -27,9 +27,9 @@ quinn-congestions = { git = "https://github.com/proxy-rs/quinn-congestions.git",
 [patch.crates-io]
 # The core patch includes the 32-bit PRR arithmetic fix; tokio-quiche provides
 # Wind's TLS hooks and transport tuning, and datagram-socket fixes musl layouts.
-quiche = { git = "https://github.com/rust-proxy/quiche", rev = "b25abcc4077ef03de1272832d6427ecfe761c09c" }
-datagram-socket = { git = "https://github.com/rust-proxy/quiche", rev = "b25abcc4077ef03de1272832d6427ecfe761c09c" }
-tokio-quiche = { git = "https://github.com/rust-proxy/quiche", rev = "b25abcc4077ef03de1272832d6427ecfe761c09c" }
+quiche = { git = "https://github.com/rust-proxy/quiche", rev = "be25b02273ad5108d6e8067983e3a4ba4a6aace1" }
+datagram-socket = { git = "https://github.com/rust-proxy/quiche", rev = "be25b02273ad5108d6e8067983e3a4ba4a6aace1" }
+tokio-quiche = { git = "https://github.com/rust-proxy/quiche", rev = "be25b02273ad5108d6e8067983e3a4ba4a6aace1" }
 
 [workspace.lints.clippy]
 unwrap_used = "deny"
