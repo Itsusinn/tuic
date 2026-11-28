@@ -21,14 +21,14 @@ quinn = ["wind-tuic/quinn"]
 [dependencies]
 
 # Wind framework
-wind-core = { git = "https://github.com/rust-proxy/wind", rev = "03d5406049af1c950b178829d24b4a67d6fad1f2" }
-wind-base = { git = "https://github.com/rust-proxy/wind", rev = "03d5406049af1c950b178829d24b4a67d6fad1f2" }
-wind-dns = { git = "https://github.com/rust-proxy/wind", rev = "03d5406049af1c950b178829d24b4a67d6fad1f2" }
-wind-socks = { git = "https://github.com/rust-proxy/wind", rev = "03d5406049af1c950b178829d24b4a67d6fad1f2" }
-wind-tuic = { git = "https://github.com/rust-proxy/wind", rev = "03d5406049af1c950b178829d24b4a67d6fad1f2", features = ["server"] }
-wind-acme = { git = "https://github.com/rust-proxy/wind", rev = "03d5406049af1c950b178829d24b4a67d6fad1f2", features = ["http01"] }
-wind-acl = { git = "https://github.com/rust-proxy/wind", rev = "03d5406049af1c950b178829d24b4a67d6fad1f2" }
-wind-geodata = { git = "https://github.com/rust-proxy/wind", rev = "03d5406049af1c950b178829d24b4a67d6fad1f2" }
+wind-core = { git = "https://github.com/rust-proxy/wind", rev = "c5385ac907906eaf02249842084fda8f8c66b3ef" }
+wind-base = { git = "https://github.com/rust-proxy/wind", rev = "c5385ac907906eaf02249842084fda8f8c66b3ef" }
+wind-dns = { git = "https://github.com/rust-proxy/wind", rev = "c5385ac907906eaf02249842084fda8f8c66b3ef" }
+wind-socks = { git = "https://github.com/rust-proxy/wind", rev = "c5385ac907906eaf02249842084fda8f8c66b3ef" }
+wind-tuic = { git = "https://github.com/rust-proxy/wind", rev = "c5385ac907906eaf02249842084fda8f8c66b3ef", features = ["quiche", "server"] }
+wind-acme = { git = "https://github.com/rust-proxy/wind", rev = "c5385ac907906eaf02249842084fda8f8c66b3ef", features = ["http01"] }
+wind-acl = { git = "https://github.com/rust-proxy/wind", rev = "c5385ac907906eaf02249842084fda8f8c66b3ef" }
+wind-geodata = { git = "https://github.com/rust-proxy/wind", rev = "c5385ac907906eaf02249842084fda8f8c66b3ef" }
 
 toml = "1.0"
 clap = { version = "4", features = ["derive"] }

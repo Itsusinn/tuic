@@ -114,9 +114,9 @@ dependencies = [
 
 [[package]]
 name = "arc-swap"
-version = "1.9.3"
+version = "1.9.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "380962b3d93b99642e50b9febf72c071e97e8b32d86eae9cf4ef582bb960ae6e"
+checksum = "84a22b5d51209f6de83d37a0b33d320acb8da88823e42a94c075140708f032a5"
 dependencies = [
  "rustversion",
 ]
@@ -476,9 +476,9 @@ dependencies = [
 
 [[package]]
 name = "boring"
-version = "5.3.0"
+version = "5.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "15483e6dd58f7de5b506198a8f33c2bd1e030beed2c2b5425be057f5e0e4a8ec"
+checksum = "093fe0c9f8d2f593cca339fe6cc5a86121bfad806c6430c0d07293f46af00141"
 dependencies = [
  "bitflags 2.13.1",
  "boring-sys",
@@ -489,9 +489,9 @@ dependencies = [
 
 [[package]]
 name = "boring-sys"
-version = "5.4.0"
+version = "5.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4986392770df40d11d0d6294b0dd8399570f4a6e76d6953c7a34f7dd1defbd76"
+checksum = "c3be6e18ffdb4eb2bed4ecafb8cea7bdce3eae02350814035ba62c560ddb959f"
 dependencies = [
  "bindgen",
  "cmake",
@@ -551,9 +551,9 @@ checksum = "1fd0f2584146f6f2ef48085050886acf353beff7305ebd1ae69500e27c67f64b"
 
 [[package]]
 name = "bytes"
-version = "1.12.1"
+version = "1.12.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fc652a48c352aef3ea3aed32080501cf3ef6ed5da78602a020c991775b0aff04"
+checksum = "776dfebd015e2d8732c684a2c71003674ccb49457b539b9e82151ba38e96dd7c"
 
 [[package]]
 name = "bytesize"
@@ -593,12 +593,12 @@ dependencies = [
 
 [[package]]
 name = "cf-rustracing"
-version = "1.4.0"
+version = "1.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9e708e4e7bd0aa8f03edc6befeb0b40587c202c503f00a7cc20e612d14af55d3"
+checksum = "ade7181a62ceedcf367c29cbe8114fea9c3e770d8ce1d698dc568ab135295288"
 dependencies = [
  "backtrace",
- "rand 0.10.3",
+ "rand 0.10.4",
  "tokio",
  "trackable",
 ]
@@ -613,7 +613,7 @@ dependencies = [
  "hostname",
  "local-ip-address",
  "percent-encoding",
- "rand 0.10.3",
+ "rand 0.10.4",
  "thrift_codec",
  "tokio",
  "trackable",
@@ -745,9 +745,9 @@ dependencies = [
 
 [[package]]
 name = "codspeed"
-version = "5.0.2"
+version = "5.0.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c0379da47d0de730b2f7900e3f2d9c3b5efc21b46875282305300b4851f03e70"
+checksum = "1cade51e6e6e30e7ea2cd9599fa5d5d5f48255a6b221bbd0cab1cf32f3c23c65"
 dependencies = [
  "anyhow",
  "cc",
@@ -763,9 +763,9 @@ dependencies = [
 
 [[package]]
 name = "codspeed-criterion-compat"
-version = "5.0.2"
+version = "5.0.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "65f64942456bd4514b06ba4c72623bf197931d05d3d1db61b8a0c6289b30b2c7"
+checksum = "b5d1640d31b122c8d754939c6ae4040709a9602f289d11e43075476a21285020"
 dependencies = [
  "clap",
  "codspeed",
@@ -776,9 +776,9 @@ dependencies = [
 
 [[package]]
 name = "codspeed-criterion-compat-walltime"
-version = "5.0.2"
+version = "5.0.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e86691354129085562c025293f9e8b35bf9054813bb9981be3a96aa8490c07d1"
+checksum = "2a83eed387b8f84aad4cb29607758bec3ab3f53b1734af934ddae7fee626d8ce"
 dependencies = [
  "anes",
  "cast",
@@ -1115,7 +1115,7 @@ checksum = "4583a4551df46e2792f82ceeac45e850d2e2d5debba0b91f102385cda5b11f06"
 [[package]]
 name = "datagram-socket"
 version = "0.8.1"
-source = "git+https://github.com/rust-proxy/quiche?rev=b25abcc4077ef03de1272832d6427ecfe761c09c#b25abcc4077ef03de1272832d6427ecfe761c09c"
+source = "git+https://github.com/rust-proxy/quiche?rev=be25b02273ad5108d6e8067983e3a4ba4a6aace1#be25b02273ad5108d6e8067983e3a4ba4a6aace1"
 dependencies = [
  "bytes",
  "futures-util",
@@ -1294,9 +1294,9 @@ checksum = "d0881ea181b1df73ff77ffaaf9c7544ecc11e82fba9b5f27b262a3c73a332555"
 
 [[package]]
 name = "educe"
-version = "0.8.1"
+version = "0.8.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1ebdb1f8f8d2815bbe7b369a7da10343c82026a4503b68bd1279ba557611e96d"
+checksum = "a00371d2607edea062396ef1ce6ade65c8e915ac7a1277daa198208420f682c6"
 dependencies = [
  "enum-ordinalize",
  "proc-macro2",
@@ -1535,9 +1535,9 @@ dependencies = [
 
 [[package]]
 name = "foundations"
-version = "5.10.1"
+version = "5.12.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "adde4f5acb8b67bf4c96b774395f1a72ce4f0f5012464622b8556ab3e551cd88"
+checksum = "b34e3af692c19e9eb2401bd76482834f9217bf1bec938e7c0e47cc529215ea57"
 dependencies = [
  "anyhow",
  "cf-rustracing",
@@ -1556,7 +1556,7 @@ dependencies = [
  "prometheus",
  "prometheus-client",
  "prometools",
- "rand 0.10.3",
+ "rand 0.10.4",
  "serde",
  "serde_json",
  "serde_path_to_error",
@@ -1567,7 +1567,6 @@ dependencies = [
  "slog-async",
  "slog-json",
  "slog-term",
- "thread_local",
  "tokio",
  "yaml-merge-keys",
  "zeroize",
@@ -1575,9 +1574,9 @@ dependencies = [
 
 [[package]]
 name = "foundations-macros"
-version = "5.10.1"
+version = "5.12.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c133198808d60c0237dba47f40ab59f4631c92529c7989251e76b4313d5cc9a8"
+checksum = "7834a5295ae4017f5b191c0dc1442f0926b352cc585bc16792b7c562244c67a1"
 dependencies = [
  "darling 0.23.0",
  "proc-macro2",
@@ -1951,7 +1950,7 @@ dependencies = [
  "idna",
  "ipnet",
  "jni",
- "rand 0.10.3",
+ "rand 0.10.4",
  "rustls",
  "thiserror 2.0.21",
  "tinyvec",
@@ -1959,7 +1958,7 @@ dependencies = [
  "tokio-rustls",
  "tracing",
  "url",
- "webpki-roots 1.0.11",
+ "webpki-roots 1.0.12",
 ]
 
 [[package]]
@@ -1974,7 +1973,7 @@ dependencies = [
  "jni",
  "once_cell",
  "prefix-trie",
- "rand 0.10.3",
+ "rand 0.10.4",
  "ring",
  "thiserror 2.0.21",
  "tinyvec",
@@ -1999,7 +1998,7 @@ dependencies = [
  "ndk-context",
  "once_cell",
  "parking_lot",
- "rand 0.10.3",
+ "rand 0.10.4",
  "resolv-conf",
  "rustls",
  "smallvec",
@@ -2008,7 +2007,7 @@ dependencies = [
  "tokio",
  "tokio-rustls",
  "tracing",
- "webpki-roots 1.0.11",
+ "webpki-roots 1.0.12",
 ]
 
 [[package]]
@@ -2129,7 +2128,7 @@ dependencies = [
  "tokio",
  "tokio-rustls",
  "tower-service",
- "webpki-roots 1.0.11",
+ "webpki-roots 1.0.12",
 ]
 
 [[package]]
@@ -2439,15 +2438,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "itertools"
-version = "0.14.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2b192c782037fadd9cfa75548310488aabdbf3d2da73885b31bd0abd03351285"
-dependencies = [
- "either",
-]
-
-[[package]]
 name = "itoa"
 version = "1.0.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2589,9 +2579,9 @@ dependencies = [
 
 [[package]]
 name = "json5"
-version = "1.3.6"
+version = "1.3.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e46128c9fb848c29097da3149e627cce5496d0b2820a9be06d12ee266c09c749"
+checksum = "6c1d229cedc4e210dd2e2a6cdc59e36ce28e7338fb69367d0d2566e26de7d599"
 dependencies = [
  "serde",
  "ucd-trie",
@@ -2611,9 +2601,9 @@ checksum = "803ec87c9cfb29b9d2633f20cba1f488db3fd53f2158b1024cbefb47ba05d413"
 
 [[package]]
 name = "libc"
-version = "0.2.189"
+version = "0.2.191"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3eaf3ede3fee6db1a4c2ee091bf8a8b4dccdc6d17f656fb07896ee72867612f2"
+checksum = "65cd87c9a6d60536580b316ad985726104730a5151c99845f2490428ef91240a"
 
 [[package]]
 name = "libloading"
@@ -3153,9 +3143,9 @@ checksum = "9b4f627cb1b25917193a259e49bdad08f671f8d9708acfd5fe0a8c1455d87220"
 
 [[package]]
 name = "pest"
-version = "2.9.5"
+version = "2.9.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a8db75153506001cb36ed924f08cadc862eb3f8c4d0d534139f29074769d7660"
+checksum = "44cf434b793f79ab490e99ae3b2f9acce4ef02cdac3eee541a69de78c1aadd7c"
 dependencies = [
  "memchr",
  "pest_stack_guard",
@@ -3164,9 +3154,9 @@ dependencies = [
 
 [[package]]
 name = "pest_derive"
-version = "2.9.5"
+version = "2.9.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "20aa17e11fb35664b67d5214a0afac57a360d231b6ec53d6eba0700b27d933b4"
+checksum = "082f5f21b49230a02b9ee78a8a39d5771fd0ed6dc4d88ecc9fd583cb781e5751"
 dependencies = [
  "pest",
  "pest_generator",
@@ -3174,9 +3164,9 @@ dependencies = [
 
 [[package]]
 name = "pest_generator"
-version = "2.9.5"
+version = "2.9.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "626ec5afccf44ccbfeb2b232316510bb55b4bf34d891afcb0fb07d2b17d7fe9d"
+checksum = "5e4725db179c5bc5ea719d3312ce518f4b70d368139d630f4c9309d9117a3ac1"
 dependencies = [
  "pest",
  "pest_meta",
@@ -3187,9 +3177,9 @@ dependencies = [
 
 [[package]]
 name = "pest_meta"
-version = "2.9.5"
+version = "2.9.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b3f45b6caa65c1b08186832745159c2529994146340a7bf44168095469720f5d"
+checksum = "8363b5d48f0960fc3db68b1c8aa0bdc1a370d465a8c74287172ed5093a4cf293"
 dependencies = [
  "pest",
 ]
@@ -3487,7 +3477,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8a56d757972c98b346a9b766e3f02746cde6dd1cd1d1d563472929fdd74bec4d"
 dependencies = [
  "anyhow",
- "itertools 0.14.0",
+ "itertools 0.10.5",
  "proc-macro2",
  "quote",
  "syn 2.0.119",
@@ -3500,7 +3490,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b570b25f7617e43d59005d0990ccb79e950a423952cea19671b7a876da390adf"
 dependencies = [
  "anyhow",
- "itertools 0.14.0",
+ "itertools 0.10.5",
  "proc-macro2",
  "quote",
  "syn 2.0.119",
@@ -3588,7 +3578,7 @@ dependencies = [
 [[package]]
 name = "quiche"
 version = "0.30.1"
-source = "git+https://github.com/rust-proxy/quiche?rev=b25abcc4077ef03de1272832d6427ecfe761c09c#b25abcc4077ef03de1272832d6427ecfe761c09c"
+source = "git+https://github.com/rust-proxy/quiche?rev=be25b02273ad5108d6e8067983e3a4ba4a6aace1#be25b02273ad5108d6e8067983e3a4ba4a6aace1"
 dependencies = [
  "boring",
  "boring-sys",
@@ -3635,7 +3625,7 @@ dependencies = [
 [[package]]
 name = "quinn"
 version = "0.12.0"
-source = "git+https://github.com/Tipuch/quinn.git?branch=bbrv3#01b8848dcb321eb17ad4d88dd6f84f28f45a0d6a"
+source = "git+https://github.com/Tipuch/quinn.git?branch=bbrv3#0ebaf7e2c9932e432ef5e7caf916291b02d8277e"
 dependencies = [
  "bytes",
  "cfg_aliases",
@@ -3654,11 +3644,11 @@ dependencies = [
 [[package]]
 name = "quinn-congestions"
 version = "0.1.0"
-source = "git+https://github.com/proxy-rs/quinn-congestions.git#83052f7da6f59d70792f9abb7b62b171cdc0d443"
+source = "git+https://github.com/proxy-rs/quinn-congestions.git#14757896e9b46883de0f17cef3d65008939f0159"
 dependencies = [
  "quinn 0.12.0",
  "quinn-proto 0.12.0",
- "rand 0.10.3",
+ "rand 0.10.4",
  "rand_pcg",
 ]
 
@@ -3672,7 +3662,7 @@ dependencies = [
  "bytes",
  "getrandom 0.4.3",
  "lru-slab",
- "rand 0.10.3",
+ "rand 0.10.4",
  "rand_pcg",
  "ring",
  "rustc-hash",
@@ -3688,14 +3678,14 @@ dependencies = [
 [[package]]
 name = "quinn-proto"
 version = "0.12.0"
-source = "git+https://github.com/Tipuch/quinn.git?branch=bbrv3#01b8848dcb321eb17ad4d88dd6f84f28f45a0d6a"
+source = "git+https://github.com/Tipuch/quinn.git?branch=bbrv3#0ebaf7e2c9932e432ef5e7caf916291b02d8277e"
 dependencies = [
  "aws-lc-rs",
  "bytes",
  "fastbloom",
  "getrandom 0.4.3",
  "lru-slab",
- "rand 0.10.3",
+ "rand 0.10.4",
  "rand_pcg",
  "ring",
  "rustc-hash",
@@ -3726,7 +3716,7 @@ dependencies = [
 [[package]]
 name = "quinn-udp"
 version = "0.6.3"
-source = "git+https://github.com/Tipuch/quinn.git?branch=bbrv3#01b8848dcb321eb17ad4d88dd6f84f28f45a0d6a"
+source = "git+https://github.com/Tipuch/quinn.git?branch=bbrv3#0ebaf7e2c9932e432ef5e7caf916291b02d8277e"
 dependencies = [
  "cfg_aliases",
  "libc",
@@ -3777,9 +3767,9 @@ dependencies = [
 
 [[package]]
 name = "rand"
-version = "0.10.3"
+version = "0.10.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "65c9fb96cbc91e3478eaae79a69fcd3f1ae4ad052e471fe6732fff548984b4af"
+checksum = "8f6fa277c67e6ea590466f04c3fe82cb509f0864fe470643e5570de9514a9b11"
 dependencies = [
  "chacha20",
  "getrandom 0.4.3",
@@ -3990,7 +3980,7 @@ dependencies = [
  "wasm-bindgen",
  "wasm-bindgen-futures",
  "web-sys",
- "webpki-roots 1.0.11",
+ "webpki-roots 1.0.12",
 ]
 
 [[package]]
@@ -4178,7 +4168,7 @@ dependencies = [
  "tokio",
  "tokio-util",
  "tower-service",
- "webpki-roots 1.0.11",
+ "webpki-roots 1.0.12",
  "x509-parser 0.16.0",
 ]
 
@@ -4496,9 +4486,9 @@ dependencies = [
 
 [[package]]
 name = "sha2"
-version = "0.11.1"
+version = "0.11.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "47d7069beb7d6ac7b9acd1039986e73443f24234f41074da099d6f994ac9ad19"
+checksum = "5b0e5c7d67bc53f435386b2130fdc900488c5703770f6d8a4633060e34288a27"
 dependencies = [
  "cfg-if",
  "cpufeatures 0.3.1",
@@ -5041,7 +5031,7 @@ dependencies = [
 [[package]]
 name = "tokio-quiche"
 version = "0.23.0"
-source = "git+https://github.com/rust-proxy/quiche?rev=b25abcc4077ef03de1272832d6427ecfe761c09c#b25abcc4077ef03de1272832d6427ecfe761c09c"
+source = "git+https://github.com/rust-proxy/quiche?rev=be25b02273ad5108d6e8067983e3a4ba4a6aace1#be25b02273ad5108d6e8067983e3a4ba4a6aace1"
 dependencies = [
  "anyhow",
  "boring",
@@ -5453,7 +5443,7 @@ dependencies = [
  "figment-json5",
  "humantime",
  "humantime-serde",
- "json5 1.3.6",
+ "json5 1.3.8",
  "quinn 0.12.0",
  "quinn-congestions",
  "rcgen 0.14.10",
@@ -5471,7 +5461,7 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "uuid",
- "webpki-roots 1.0.11",
+ "webpki-roots 1.0.12",
  "wind-base",
  "wind-core",
  "wind-socks",
@@ -5499,12 +5489,12 @@ dependencies = [
  "humantime-serde",
  "ip_network",
  "ipnet",
- "json5 1.3.6",
+ "json5 1.3.8",
  "pest",
  "pest_derive",
  "quinn 0.12.0",
  "quinn-congestions",
- "rand 0.10.3",
+ "rand 0.10.4",
  "rcgen 0.14.10",
  "regex",
  "reqwest 0.12.28",
@@ -5548,7 +5538,7 @@ dependencies = [
  "eyre",
  "fast-socks5",
  "http",
- "json5 1.3.6",
+ "json5 1.3.8",
  "lexopt",
  "quinn 0.12.0",
  "rcgen 0.14.10",
@@ -5664,9 +5654,9 @@ checksum = "06abde3611657adf66d383f00b093d7faecc7fa57071cce2578660c9f1010821"
 
 [[package]]
 name = "uuid"
-version = "1.29.0"
+version = "1.29.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4a0e2d11620c50695fe12bbbfde96b3477fe606e7284c22d505c12ce51214514"
+checksum = "3c14b15dffa2f4bd712103e857140aa04a4f2ff6e955c77d7eb8e53ee02a3b64"
 dependencies = [
  "getrandom 0.4.3",
  "js-sys",
@@ -5823,14 +5813,14 @@ version = "0.26.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "521bc38abb08001b01866da9f51eb7c5d647a19260e00054a8c7fd5f9e57f7a9"
 dependencies = [
- "webpki-roots 1.0.11",
+ "webpki-roots 1.0.12",
 ]
 
 [[package]]
 name = "webpki-roots"
-version = "1.0.11"
+version = "1.0.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f5f280bbb2b287bc8e7de7e3852945a0ff50d1bbcb5ed42b6c7a568c546df171"
+checksum = "7265c9301c16a8711c992c2d8da90ee77ef54b1ed51482d6dfeb00dc756b1297"
 dependencies = [
  "rustls-pki-types",
 ]
@@ -5875,7 +5865,7 @@ checksum = "712e227841d057c1ee1cd2fb22fa7e5a5461ae8e48fa2ca79ec42cfc1931183f"
 [[package]]
 name = "wind-acl"
 version = "0.2.0"
-source = "git+https://github.com/rust-proxy/wind?rev=03d5406049af1c950b178829d24b4a67d6fad1f2#03d5406049af1c950b178829d24b4a67d6fad1f2"
+source = "git+https://github.com/rust-proxy/wind?rev=c5385ac907906eaf02249842084fda8f8c66b3ef#c5385ac907906eaf02249842084fda8f8c66b3ef"
 dependencies = [
  "async-trait",
  "derive_more",
@@ -5894,7 +5884,7 @@ dependencies = [
 [[package]]
 name = "wind-acme"
 version = "0.2.0"
-source = "git+https://github.com/rust-proxy/wind?rev=03d5406049af1c950b178829d24b4a67d6fad1f2#03d5406049af1c950b178829d24b4a67d6fad1f2"
+source = "git+https://github.com/rust-proxy/wind?rev=c5385ac907906eaf02249842084fda8f8c66b3ef#c5385ac907906eaf02249842084fda8f8c66b3ef"
 dependencies = [
  "async-trait",
  "axum",
@@ -5905,6 +5895,7 @@ dependencies = [
  "rustls-acme",
  "serde",
  "serde_json",
+ "tempfile",
  "time",
  "tokio",
  "tokio-stream",
@@ -5916,12 +5907,12 @@ dependencies = [
 [[package]]
 name = "wind-base"
 version = "0.2.0"
-source = "git+https://github.com/rust-proxy/wind?rev=03d5406049af1c950b178829d24b4a67d6fad1f2#03d5406049af1c950b178829d24b4a67d6fad1f2"
+source = "git+https://github.com/rust-proxy/wind?rev=c5385ac907906eaf02249842084fda8f8c66b3ef#c5385ac907906eaf02249842084fda8f8c66b3ef"
 dependencies = [
  "async-trait",
  "bytes",
  "eyre",
- "libc",
+ "nix",
  "socket2 0.6.5",
  "tokio",
  "tokio-util",
@@ -5932,7 +5923,7 @@ dependencies = [
 [[package]]
 name = "wind-core"
 version = "0.2.0"
-source = "git+https://github.com/rust-proxy/wind?rev=03d5406049af1c950b178829d24b4a67d6fad1f2#03d5406049af1c950b178829d24b4a67d6fad1f2"
+source = "git+https://github.com/rust-proxy/wind?rev=c5385ac907906eaf02249842084fda8f8c66b3ef#c5385ac907906eaf02249842084fda8f8c66b3ef"
 dependencies = [
  "async-trait",
  "bytes",
@@ -5944,7 +5935,7 @@ dependencies = [
  "pin-project-lite",
  "portable-atomic",
  "quinn 0.12.0",
- "rand 0.10.3",
+ "rand 0.10.4",
  "serde",
  "socket2 0.6.5",
  "tokio",
@@ -5957,7 +5948,7 @@ dependencies = [
 [[package]]
 name = "wind-dns"
 version = "0.2.0"
-source = "git+https://github.com/rust-proxy/wind?rev=03d5406049af1c950b178829d24b4a67d6fad1f2#03d5406049af1c950b178829d24b4a67d6fad1f2"
+source = "git+https://github.com/rust-proxy/wind?rev=c5385ac907906eaf02249842084fda8f8c66b3ef#c5385ac907906eaf02249842084fda8f8c66b3ef"
 dependencies = [
  "educe",
  "eyre",
@@ -5971,7 +5962,7 @@ dependencies = [
 [[package]]
 name = "wind-geodata"
 version = "0.2.0"
-source = "git+https://github.com/rust-proxy/wind?rev=03d5406049af1c950b178829d24b4a67d6fad1f2#03d5406049af1c950b178829d24b4a67d6fad1f2"
+source = "git+https://github.com/rust-proxy/wind?rev=c5385ac907906eaf02249842084fda8f8c66b3ef#c5385ac907906eaf02249842084fda8f8c66b3ef"
 dependencies = [
  "geosite-rs",
  "memmap2",
@@ -5982,7 +5973,7 @@ dependencies = [
 [[package]]
 name = "wind-quic"
 version = "0.2.0"
-source = "git+https://github.com/rust-proxy/wind?rev=03d5406049af1c950b178829d24b4a67d6fad1f2#03d5406049af1c950b178829d24b4a67d6fad1f2"
+source = "git+https://github.com/rust-proxy/wind?rev=c5385ac907906eaf02249842084fda8f8c66b3ef#c5385ac907906eaf02249842084fda8f8c66b3ef"
 dependencies = [
  "arc-swap",
  "aws-lc-rs",
@@ -6012,7 +6003,7 @@ dependencies = [
 [[package]]
 name = "wind-rule"
 version = "0.2.0"
-source = "git+https://github.com/rust-proxy/wind?rev=03d5406049af1c950b178829d24b4a67d6fad1f2#03d5406049af1c950b178829d24b4a67d6fad1f2"
+source = "git+https://github.com/rust-proxy/wind?rev=c5385ac907906eaf02249842084fda8f8c66b3ef#c5385ac907906eaf02249842084fda8f8c66b3ef"
 dependencies = [
  "ipnet",
  "regex",
@@ -6021,7 +6012,7 @@ dependencies = [
 [[package]]
 name = "wind-socks"
 version = "0.2.0"
-source = "git+https://github.com/rust-proxy/wind?rev=03d5406049af1c950b178829d24b4a67d6fad1f2#03d5406049af1c950b178829d24b4a67d6fad1f2"
+source = "git+https://github.com/rust-proxy/wind?rev=c5385ac907906eaf02249842084fda8f8c66b3ef#c5385ac907906eaf02249842084fda8f8c66b3ef"
 dependencies = [
  "arc-swap",
  "async-trait",
@@ -6041,7 +6032,7 @@ dependencies = [
 [[package]]
 name = "wind-tuic"
 version = "0.2.0"
-source = "git+https://github.com/rust-proxy/wind?rev=03d5406049af1c950b178829d24b4a67d6fad1f2#03d5406049af1c950b178829d24b4a67d6fad1f2"
+source = "git+https://github.com/rust-proxy/wind?rev=c5385ac907906eaf02249842084fda8f8c66b3ef#c5385ac907906eaf02249842084fda8f8c66b3ef"
 dependencies = [
  "arc-swap",
  "async-trait",
