@@ -19,6 +19,14 @@ passthrough = [
     "SCCACHE_DIR",
 ]
 
+# Run i686 tests through QEMU so socketpair uses the host's native ABI.
+# Hosted x86_64 runners can return ENOSYS for the 32-bit syscall.
+[target.i686-unknown-linux-gnu]
+runner = "qemu-user"
+
+[target.i686-unknown-linux-musl]
+runner = "qemu-user"
+
 [target.mips-unknown-linux-musl]
 image = "ghcr.io/cross-rs/mips-unknown-linux-musl:edge"
 

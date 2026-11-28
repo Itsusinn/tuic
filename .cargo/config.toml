@@ -15,9 +15,15 @@ CXXFLAGS_i686_unknown_linux_musl = "-msse2"
 # The FreeBSD cross GCC exposes ULLONG_MAX through the C++ limits header.
 CXXFLAGS_x86_64_unknown_freebsd = "-include climits"
 RUSTC_BOOTSTRAP = { value = "1" }
+# Standalone Android binaries use the NDK static C++ runtime.
+BORING_BSSL_RUST_CPPLIB_aarch64_linux_android = "static:-bundle=c++"
 # BoringSSL's default C++ runtime linkage pulls libstdc++.so into musl binaries.
 # Resolve the static runtime at the final link using the cross-linker's paths.
 BORING_BSSL_RUST_CPPLIB_aarch64_unknown_linux_musl = "static:-bundle=stdc++"
+BORING_BSSL_RUST_CPPLIB_armv7_unknown_linux_musleabi = "static:-bundle=stdc++"
+BORING_BSSL_RUST_CPPLIB_armv7_unknown_linux_musleabihf = "static:-bundle=stdc++"
+BORING_BSSL_RUST_CPPLIB_i686_unknown_linux_musl = "static:-bundle=stdc++"
+BORING_BSSL_RUST_CPPLIB_x86_64_unknown_linux_musl = "static:-bundle=stdc++"
 
 [net]
 # Fetch the Wind and quiche fork Git dependencies with the `git` CLI instead of
