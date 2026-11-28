@@ -7,6 +7,13 @@
 rustflags = ["--cfg", "reqwest_unstable"]
 
 [env]
+# Rust's i686 Linux targets require SSE2. Use the same baseline for BoringSSL.
+CFLAGS_i686_unknown_linux_gnu = "-msse2"
+CXXFLAGS_i686_unknown_linux_gnu = "-msse2"
+CFLAGS_i686_unknown_linux_musl = "-msse2"
+CXXFLAGS_i686_unknown_linux_musl = "-msse2"
+# The FreeBSD cross GCC exposes ULLONG_MAX through the C++ limits header.
+CXXFLAGS_x86_64_unknown_freebsd = "-include climits"
 RUSTC_BOOTSTRAP = { value = "1" }
 # BoringSSL's default C++ runtime linkage pulls libstdc++.so into musl binaries.
 # Resolve the static runtime at the final link using the cross-linker's paths.
