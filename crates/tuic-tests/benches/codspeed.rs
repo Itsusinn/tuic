@@ -528,7 +528,8 @@ fn e2e_enabled() -> bool {
 }
 
 /// Whether the end-to-end cases should also cover the quiche backend
-/// (`TUIC_BENCH_E2E=quiche` or `all`). Both backends are always compiled.
+/// (`TUIC_BENCH_E2E=quiche` or `all`).
+#[cfg(not(target_arch = "loongarch64"))]
 fn e2e_wants_quiche() -> bool {
 	std::env::var("TUIC_BENCH_E2E").is_ok_and(|value| value.eq_ignore_ascii_case("quiche") || value.eq_ignore_ascii_case("all"))
 }
@@ -623,6 +624,7 @@ impl EchoServers {
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum E2eBackend {
 	Quinn,
+	#[cfg(not(target_arch = "loongarch64"))]
 	Quiche,
 }
 
@@ -630,6 +632,7 @@ impl E2eBackend {
 	fn label(self) -> &'static str {
 		match self {
 			Self::Quinn => "quinn",
+			#[cfg(not(target_arch = "loongarch64"))]
 			Self::Quiche => "quiche",
 		}
 	}
@@ -650,6 +653,7 @@ fn bench_e2e_backend(c: &mut criterion::Criterion, backend: E2eBackend) {
 	let pair = runtime.block_on(async {
 		match backend {
 			E2eBackend::Quinn => tuic_tests::start_quinn_pair(false).await,
+			#[cfg(not(target_arch = "loongarch64"))]
 			E2eBackend::Quiche => tuic_tests::start_quiche_pair(false).await,
 		}
 	});
@@ -724,7 +728,8 @@ fn bench_e2e_quinn(c: &mut criterion::Criterion) {
 	bench_e2e_backend(c, E2eBackend::Quinn);
 }
 
-/// The same relay cases over the always-available tokio-quiche backend.
+/// The same relay cases over the tokio-quiche backend.
+#[cfg(not(target_arch = "loongarch64"))]
 fn bench_e2e_quiche(c: &mut criterion::Criterion) {
 	if !e2e_enabled() || !e2e_wants_quiche() {
 		return;
@@ -738,6 +743,7 @@ fn all_benches(c: &mut criterion::Criterion) {
 	bench_acl(c);
 	bench_config(c);
 	bench_e2e_quinn(c);
+	#[cfg(not(target_arch = "loongarch64"))]
 	bench_e2e_quiche(c);
 }
 

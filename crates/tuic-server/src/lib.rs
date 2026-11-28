@@ -3,6 +3,7 @@
 //! The server is assembled via [`TuicServerPlugin`], which implements
 //! [`wind_core::Plugin`] and can be used with [`wind_core::App`].
 
+#[cfg(not(target_arch = "loongarch64"))]
 mod cert_renewal;
 pub mod config;
 mod connection_limit;

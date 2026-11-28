@@ -24,7 +24,6 @@ os = "ubuntu-latest"
 target = "x86_64-unknown-linux-gnu"
 release-name = "x86_64-linux"
 tool = "cross"
-# Both QUIC backends are compiled on every target.
 extra-args = "--features jemallocator"
 zig = "2.17"
 
@@ -177,7 +176,7 @@ release-name = "riscv64gc-linux"
 tool = "cross"
 extra-args = "--no-default-features --features ring,jemallocator"
 
-# LoongArch 64-bit Linux
+# LoongArch 64-bit Linux (Quinn only)
 [[target]]
 os = "ubuntu-latest"
 target = "loongarch64-unknown-linux-gnu"

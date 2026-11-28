@@ -95,7 +95,10 @@ fn server_name(relay: &Relay) -> String {
 async fn build_outbound(ctx: Arc<AppContext>, relay: Relay) -> eyre::Result<Arc<dyn Outbound>> {
 	match relay.backend_mode {
 		BackendMode::Quinn => build_quinn_outbound(ctx, relay).await,
+		#[cfg(not(target_arch = "loongarch64"))]
 		BackendMode::Quiche => build_quiche_outbound(ctx, relay).await,
+		#[cfg(target_arch = "loongarch64")]
+		BackendMode::Quiche => eyre::bail!("Quiche is unavailable on LoongArch64; set backend.mode to \"quinn\""),
 	}
 }
 
@@ -212,6 +215,7 @@ async fn build_quinn_outbound_inner(ctx: Arc<AppContext>, relay: Relay) -> eyre:
 /// shared `[tls]`/relay fields. `[tls] disable_sni`, `[tls]
 /// disable_native_certs`, and the `[tls] certificates` list have no counterpart
 /// in the quiche TLS settings, so configuration validation rejects them.
+#[cfg(not(target_arch = "loongarch64"))]
 async fn build_quiche_outbound(ctx: Arc<AppContext>, relay: Relay) -> eyre::Result<Arc<dyn Outbound>> {
 	tokio::select! {
 		_ = ctx.token.cancelled() => Err(eyre::eyre!("TUIC setup cancelled")),
@@ -219,6 +223,7 @@ async fn build_quiche_outbound(ctx: Arc<AppContext>, relay: Relay) -> eyre::Resu
 	}
 }
 
+#[cfg(not(target_arch = "loongarch64"))]
 async fn build_quiche_outbound_inner(ctx: Arc<AppContext>, relay: Relay) -> eyre::Result<Arc<dyn Outbound>> {
 	use wind_tuic::quiche::{
 		CongestionControl as QuicheCongestionControl, ConnectionOpts, ReconnectConfig as QuicheReconnect, TuicheOutbound,
@@ -491,7 +496,11 @@ mod tests {
 
 	#[tokio::test]
 	async fn direct_handshake_respects_timeout() -> eyre::Result<()> {
-		let backends = [BackendMode::Quinn, BackendMode::Quiche];
+		let backends = [
+			BackendMode::Quinn,
+			#[cfg(not(target_arch = "loongarch64"))]
+			BackendMode::Quiche,
+		];
 		for backend in backends {
 			let blackhole = std::net::UdpSocket::bind("127.0.0.1:0")?;
 			let address = blackhole.local_addr()?;

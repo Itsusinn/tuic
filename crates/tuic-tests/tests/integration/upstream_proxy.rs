@@ -201,6 +201,7 @@ async fn proxy_disconnect_does_not_fall_back_to_direct_quic() -> eyre::Result<()
 async fn proxy_startup_is_lazy_for_supported_backends() -> eyre::Result<()> {
 	for mode in [
 		tuic_client::config::BackendMode::Quinn,
+		#[cfg(not(target_arch = "loongarch64"))]
 		tuic_client::config::BackendMode::Quiche,
 	] {
 		let listener = TcpListener::bind("127.0.0.1:0").await?;
@@ -241,6 +242,7 @@ async fn proxy_preserves_original_sni_and_alpn_in_both_backends() -> eyre::Resul
 	install_crypto_provider();
 	for mode in [
 		tuic_client::config::BackendMode::Quinn,
+		#[cfg(not(target_arch = "loongarch64"))]
 		tuic_client::config::BackendMode::Quiche,
 	] {
 		let cert = rcgen::generate_simple_self_signed(vec!["relay-test.invalid".into()])?;
@@ -304,6 +306,7 @@ async fn proxy_preserves_original_sni_and_alpn_in_both_backends() -> eyre::Resul
 async fn rejected_proxy_never_dials_the_relay_in_supported_backends() -> eyre::Result<()> {
 	for mode in [
 		tuic_client::config::BackendMode::Quinn,
+		#[cfg(not(target_arch = "loongarch64"))]
 		tuic_client::config::BackendMode::Quiche,
 	] {
 		let target = UdpSocket::bind("127.0.0.1:0").await?;

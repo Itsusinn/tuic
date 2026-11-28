@@ -175,6 +175,7 @@ macro_rules! backend_cases {
 
 backend_cases!(quinn_quinn, Quinn, Quinn);
 
+#[cfg(not(target_arch = "loongarch64"))]
 mod quiche {
 	use super::*;
 	backend_cases!(quiche_quinn, Quiche, Quinn);

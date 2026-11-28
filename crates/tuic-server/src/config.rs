@@ -303,8 +303,7 @@ pub enum BackendMode {
 	/// quinn-based backend (`wind-tuic`). The default, fully-featured backend.
 	#[default]
 	Quinn,
-	/// tokio-quiche-based backend (`wind-tuiche`). Experimental, and only
-	/// available on every target without an additional Cargo feature.
+	/// Experimental tokio-quiche backend, available on targets other than LoongArch64.
 	Quiche,
 }
 

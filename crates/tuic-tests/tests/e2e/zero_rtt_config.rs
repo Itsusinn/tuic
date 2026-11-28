@@ -11,6 +11,7 @@ async fn quinn_zero_rtt_config_tcp_and_udp_relay() -> eyre::Result<()> {
 	relay::exercise(Backend::Quinn, Backend::Quinn, true).await
 }
 
+#[cfg(not(target_arch = "loongarch64"))]
 #[tokio::test]
 async fn quiche_zero_rtt_config_tcp_and_udp_relay() -> eyre::Result<()> {
 	relay::exercise(Backend::Quiche, Backend::Quinn, true).await

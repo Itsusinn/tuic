@@ -13,8 +13,8 @@ repository.workspace = true
 
 [features]
 default = ["aws-lc-rs"]
-ring = ["rustls/ring", "quinn/rustls-ring", "rcgen/ring"]
-aws-lc-rs = ["dep:aws-lc-rs", "rustls/aws-lc-rs", "quinn/rustls-aws-lc-rs", "rcgen/aws_lc_rs"]
+ring = ["wind-tuic/ring", "rustls/ring", "quinn/rustls-ring", "rcgen/ring"]
+aws-lc-rs = ["wind-tuic/aws-lc-rs", "dep:aws-lc-rs", "rustls/aws-lc-rs", "quinn/rustls-aws-lc-rs", "rcgen/aws_lc_rs"]
 jemallocator = ["tikv-jemallocator"]
 
 [dependencies]
@@ -23,7 +23,7 @@ jemallocator = ["tikv-jemallocator"]
 wind-base = { git = "https://github.com/rust-proxy/wind", rev = "c5385ac907906eaf02249842084fda8f8c66b3ef" }
 wind-core = { git = "https://github.com/rust-proxy/wind", rev = "c5385ac907906eaf02249842084fda8f8c66b3ef" }
 wind-socks = { git = "https://github.com/rust-proxy/wind", rev = "c5385ac907906eaf02249842084fda8f8c66b3ef" }
-wind-tuic = { git = "https://github.com/rust-proxy/wind", rev = "c5385ac907906eaf02249842084fda8f8c66b3ef", features = ["quiche", "client", "quinn"] }
+wind-tuic = { workspace = true, features = ["client", "quinn"] }
 
 async-trait = "0.1"
 
@@ -69,6 +69,10 @@ chrono = "0.4"
 tracing = "0.1"
 
 tikv-jemallocator = { version = "0.7", optional = true }
+
+# BoringSSL does not support LoongArch64.
+[target.'cfg(not(target_arch = "loongarch64"))'.dependencies]
+wind-tuic = { workspace = true, features = ["quiche"] }
 
 [dev-dependencies]
 fast-socks5 = { version = "1" }

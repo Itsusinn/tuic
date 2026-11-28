@@ -30,10 +30,10 @@ masquerade-test = ["dep:reqwest", "dep:http"]
 
 [dependencies]
 wind-core = { git = "https://github.com/rust-proxy/wind", rev = "c5385ac907906eaf02249842084fda8f8c66b3ef" }
-wind-quic = { git = "https://github.com/rust-proxy/wind", rev = "c5385ac907906eaf02249842084fda8f8c66b3ef", default-features = false, features = ["quiche", "quinn"] }
+wind-quic = { git = "https://github.com/rust-proxy/wind", rev = "c5385ac907906eaf02249842084fda8f8c66b3ef", default-features = false, features = ["quinn"] }
 tuic-client = { path = "../tuic-client", default-features = false }
 tuic-server = { path = "../tuic-server", default-features = false }
-wind-tuic = { git = "https://github.com/rust-proxy/wind", rev = "c5385ac907906eaf02249842084fda8f8c66b3ef", default-features = false, features = ["quiche", "server", "client", "quinn", "masquerade"] }
+wind-tuic = { workspace = true, features = ["server", "client", "quinn", "masquerade"] }
 
 bytes = "1"
 json5 = { version = "1.3" }
@@ -57,8 +57,14 @@ tokio-util = { version = "0.7", features = ["codec"] }
 reqwest = { version = "0.12", default-features = false, features = ["http3", "rustls-tls"], optional = true }
 http = { version = "1", optional = true }
 
-[dev-dependencies]
+# BoringSSL does not support LoongArch64.
+[target.'cfg(not(target_arch = "loongarch64"))'.dependencies]
+wind-tuic = { workspace = true, features = ["quiche"] }
+
+[target.'cfg(not(target_arch = "loongarch64"))'.dev-dependencies]
 boring = { version = "5", default-features = false }
+
+[dev-dependencies]
 quinn = { workspace = true, default-features = false, features = ["runtime-tokio"] }
 rcgen = { version = "0.14", default-features = false, features = ["crypto", "pem"] }
 # `benches/codspeed.rs`: the CodSpeed-facing harness. The crate is the

@@ -40,6 +40,7 @@ async fn quinn_lazy_tcp_udp_forward() -> Result<()> {
 	forwards(Backend::Quinn, true).await
 }
 
+#[cfg(not(target_arch = "loongarch64"))]
 mod quiche {
 	use super::*;
 	#[tokio::test]

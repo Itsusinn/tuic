@@ -13,6 +13,7 @@ license = "GPL-3.0-or-later"
 repository = "https://github.com/Itsusinn/tuic"
 
 [workspace.dependencies]
+wind-tuic = { git = "https://github.com/rust-proxy/wind", rev = "c5385ac907906eaf02249842084fda8f8c66b3ef", default-features = false }
 quinn = { branch = "bbrv3", git = "https://github.com/Tipuch/quinn.git", default-features = false }
 quinn-proto = { branch = "bbrv3", git = "https://github.com/Tipuch/quinn.git", default-features = false }
 quinn-congestions = { git = "https://github.com/proxy-rs/quinn-congestions.git", default-features = false}

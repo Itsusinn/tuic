@@ -224,8 +224,7 @@ pub struct BackendConfig {
 
 /// Selects the QUIC implementation.
 ///
-/// Both Quinn and Quiche are available on every target; this selects the
-/// backend at runtime.
+/// LoongArch64 builds support Quinn. Other targets also provide Quiche.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize, serde::Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum BackendMode {

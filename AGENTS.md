@@ -60,7 +60,7 @@ If a change involves Wind, run its formatting, Clippy, and test commands separat
 ## Implementation constraints
 
 - Preserve protocol compatibility, authentication, TLS verification, 0-RTT security semantics, ACL and routing order, traffic accounting, and graceful shutdown behavior. Do not change defaults unless the task explicitly requires it.
-- Both client and server always compile the Quiche backend on every target. Runtime configuration selects Quinn or Quiche; there is no `quiche` Cargo feature. Keep manifests, build commands, and backend tests synchronized.
+- LoongArch64 builds use Quinn because BoringSSL does not support the architecture. Other targets compile both backends and select one at runtime. Keep manifests, build commands, and backend tests synchronized.
 - The client supports both Quinn and Quiche. Preserve backend-specific TLS validation.
 - The root workspace defaults to `aws-lc-rs` and retains a `ring` feature. For TLS or crypto-provider changes, check both feature combinations and avoid installing multiple providers or initializing Rustls without one.
 - Propagate errors through `Result` with useful context. The workspace Clippy policy denies `unwrap`, `expect`, `panic!`, `todo!`, and `unimplemented!`. Tests should follow the same style where practical, except where assertion failures are the intended test mechanism.

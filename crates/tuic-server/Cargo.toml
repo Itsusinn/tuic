@@ -13,8 +13,8 @@ repository.workspace = true
 
 [features]
 default = ["aws-lc-rs", "quinn"]
-ring = ["rustls/ring", "rcgen/ring", "quinn/rustls-ring"]
-aws-lc-rs = ["dep:aws-lc-rs", "rustls/aws-lc-rs", "rcgen/aws_lc_rs", "quinn/rustls-aws-lc-rs"]
+ring = ["wind-tuic/ring", "rustls/ring", "rcgen/ring", "quinn/rustls-ring"]
+aws-lc-rs = ["wind-tuic/aws-lc-rs", "dep:aws-lc-rs", "rustls/aws-lc-rs", "rcgen/aws_lc_rs", "quinn/rustls-aws-lc-rs"]
 jemallocator = ["tikv-jemallocator"]
 quinn = ["wind-tuic/quinn"]
 
@@ -25,7 +25,7 @@ wind-core = { git = "https://github.com/rust-proxy/wind", rev = "c5385ac907906ea
 wind-base = { git = "https://github.com/rust-proxy/wind", rev = "c5385ac907906eaf02249842084fda8f8c66b3ef" }
 wind-dns = { git = "https://github.com/rust-proxy/wind", rev = "c5385ac907906eaf02249842084fda8f8c66b3ef" }
 wind-socks = { git = "https://github.com/rust-proxy/wind", rev = "c5385ac907906eaf02249842084fda8f8c66b3ef" }
-wind-tuic = { git = "https://github.com/rust-proxy/wind", rev = "c5385ac907906eaf02249842084fda8f8c66b3ef", features = ["quiche", "server"] }
+wind-tuic = { workspace = true, features = ["server", "quinn", "masquerade"] }
 wind-acme = { git = "https://github.com/rust-proxy/wind", rev = "c5385ac907906eaf02249842084fda8f8c66b3ef", features = ["http01"] }
 wind-acl = { git = "https://github.com/rust-proxy/wind", rev = "c5385ac907906eaf02249842084fda8f8c66b3ef" }
 wind-geodata = { git = "https://github.com/rust-proxy/wind", rev = "c5385ac907906eaf02249842084fda8f8c66b3ef" }
@@ -85,6 +85,10 @@ eyre = { version = "0.6" }
 
 tikv-jemallocator = { version = "0.7", optional = true }
 rand = "0.10"
+
+# BoringSSL does not support LoongArch64.
+[target.'cfg(not(target_arch = "loongarch64"))'.dependencies]
+wind-tuic = { workspace = true, features = ["quiche"] }
 
 [dev-dependencies]
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"]}

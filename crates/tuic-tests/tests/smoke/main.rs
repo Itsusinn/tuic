@@ -10,6 +10,7 @@ async fn quinn_server_quinn_client() -> eyre::Result<()> {
 	relay::exercise(Backend::Quinn, Backend::Quinn, false).await
 }
 
+#[cfg(not(target_arch = "loongarch64"))]
 mod quiche {
 	use super::*;
 
