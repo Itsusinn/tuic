@@ -99,7 +99,12 @@ impl Proxy {
 											_ = disconnect.changed() => return eyre::Ok(()),
 											_ = control.read_u8() => return Ok(()),
 											packet = relay.recv_from(&mut request) => {
-												let (len, source) = packet?;
+												let (len, source) = match packet {
+													Ok(packet) => packet,
+													// A reply to a closed client port can surface as an ICMP error here.
+													Err(error) if udp_port_unreachable(&error) => continue,
+													Err(error) => return Err(error.into()),
+												};
 												let (frag, destination, payload) = fast_socks5::parse_udp_request(&request[..len]).await?;
 												assert_eq!(frag, 0);
 												assert!(destination == TargetAddr::Ip(target)
@@ -108,7 +113,7 @@ impl Proxy {
 												match upstream.send(payload).await {
 													Ok(_) => {},
 													// A pending ICMP error can also surface on send.
-													Err(error) if upstream_port_unreachable(&error) => {
+													Err(error) if udp_port_unreachable(&error) => {
 														unreachable_errors.fetch_add(1, Ordering::SeqCst);
 														continue;
 													},
@@ -121,7 +126,7 @@ impl Proxy {
 													Ok(len) => len,
 													// A server restart can produce ICMP port-unreachable:
 													// ConnectionRefused on Linux, ConnectionReset on Windows.
-													Err(error) if upstream_port_unreachable(&error) => {
+													Err(error) if udp_port_unreachable(&error) => {
 														unreachable_errors.fetch_add(1, Ordering::SeqCst);
 														continue;
 													},
@@ -130,7 +135,11 @@ impl Proxy {
 												if let Some(peer) = peer {
 													let mut packet = fast_socks5::new_udp_header(target)?;
 													packet.extend_from_slice(&response[..len]);
-													relay.send_to(&packet, peer).await?;
+													match relay.send_to(&packet, peer).await {
+														Ok(_) => {},
+														Err(error) if udp_port_unreachable(&error) => continue,
+														Err(error) => return Err(error.into()),
+													}
 													replies.fetch_add(1, Ordering::SeqCst);
 												}
 											},
@@ -183,7 +192,7 @@ impl Proxy {
 	}
 }
 
-fn upstream_port_unreachable(error: &std::io::Error) -> bool {
+fn udp_port_unreachable(error: &std::io::Error) -> bool {
 	matches!(
 		error.kind(),
 		std::io::ErrorKind::ConnectionRefused | std::io::ErrorKind::ConnectionReset
